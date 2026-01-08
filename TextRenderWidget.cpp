@@ -1,0 +1,1018 @@
+#include "TextRenderWidget.h"
+#include <QApplication>
+#include <QPainterPath>
+#include <QDebug>
+#include <QDir>
+#include <QFontMetrics>
+#include <QMenu>
+#include <QWidgetAction>
+#include <QRegularExpression>
+#include <QFileDialog>
+#include <QImage>
+#include <QPixmap>
+#include <QDrag>
+#include <QMimeData>
+#include <QMessageBox>
+#include <QBuffer>
+#include <QByteArray>
+#include <QFile>
+#include <QUrl>
+#include <QDateTime>
+#include <QTimer>
+
+// 获取对应版本的颜色
+static QColor getColorForToken(const QString& token, int gtaVersion) {
+    // 定义颜色映射 - 所有颜色都设置90%不透明度(alpha=230/255 = 90%)
+    static const QMap<QString, QColor> gta3Colors = {
+        {"~b~", QColor(0, 0, 255, 255)},      // blue
+        {"~g~", QColor(0, 255, 0, 255)},      // green
+        {"~h~", QColor(255, 255, 255, 255)},  // white (highlight)
+        {"~p~", QColor(128, 0, 128, 255)},    // purple
+        {"~r~", QColor(255, 0, 0, 255)},      // red
+        {"~w~", QColor(230, 230, 230, 255)},  // light gray - reset to default color
+        {"~y~", QColor(255, 255, 0, 255)},    // yellow
+        {"~a~", QColor(255, 165, 0, 255)},    // area text (orange)
+    };
+
+    static const QMap<QString, QColor> vcColors = {
+        {"~b~", QColor(0, 0, 255, 255)},      // blue
+        {"~g~", QColor(230, 136, 203, 255)},  // hot pink
+        {"~h~", QColor(255, 255, 255, 255)},  // highlight (white)
+        {"~p~", QColor(168, 110, 252, 255)},    // purple
+        {"~r~", QColor(230, 136, 203, 255)},  // hot pink
+        {"~w~", QColor(230, 230, 230, 255)},  // light gray - reset to default color
+        {"~y~", QColor(255, 227, 79, 255)},    // yellow
+        {"~o~", QColor(255, 192, 203, 255)},  // pink
+        {"~q~", QColor(199, 144, 203, 255)},  // plum pink
+        {"~x~", QColor(173, 216, 230, 255)},  // light blue
+        {"~t~", QColor(86, 212, 146, 255)},      // green
+        {"~l~", QColor(0, 0, 0, 255)},        // black text
+    };
+
+    static const QMap<QString, QColor> saColors = {
+        {"~b~", QColor(0, 0, 255, 255)},      // blue
+        {"~g~", QColor(0, 255, 0, 255)},      // green
+        {"~h~", QColor(255, 255, 255, 255)},  // white (highlight)
+        {"~p~", QColor(128, 0, 128, 255)},    // purple
+        {"~r~", QColor(255, 0, 0, 255)},      // red
+        {"~s~", QColor(255, 255, 255, 255)},  // reset color to standard (white)
+        {"~w~", QColor(230, 230, 230, 255)},  // light gray - reset to default color
+        {"~x~", QColor(0, 0, 255, 255)},      // cross icon (blue for cross)
+        {"~y~", QColor(255, 255, 0, 255)},    // yellow
+        {"~t~", QColor(0, 255, 0, 255)},      // triangle icon (green)
+        {"~o~", QColor(255, 165, 0, 255)},    // circle icon (orange)
+        {"~q~", QColor(255, 181, 197, 255)},  // square icon (plum pink)
+        {"~l~", QColor(0, 0, 0, 255)},        // black text
+    };
+
+    static const QMap<QString, QColor> lcsColors = {
+        {"~b~", QColor(0, 0, 255, 255)},      // blue
+        {"~g~", QColor(0, 255, 0, 255)},      // green
+        {"~h~", QColor(255, 255, 255, 255)},  // white (highlight)
+        {"~p~", QColor(128, 0, 128, 255)},    // purple
+        {"~r~", QColor(255, 0, 0, 255)},      // red
+        {"~w~", QColor(230, 230, 230, 255)},  // light gray - reset to default color
+        {"~x~", QColor(173, 216, 230, 255)},  // light blue
+        {"~y~", QColor(255, 255, 0, 255)},    // yellow
+        {"~o~", QColor(255, 192, 203, 255)},  // pink
+        {"~q~", QColor(255, 181, 197, 255)},  // plum pink
+        {"~l~", QColor(0, 0, 0, 255)},        // black text
+    };
+
+    static const QMap<QString, QColor> gta4Colors = {
+        {"~b~", QColor(51, 105, 114, 255)},      // blue
+        {"~g~", QColor(87, 124, 88, 255)},      // green
+        {"~s~", QColor(255, 255, 255, 255)},  // white text
+        {"~p~", QColor(152, 111, 158, 255)},    // purple
+        {"~r~", QColor(153, 69, 69, 255)},      // red
+        {"~w~", QColor(255, 255, 255, 255)},  // light gray - reset to default color
+        {"~x~", QColor(173, 216, 230, 255)},  // light blue
+        {"~y~", QColor(215, 197, 121, 255)},    // yellow
+        {"~l~", QColor(0, 0, 0, 255)},        // black text
+    };
+    
+    // 根据版本选择颜色映射
+    switch (gtaVersion) {
+        case 0: // GTA III
+            return gta3Colors.value(token, QColor(230, 230, 230, 255)); // 默认浅灰色(90%不透明度)
+        case 1: // Vice City
+            return vcColors.value(token, QColor(230, 230, 230, 255)); // 默认浅灰色(90%不透明度)
+        case 2: // San Andreas
+            return saColors.value(token, QColor(230, 230, 230, 255)); // 默认浅灰色(90%不透明度)
+        case 3: // Liberty City Stories
+            return lcsColors.value(token, QColor(230, 230, 230, 255)); // 默认浅灰色(90%不透明度)
+        case 4: // GTA IV
+            return gta4Colors.value(token, QColor(230, 230, 230, 255)); // 默认浅灰色(90%不透明度)
+        default:
+            return QColor(230, 230, 230, 230); // 默认浅灰色90%不透明度
+    }
+}
+
+TextRenderWidget::TextRenderWidget(QWidget* parent)
+    : QWidget(parent)
+    , m_text("")
+    , m_mainFontId(-1)
+    , m_mainFontFamily("")
+    , m_mainFontLoaded(false)
+    , m_outlineEnabled(true)
+    , m_shadowEnabled(false)
+    , m_fontSize(16)  // 进一步减小默认字体大小
+    , m_gradientMiddleColor(128, 128, 128)  // 灰色
+    , m_gradientEdgeColor(255, 255, 255)     // 白色
+    , m_gtaVersion(2) // 默认设置为SA版本
+    , m_dragStartPos(0, 0)
+    , m_isDragging(false)
+    , m_pngCacheValid(false)
+{
+    // 启用硬件加速和优化渲染
+    setAttribute(Qt::WA_OpaquePaintEvent); // 不透明绘制，减少合成，提升性能
+    setAttribute(Qt::WA_NoSystemBackground); // 禁用系统背景，手动绘制
+    setAttribute(Qt::WA_NativeWindow); // 使用原生窗口，启用GPU硬件加速
+    setMinimumHeight(60);  // 进一步减小最小高度
+    setMaximumHeight(60);  // 进一步减小最大高度
+    setMinimumWidth(400);
+    setAutoFillBackground(false);
+
+    loadViceCityFont();
+    setupUI();
+}
+
+TextRenderWidget::~TextRenderWidget()
+{
+}
+
+void TextRenderWidget::setupUI()
+{
+    // 创建主布局
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    mainLayout->setContentsMargins(2, 2, 2, 2);
+    mainLayout->setSpacing(2);
+    
+    // 设置背景色和边框
+    setStyleSheet(R"(
+        TextRenderWidget {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+        }
+    )");
+    
+    // 启用右键菜单
+    setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(this, &QWidget::customContextMenuRequested, this, &TextRenderWidget::showContextMenu);
+
+    // 启用拖拽
+    setAcceptDrops(true);
+}
+
+void TextRenderWidget::showContextMenu(const QPoint& pos)
+{
+    QMenu contextMenu(this);
+    
+    // 设置菜单样式 - 更紧凑
+    contextMenu.setStyleSheet(R"(
+        QMenu {
+            background-color: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 2px;
+        }
+        QMenu::item {
+            padding: 4px 12px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        QMenu::item:selected {
+            background-color: #e9ecef;
+        }
+        QCheckBox {
+            font-family: "Microsoft YaHei";
+            font-size: 11px;
+            color: #495057;
+            padding: 2px 6px;
+        }
+        QLabel {
+            font-family: "Microsoft YaHei";
+            font-size: 11px;
+            color: #495057;
+            padding: 2px 6px;
+        }
+        QSpinBox {
+            font-family: "Microsoft YaHei";
+            font-size: 11px;
+            border: 1px solid #ced4da;
+            border-radius: 3px;
+            padding: 1px 4px;
+            background-color: white;
+            min-width: 50px;
+        }
+    )");
+    
+    // 创建自定义控件 - 更紧凑的布局
+    QWidgetAction* outlineAction = new QWidgetAction(&contextMenu);
+    QCheckBox* outlineCheckBox = new QCheckBox("描边");
+    outlineCheckBox->setChecked(m_outlineEnabled);
+    connect(outlineCheckBox, &QCheckBox::stateChanged, this, &TextRenderWidget::onOutlineEnabledChanged);
+    outlineAction->setDefaultWidget(outlineCheckBox);
+    
+    QWidgetAction* shadowAction = new QWidgetAction(&contextMenu);
+    QCheckBox* shadowCheckBox = new QCheckBox("阴影");
+    shadowCheckBox->setChecked(m_shadowEnabled);
+    connect(shadowCheckBox, &QCheckBox::stateChanged, this, &TextRenderWidget::onShadowEnabledChanged);
+    shadowAction->setDefaultWidget(shadowCheckBox);
+    
+    QWidgetAction* sizeAction = new QWidgetAction(&contextMenu);
+    QWidget* sizeWidget = new QWidget();
+    QHBoxLayout* sizeLayout = new QHBoxLayout(sizeWidget);
+    sizeLayout->setContentsMargins(4, 1, 4, 1);
+    sizeLayout->setSpacing(4);
+    
+    QLabel* sizeLabel = new QLabel("大小:");
+    sizeLabel->setStyleSheet("font-family: 'Microsoft YaHei'; font-size: 11px; color: #495057;");
+    
+    QSpinBox* sizeSpinBox = new QSpinBox();
+    sizeSpinBox->setRange(8, 32);  // 减小字体范围
+    sizeSpinBox->setValue(m_fontSize);
+    sizeSpinBox->setMinimumWidth(45);
+    connect(sizeSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, &TextRenderWidget::onFontSizeChanged);
+    
+    sizeLayout->addWidget(sizeLabel);
+    sizeLayout->addWidget(sizeSpinBox);
+    sizeAction->setDefaultWidget(sizeWidget);
+    
+    // 添加动作到菜单
+    contextMenu.addAction(outlineAction);
+    contextMenu.addAction(shadowAction);
+    contextMenu.addSeparator();
+    contextMenu.addAction(sizeAction);
+    contextMenu.addSeparator();
+
+    // 添加导出图片选项
+    QAction* exportAction = contextMenu.addAction("导出图片");
+    connect(exportAction, &QAction::triggered, this, &TextRenderWidget::exportToImage);
+
+    // 显示菜单
+    contextMenu.exec(mapToGlobal(pos));
+}
+
+void TextRenderWidget::loadViceCityFont()
+{
+    QFontDatabase db;
+    QString mainFontPath;
+    QString fallbackFontPath;
+
+    // 根据GTA版本选择字体
+    if (m_gtaVersion == 0) {
+        // GTA III 使用 Arial Black 和微软雅黑粗体，全部斜体
+            qDebug() << "GTA III version selected, loading fonts:";
+        // 主字体直接使用系统Arial Black，斜体
+            m_mainFont = QFont("Arial Black", m_fontSize);
+        m_mainFont.setBold(true);
+        m_mainFont.setItalic(true); // 斜体
+        m_mainFontLoaded = true;
+        m_mainFontFamily = "Arial Black";
+        // 备用字体直接使用系统微软雅黑粗体，斜体
+        m_fallbackFont = QFont("Microsoft YaHei", m_fontSize);
+        m_fallbackFont.setBold(true);
+        m_fallbackFont.setItalic(true); // 斜体
+        return; // GTA III直接返回，不继续执行
+    } else if (m_gtaVersion == 4) {
+        // GTA IV 使用 WHM 使用 alte-din-1451-mittelschrift.regular.ttf 和微软雅黑粗体
+        mainFontPath = QApplication::applicationDirPath() + "/font/alte-din-1451-mittelschrift.regular.ttf";
+        fallbackFontPath.clear(); // 使用系统微软雅黑粗体
+    } else if (m_gtaVersion == 2) {
+        // GTA SA 使用 FuturaLT-Bold.ttf 和微软简综艺.ttf
+        mainFontPath = QApplication::applicationDirPath() + "/font/FuturaLT-Bold.ttf";
+        fallbackFontPath = QApplication::applicationDirPath() + "/font/微软简综艺.ttf";
+    } else {
+        // 其他版本使用 ViceCitySans.otf
+        mainFontPath = QApplication::applicationDirPath() + "/font/ViceCitySans.otf";
+        fallbackFontPath.clear(); // 使用系统默认中文字体
+    }
+
+    // 加载主字体
+    m_mainFontId = db.addApplicationFont(mainFontPath);
+
+    if (m_mainFontId != -1) {
+        QStringList families = db.applicationFontFamilies(m_mainFontId);
+        if (!families.isEmpty()) {
+            m_mainFont.setFamily(families.first());
+            m_mainFont.setPointSize(m_fontSize);
+            m_mainFontLoaded = true;
+            m_mainFontFamily = families.first(); // 保存字体族名称
+            qDebug() << "Main font loaded successfully:" << families.first() << "from:" << mainFontPath;
+        } else {
+            m_mainFontLoaded = false;
+        }
+    } else {
+        m_mainFontLoaded = false;
+    }
+
+    // 加载备用字体
+    if (!fallbackFontPath.isEmpty()) {
+
+        // 使用QFontDatabase加载字体
+        int fallbackFontId = db.addApplicationFont(fallbackFontPath);
+
+        if (fallbackFontId != -1) {
+            QStringList families = db.applicationFontFamilies(fallbackFontId);
+
+            // 尝试多个可能的字体族名称
+            QStringList possibleNames = {
+                "微软简综艺",
+                "DFZongYi",
+                "DFZongYi-Bd-80-Win-GB",
+                "DFZongYi Bd",
+                "DFZongYi-Bd",
+                "ZongYi",
+                "DF ZongYi"
+            };
+
+            bool fontMatched = false;
+            QString usedFamily;
+
+            // 优先使用QFontDatabase返回的字体族
+            if (!families.isEmpty() && !families.first().isEmpty()) {
+                usedFamily = families.first();
+                m_fallbackFont = QFont(usedFamily, m_fontSize);
+                QFontInfo info(m_fallbackFont);
+
+                // 检查是否真正使用了该字体
+                if (info.family() != "MS Sans Serif" && info.family() != "Arial") {
+                    fontMatched = true;
+                }
+            }
+
+            // 如果失败，尝试其他可能的名称
+            if (!fontMatched) {
+
+                // 获取系统所有字体族
+                QStringList systemFamilies = db.families();
+
+                for (const QString& testName : possibleNames) {
+
+                    // 检查系统中是否存在这个字体
+                    bool foundInSystem = false;
+                    for (const QString& sysFamily : systemFamilies) {
+                        if (sysFamily.compare(testName, Qt::CaseInsensitive) == 0) {
+                            foundInSystem = true;
+                            usedFamily = sysFamily;
+                            break;
+                        }
+                    }
+
+                    if (foundInSystem) {
+                        m_fallbackFont = QFont(usedFamily, m_fontSize);
+                        QFontInfo info(m_fallbackFont);
+
+                        if (info.family() != "MS Sans Serif" && info.family() != "Arial") {
+                            fontMatched = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 如果所有方法都失败，回退到系统字体
+            if (!fontMatched) {
+                loadSystemFallbackFont(db);
+            } else {
+                // 验证最终字体
+                QFontInfo fontInfo(m_fallbackFont);
+            }
+        } else {
+            loadSystemFallbackFont(db);
+        }
+    } else {
+        loadSystemFallbackFont(db);
+    }
+
+    // 最终验证
+    QFontInfo finalFontInfo(m_fallbackFont);
+}
+
+void TextRenderWidget::setGtaVersion(int version)
+{
+    if (m_gtaVersion != version) {
+        m_gtaVersion = version;
+        // 重新加载字体
+        loadViceCityFont();
+        // 标记PNG缓存无效
+        m_pngCacheValid = false;
+        // 触发重绘
+        update();
+    }
+}
+
+void TextRenderWidget::loadSystemFallbackFont(QFontDatabase& db)
+{
+    // 直接使用微软雅黑作为系统备用字体（确保使用粗体）
+
+    QStringList families = db.families();
+    QString yaHeiFamily;
+    for (const QString& family : families) {
+        if (family.contains("Microsoft YaHei", Qt::CaseInsensitive)) {
+            yaHeiFamily = family;
+            break;
+        }
+    }
+
+    if (!yaHeiFamily.isEmpty()) {
+        m_fallbackFont = QFont(yaHeiFamily, m_fontSize);
+        // 微软雅黑使用粗体，以匹配艺术字体的外观
+        m_fallbackFont.setBold(true);
+        QFontInfo info(m_fallbackFont);
+    } else {
+        // 如果找不到微软雅黑，尝试其他中文字体（不包括宋体）
+        qDebug() << "Microsoft YaHei not found, trying alternatives...";
+        bool foundFallback = false;
+        QStringList fallbackCandidates = {"SimHei", "Microsoft YaHei UI", "黑体", "PingFang SC", "Microsoft JhengHei"};
+        for (const QString& candidate : fallbackCandidates) {
+            if (families.contains(candidate, Qt::CaseInsensitive)) {
+                m_fallbackFont = QFont(candidate, m_fontSize);
+                m_fallbackFont.setBold(true); // 备选字体也使用粗体
+                foundFallback = true;
+                break;
+            }
+        }
+        if (!foundFallback) {
+            // 最后的备选：使用系统默认无衬线字体
+            m_fallbackFont = QFont("Arial", m_fontSize);
+            m_fallbackFont.setStyleHint(QFont::SansSerif);
+            m_fallbackFont.setBold(true); // Arial也使用粗体
+            qDebug() << "No Chinese font found, using Arial Bold";
+        }
+    }
+}
+
+bool TextRenderWidget::needsFallbackFont(const QChar& ch) const
+{
+    // 如果主字体未加载，总是使用备用字体
+    if (!m_mainFontLoaded) {
+        return true;
+    }
+
+    // GTA SA 使用 Twentieth-Century-Bold.ttf 和其他版本的 ViceCitySans.otf 都只支持ASCII字符
+    // 对于非ASCII字符（unicode >= 256），使用备用字体（中文等）
+    bool needsFallback = (ch.unicode() >= 256);
+    if (needsFallback) {
+        qDebug() << "Fallback font family:" << m_fallbackFont.family();
+    }
+    return needsFallback;
+}
+
+void TextRenderWidget::setText(const QString& text)
+{
+    if (m_text == text) {
+        return;
+    }
+    
+    m_text = text;
+
+    // 更新PNG缓存
+    m_pngCacheValid = false;
+
+    // 直接触发重绘，不再显示预览标记
+    update(); // 触发重绘
+}
+
+void TextRenderWidget::clear()
+{
+    setText("");
+}
+
+void TextRenderWidget::onOutlineEnabledChanged(int state)
+{
+    m_outlineEnabled = (state == Qt::Checked);
+    m_pngCacheValid = false;
+    update();
+}
+
+void TextRenderWidget::onShadowEnabledChanged(int state)
+{
+    m_shadowEnabled = (state == Qt::Checked);
+    m_pngCacheValid = false;
+    update();
+}
+
+void TextRenderWidget::onFontSizeChanged(int size)
+{
+    m_fontSize = size;
+    m_mainFont.setPointSize(m_fontSize);
+    m_fallbackFont.setPointSize(m_fontSize);
+    m_pngCacheValid = false;
+    update();
+}
+
+void TextRenderWidget::paintEvent(QPaintEvent* event)
+{
+    Q_UNUSED(event);
+    
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    
+    // 绘制渐变背景
+    drawGradientBackground(&painter);
+    
+    // 绘制文字
+    if (!m_text.isEmpty()) {
+        drawColoredText(&painter);
+    }
+}
+
+void TextRenderWidget::drawGradientBackground(QPainter* painter)
+{
+    QRect rect = this->rect();
+    
+    // 创建线性渐变：从顶部白色 -> 中间灰色 -> 底部白色
+    QLinearGradient gradient(0, rect.top(), 0, rect.bottom());
+    
+    // 渐变stops
+    gradient.setColorAt(0.0, m_gradientEdgeColor);      // 顶部白色
+    gradient.setColorAt(0.5, m_gradientMiddleColor);    // 中间灰色
+    gradient.setColorAt(1.0, m_gradientEdgeColor);     // 底部白色
+    
+    // 绘制渐变背景
+    painter->fillRect(rect, gradient);
+    
+    // 绘制边框
+    painter->setPen(QColor(200, 200, 200));
+    painter->setBrush(Qt::NoBrush);
+    painter->drawRect(rect);
+}
+
+// 判断是否为隐藏标记（不显示在文本中）
+bool TextRenderWidget::isHiddenToken(const QString& token) {
+    // 根据用户提供的表，这些标记不会显示在文本中
+    static const QStringList hiddenTokens = {
+        "~1~", "~k~", "~n~", "~z~", "~<~", "~>~", "~f~", 
+        "~d~", "~u~", "~c~", "~j~", "~m~", "~v~", 
+        "~a~", "~l~"  // ~a~ area text, ~l~ black text
+    };
+    
+    return hiddenTokens.contains(token.toLower());
+}
+
+void TextRenderWidget::drawColoredText(QPainter* painter)
+{
+    if (m_text.isEmpty()) {
+        return;
+    }
+    
+    QRect rect = this->rect();
+    QRect textRect = rect.adjusted(8, 2, -8, -2);  // 更紧凑的边距
+    
+    // 计算文本总高度用于垂直居中
+    QStringList lines = m_text.split('\n');
+    QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
+    QFontMetrics fm(currentFont);
+    int singleLineHeight = fm.height();
+    int totalTextHeight = lines.size() * singleLineHeight;
+
+    // 调试输出
+    qDebug() << "Family:" << currentFont.family();
+    
+    // 如果总文本高度超过可用空间，则限制在可用空间内
+    int availableHeight = textRect.height();
+    if (totalTextHeight > availableHeight) {
+        // 如果文本太高，只显示能容纳的部分
+        int maxLines = availableHeight / singleLineHeight;
+        if (maxLines < lines.size()) {
+            lines = lines.mid(0, maxLines);
+            totalTextHeight = maxLines * singleLineHeight;
+        }
+    }
+    
+    // 计算垂直居中的起始Y位置
+    int startY = textRect.top() + (availableHeight - totalTextHeight) / 2;
+    
+    // 绘制阴影
+    if (m_shadowEnabled) {
+        painter->save();
+        painter->setPen(QColor(0, 0, 0, 120)); // 减淡阴影
+
+        for (int i = 0; i < lines.size(); ++i) {
+            QString line = lines[i];
+            if (!line.isEmpty()) {
+                // 与主文本渲染一样，移除隐藏标记，只显示可见文本
+                QStringList parts = splitTextAndTokens(line);
+
+                int shadowXPos = textRect.left() + 2;
+                int shadowYPos = startY + 2 + i * singleLineHeight;
+
+                // 统一的基线：使用主字体的ascent，确保不同字体的字符在同一水平线上
+                int baseline = shadowYPos + fm.ascent();
+
+                for (const QString& part : parts) {
+                    if (part.startsWith("~") && part.endsWith("~") && part.length() == 3) {
+                        // 这是一个颜色标记
+                        QString token = part.toLower();
+
+                        // 检查是否是隐藏标记
+                        if (!isHiddenToken(token)) {
+                            // 不是隐藏标记，但颜色标记本身不显示在文本中，只影响颜色
+                            // 所以我们跳过颜色标记，只添加普通文本
+                        }
+                    } else {
+                        // 普通文本，逐字符绘制
+                        for (const QChar& ch : part) {
+                            // 为当前字符选择合适的字体
+                            QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
+                            QFontMetrics fm_char(charFont);
+                            int charWidth = fm_char.horizontalAdvance(ch);
+
+                            // 检查是否超出边界
+                            if (shadowXPos + charWidth > textRect.right()) {
+                                break;
+                            }
+
+                            painter->setFont(charFont);
+                            // 使用统一的基线绘制阴影
+                            painter->drawText(shadowXPos, baseline, ch);
+                            shadowXPos += charWidth;
+                        }
+                    }
+                }
+            }
+        }
+        painter->restore();
+    }
+    
+    // 绘制文字（所有颜色都使用100%不透明度）
+    painter->save();
+
+    QColor currentColor(255, 255, 255, 255); // 默认白色100%不透明度
+    painter->setPen(currentColor);
+    painter->setOpacity(1.0); // 使用1.0不透明度
+    for (int i = 0; i < lines.size(); ++i) {
+        QString line = lines[i];
+        if (line.isEmpty()) {
+            continue;
+        }
+
+        int xPos = textRect.left();
+        int yPos = textRect.top() + startY + i * singleLineHeight;
+
+        // 统一的基线：使用主字体的ascent，确保不同字体的字符在同一水平线上
+        int baseline = yPos + fm.ascent();
+
+        // 分割文本和颜色标记
+        QStringList parts = splitTextAndTokens(line);
+
+        for (const QString& part : parts) {
+            if (part.startsWith("~") && part.endsWith("~") && part.length() == 3) {
+                // 这是一个颜色标记
+                            QString token = part.toLower();
+
+                // 检查是否是隐藏标记
+                if (isHiddenToken(token)) {
+                    // 隐藏标记，不显示在文本中，只做逻辑处理
+                    continue;
+                }
+
+                // 更新颜色 - 使用当前版本信息
+                currentColor = getColorForToken(token, m_gtaVersion);
+                painter->setPen(currentColor);
+            } else {
+                    // 这是普通文本，进行绘制
+                    if (!part.isEmpty()) {
+                        QFontMetrics fm_part(currentFont);
+
+                        // 检查是否超出边界
+                        for (const QChar& ch : part) {
+                            // 为当前字符选择合适的字体
+                            QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
+                            QFontMetrics fm_char(charFont);
+                            int charWidth = fm_char.horizontalAdvance(ch);
+
+                            // 检查是否超出边界
+                            if (xPos + charWidth > textRect.right()) {
+                                break;
+                            }
+
+                            // 关键：每次绘制字符前都设置正确的字体
+                            painter->setFont(charFont);
+
+                        // 绘制描边
+                        if (m_outlineEnabled) {
+                            painter->save();
+                            QColor outlineColor(0, 0, 0, 255); // 黑色描边，完全不透明
+
+                            // 使用更细的描边 - 绘制一层
+                            QPainterPath path;
+                            // 使用统一的基线，而不是各自字体的ascent
+                            path.addText(xPos, baseline, charFont, ch);
+
+                            // 绘制单层描边，增加描边粗细
+                            painter->setPen(QPen(outlineColor, 3.5));
+                            painter->setBrush(outlineColor);
+                            painter->drawPath(path);
+
+                            painter->restore();
+
+                            // 重新设置文字颜色（已包含90%不透明度）
+                            painter->setPen(currentColor);
+                            // restore后字体可能被重置，重新设置
+                            painter->setFont(charFont);
+                        }
+
+                        // 绘制字符 - 使用统一的基线
+                        painter->drawText(xPos, baseline, ch);
+                        xPos += charWidth;
+                    }
+                }
+            }
+        }
+        
+        // 检查是否超出高度边界
+            if (yPos > textRect.bottom()) {
+            break;
+        }
+    }
+    
+    painter->restore();
+}
+
+// 移除隐藏标记，保留可见文本
+QString TextRenderWidget::removeHiddenTokens(const QString& input) {
+    QString result = input;
+    QRegularExpression colorRegex("~[a-zA-Z0-9]~");
+    
+    int pos = 0;
+    QRegularExpressionMatch match;
+    while ((match = colorRegex.match(result, pos)).hasMatch()) {
+        QString token = match.captured(0).toLower();
+        // 检查是否是隐藏标记
+        if (isHiddenToken(token)) {
+            // 移除隐藏标记
+            result.remove(match.capturedStart(0), match.capturedLength(0));
+            // 不增加pos，因为字符串长度已改变
+            } else {
+            // 非隐藏标记，继续移动位置
+            pos = match.capturedEnd(0);
+        }
+    }
+    
+    return result;
+}
+
+// 分割文本和标记
+QStringList TextRenderWidget::splitTextAndTokens(const QString& input) {
+    QStringList parts;
+    QRegularExpression colorRegex("~[a-zA-Z0-9]~");
+    
+    int lastPos = 0;
+    int pos = 0;
+    QRegularExpressionMatch match;
+    while ((match = colorRegex.match(input, pos)).hasMatch()) {
+        // 添加颜色标记前的文本
+        if (match.capturedStart(0) > lastPos) {
+            parts << input.mid(lastPos, match.capturedStart(0) - lastPos);
+        }
+        // 添加颜色标记
+        parts << match.captured(0);
+        pos = match.capturedEnd(0);
+        lastPos = pos;
+    }
+    
+    // 添加最后剩余的文本
+    if (lastPos < input.length()) {
+        parts << input.mid(lastPos);
+    }
+    
+    return parts;
+}
+
+void TextRenderWidget::exportToImage()
+{
+    if (m_text.isEmpty()) {
+        QMessageBox::warning(this, "提示", "没有可导出的内容");
+        return;
+    }
+
+    // 让用户选择保存位置
+    QString fileName = QFileDialog::getSaveFileName(
+        this,
+        "导出图片",
+        QDir::homePath() + "/text_render.png",
+        "PNG 图片 (*.png);;JPEG 图片 (*.jpg);;BMP 图片 (*.bmp)"
+    );
+
+    if (fileName.isEmpty()) {
+        return;
+    }
+
+    // 确保PNG缓存已生成
+    if (!m_pngCacheValid) {
+        updateCachedPNG();
+    }
+
+    // 从缓存获取图片
+    QImage image = QImage::fromData(m_cachedPNGData, "PNG");
+
+    // 保存图片
+    bool success = image.save(fileName);
+
+    if (success) {
+        QMessageBox::information(this, "成功", QString("图片已成功导出到:\n%1").arg(fileName));
+    } else {
+        QMessageBox::critical(this, "错误", "保存图片失败");
+    }
+}
+
+void TextRenderWidget::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        m_dragStartPos = event->pos();
+        m_isDragging = false;
+    }
+    QWidget::mousePressEvent(event);
+}
+
+void TextRenderWidget::mouseMoveEvent(QMouseEvent* event)
+{
+    if (!(event->buttons() & Qt::LeftButton)) {
+        return;
+    }
+
+    if ((event->pos() - m_dragStartPos).manhattanLength() < 10) {
+        return;
+    }
+
+    m_isDragging = true;
+
+
+    // 创建拖拽对象
+    QDrag* drag = new QDrag(this);
+    QMimeData* mimeData = new QMimeData();
+
+    // 确保PNG缓存已生成
+    if (!m_pngCacheValid) {
+        updateCachedPNG();
+    }
+
+
+    // 从缓存创建图片用于显示
+    QImage image = QImage::fromData(m_cachedPNGData, "PNG");
+
+    // 设置拖拽数据 - 同时提供图片和文件两种格式
+    // 1. 图片数据格式 - 供QQ等应用程序使用
+    mimeData->setData("image/png", m_cachedPNGData);
+    mimeData->setImageData(image);
+
+    // 2. 创建临时文件供桌面保存使用
+    QString tempPath = QDir::tempPath() + "/gxt_text_render_" + QDateTime::currentDateTime().toString("yyyyMMddhhmmsszzz") + ".png";
+    bool saved = image.save(tempPath, "PNG");
+
+    if (saved) {
+        // 使用 setUrls() 设置文件列表 - 桌面会优先使用这个
+        QList<QUrl> urls;
+        urls << QUrl::fromLocalFile(tempPath);
+        mimeData->setUrls(urls);
+    }
+
+    drag->setMimeData(mimeData);
+    drag->setPixmap(QPixmap::fromImage(image));
+    drag->setHotSpot(event->pos());
+
+
+    // 执行拖拽 - 强制使用CopyAction
+    Qt::DropAction result = drag->exec(Qt::CopyAction, Qt::CopyAction);
+
+
+    // 清理临时文件（延迟删除，让接收方有时间复制）
+    QTimer::singleShot(1000, [tempPath]() {
+        QFile::remove(tempPath);
+    });
+}
+
+void TextRenderWidget::dragEnterEvent(QDragEnterEvent* event)
+{
+    // 接受图片和文本类型的拖拽
+    if (event->mimeData()->hasImage() || event->mimeData()->hasText()) {
+        event->acceptProposedAction();
+    } else {
+        event->ignore();
+    }
+}
+
+void TextRenderWidget::dropEvent(QDropEvent* event)
+{
+    if (event->mimeData()->hasText()) {
+        // 如果拖入的是文本，设置为当前文本
+        QString droppedText = event->mimeData()->text();
+        setText(droppedText);
+        event->acceptProposedAction();
+    } else if (event->mimeData()->hasImage()) {
+        // 如果拖入的是图片，提取文本（如果可能）
+        QImage image = qvariant_cast<QImage>(event->mimeData()->imageData());
+        if (!image.isNull()) {
+            // 这里可以添加OCR功能来从图片中提取文本
+            // 目前暂不实现
+        }
+        event->acceptProposedAction();
+    }
+}
+
+void TextRenderWidget::updateCachedPNG()
+{
+    // 计算文字的实际大小
+    QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
+    QFontMetrics fm(currentFont);
+
+    QStringList lines = m_text.split('\n');
+    int maxWidth = 0;
+    int totalHeight = lines.size() * fm.height();
+
+    for (const QString& line : lines) {
+        QString cleanLine = removeHiddenTokens(line);
+        int lineWidth = fm.horizontalAdvance(cleanLine);
+        if (lineWidth > maxWidth) {
+            maxWidth = lineWidth;
+        }
+    }
+
+    // 添加一些边距
+    const int margin = 8;
+    QSize imageSize(maxWidth + margin * 2, totalHeight + margin * 2);
+
+    // 如果文字为空，使用默认大小
+    if (maxWidth == 0 || totalHeight == 0) {
+        imageSize = this->size();
+    }
+
+
+    QImage image(imageSize, QImage::Format_ARGB32);
+    image.fill(Qt::transparent);
+
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.setFont(currentFont);
+
+        // 绘制文字（不带背景）
+        if (!m_text.isEmpty()) {
+            QRect textRect(margin, margin, imageSize.width() - margin * 2, imageSize.height() - margin * 2);
+
+            QColor currentColor(255, 255, 255, 255);
+            painter.setPen(currentColor);
+            painter.setOpacity(1.0);
+
+            int yPos = margin;
+
+            for (const QString& line : lines) {
+                QStringList parts = splitTextAndTokens(line);
+                int xPos = margin;
+
+                for (const QString& part : parts) {
+                    if (part.startsWith("~") && part.endsWith("~") && part.length() == 3) {
+                        QString token = part.toLower();
+                        if (!isHiddenToken(token)) {
+                            currentColor = getColorForToken(token, m_gtaVersion);
+                            painter.setPen(currentColor);
+                        }
+                    } else {
+                        for (const QChar& ch : part) {
+                            QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
+                            QFontMetrics fm_char(charFont);
+                            int charWidth = fm_char.horizontalAdvance(ch);
+                            int baseline = yPos + fm_char.ascent();
+
+                        if (m_outlineEnabled) {
+                            painter.save();
+                            QColor outlineColor(0, 0, 0, 255); // 黑色描边，完全不透明
+                            QPainterPath path;
+                            path.addText(xPos, baseline, charFont, ch);
+                            painter.setPen(QPen(outlineColor, 3.5));
+                            painter.setBrush(outlineColor);
+                            painter.drawPath(path);
+                            painter.restore();
+                            painter.setPen(currentColor);
+                            painter.setFont(charFont);
+                        }
+
+                        painter.setFont(charFont);
+                        painter.drawText(xPos, baseline, ch);
+                        xPos += charWidth;
+                    }
+                }
+            }
+            yPos += fm.height();
+        }
+    }
+
+    painter.end();
+
+    // 将图片转换为PNG格式的字节数组并缓存
+    m_cachedPNGData.clear();
+    QBuffer buffer(&m_cachedPNGData);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    buffer.close();
+
+
+    m_pngCacheValid = true;
+}
