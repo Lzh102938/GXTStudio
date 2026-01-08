@@ -1471,6 +1471,9 @@ void GXTStudio::connectSignals()
     connect(m_tabWidget, &QTabWidget::currentChanged, this, &GXTStudio::onTabChanged);
     connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, &GXTStudio::closeTab);
     
+    // 【关键修复】QTabWidget 没有 tabMoved 信号，需要通过 QTabBar 监听
+    connect(m_tabWidget->tabBar(), &QTabBar::tabMoved, this, &GXTStudio::onTabMoved);
+    
     // 简化内存管理 - Qt自动处理大部分内存
 }
 
@@ -2205,6 +2208,14 @@ void GXTStudio::switchToTable(int newTableIndex)
         return;
     }
     
+    // 【关键修复】立即更新当前表格索引
+    tab->currentTableIndex = newTableIndex;
+    
+    // 【关键修复】立即重新设置模型，确保模型指向正确的表格索引
+    if (tab->entryTableModel) {
+        tab->entryTableModel->setTab(tab);
+    }
+    
     // 不检查是否已切换到相同表格，总是更新模型以确保数据正确显示
     if (tab->entryTableView) {
         // 禁用重绘以减少闪烁
@@ -2215,12 +2226,14 @@ void GXTStudio::switchToTable(int newTableIndex)
             delegate->clearCache();
         }
         
+        // 【关键修复】确保模型正确
+        if (tab->entryTableView->model() != tab->entryTableModel) {
+            tab->entryTableView->setModel(tab->entryTableModel);
+        }
+        
         // 清除视口
         tab->entryTableView->viewport()->update();
     }
-    
-    // 更新当前表格索引
-    tab->currentTableIndex = newTableIndex;
     
     // 同步更新侧边栏选择
     if (tab->tableList) {
@@ -2229,36 +2242,55 @@ void GXTStudio::switchToTable(int newTableIndex)
         tab->tableList->setCurrentRow(newTableIndex);
         tab->tableList->blockSignals(wasBlocked);
     }
-    
-    // 懒加载：延迟更新表格数据，避免UI卡顿
-    QTimer::singleShot(50, [this, tab, newTableIndex]() {
+
+    // 【性能优化】减少延迟从50ms到10ms，加快响应速度
+    // 【关键修复】捕获索引而不是指针，避免标签页移动后指针失效
+    int currentTabIndex = m_currentTabIndex;
+    QTimer::singleShot(10, this, [this, currentTabIndex, newTableIndex]() {
+        // 【关键修复】每次都通过索引重新获取指针，避免指针失效
+        FileTab* tab = (currentTabIndex >= 0 && currentTabIndex < static_cast<int>(m_fileTabs.size()))
+                         ? &m_fileTabs[currentTabIndex] : nullptr;
+
         // 验证标签页和索引仍然有效
-        if (!tab || tab != getCurrentTab()) return;
+        if (!tab || currentTabIndex != m_currentTabIndex) return;
         if (newTableIndex < 0 || newTableIndex >= static_cast<int>(tab->tables.size())) return;
-        
+
         try {
             if (tab->entryTableModel) {
-                // 强制重置模型以清除所有缓存
+                // 【关键修复】强制重置模型以清除所有缓存
                 tab->entryTableModel->forceDataReset();
-                
+
                 // 重新启用表格视图更新
                 if (tab->entryTableView) {
                     tab->entryTableView->setUpdatesEnabled(true);
+
+                    // 【关键修复】确保模型正确
+                    if (tab->entryTableView->model() != tab->entryTableModel) {
+                        tab->entryTableView->setModel(tab->entryTableModel);
+                    }
+
                     tab->entryTableView->viewport()->update();
                     tab->entryTableView->update();
+
+                    // 【关键修复】强制立即重绘，确保内容立即显示
+                    tab->entryTableView->viewport()->repaint();
+                    tab->entryTableView->repaint();
+
+                    // 【性能优化】立即处理事件，确保UI立即更新显示
+                    QCoreApplication::processEvents();
                 }
-                
+
                 updateStatusBar();
-                
+
                 // 记录切换日志
                 QString newTableName = QString::fromStdString(tab->tables[newTableIndex].name);
-                showLogMessage("切换到表格: " + newTableName + " (条目数: " + 
+                showLogMessage("切换到表格: " + newTableName + " (条目数: " +
                                QString::number(tab->tables[newTableIndex].entries.size()) + ")");
             }
         } catch (...) {
             qWarning() << "Exception occurred during table switching";
             // 确保视图更新被重新启用
-            if (tab->entryTableView) {
+            if (tab && tab->entryTableView) {
                 tab->entryTableView->setUpdatesEnabled(true);
             }
         }
@@ -3861,15 +3893,15 @@ void GXTStudio::openEditDialog(int row, int column)
 void GXTStudio::onTabChanged(int index)
 {
     if (m_currentTabIndex == index) return;
-    
+
     // 先保存前一个标签页索引，用于清理
     int previousTabIndex = m_currentTabIndex;
-    
+
     // 清理前一个标签页的资源
     if (previousTabIndex >= 0 && previousTabIndex < static_cast<int>(m_fileTabs.size())) {
         FileTab* previousTab = &m_fileTabs[previousTabIndex];
         if (previousTab && previousTab != getCurrentTab()) {
-            // 暂停前一个标签页的视图更新
+            // 暂停前一个标签页的视图更新（但保持可用状态）
             if (previousTab->entryTableView) {
                 previousTab->entryTableView->setUpdatesEnabled(false);
             }
@@ -3878,16 +3910,34 @@ void GXTStudio::onTabChanged(int index)
             }
         }
     }
-    
+
     // 更新索引
     m_currentTabIndex = index;
-    
+
     // 获取新的当前标签页
     FileTab* currentTab = getCurrentTab();
     if (!currentTab) {
+        // 如果没有有效的当前标签页，恢复前一个标签页的状态
+        if (previousTabIndex >= 0 && previousTabIndex < static_cast<int>(m_fileTabs.size())) {
+            FileTab* previousTab = &m_fileTabs[previousTabIndex];
+            if (previousTab) {
+                if (previousTab->entryTableView) {
+                    previousTab->entryTableView->setUpdatesEnabled(true);
+                }
+                if (previousTab->tableList) {
+                    previousTab->tableList->setUpdatesEnabled(true);
+                }
+            }
+        }
         return;
     }
-    
+
+    // 【关键修复】立即重新设置模型的tab指针，确保模型指向正确的FileTab
+    if (currentTab->entryTableModel && currentTab->entryTableView) {
+        // 强制重新设置模型，清除所有缓存
+        currentTab->entryTableModel->setTab(currentTab);
+    }
+
     // 暂停所有视图更新以防止闪烁和内存问题
     if (currentTab->entryTableView) {
         currentTab->entryTableView->setUpdatesEnabled(false);
@@ -3914,14 +3964,35 @@ void GXTStudio::onTabChanged(int index)
         currentTab->tableList->show();
     }
 
-    // 延迟更新UI，确保数据准备就绪后再更新视图
-    QTimer::singleShot(100, this, [this, currentTab]() {
+    // 【关键修复】捕获索引而不是指针，避免标签页移动后指针失效
+    int currentTabIndex = m_currentTabIndex;
+
+    // 【性能优化】减少延迟从50ms到10ms，加快标签页切换响应速度
+    QTimer::singleShot(10, this, [this, currentTabIndex, previousTabIndex]() {
+        // 【关键修复】每次都通过索引重新获取指针，避免指针失效
+        FileTab* currentTab = (currentTabIndex >= 0 && currentTabIndex < static_cast<int>(m_fileTabs.size()))
+                              ? &m_fileTabs[currentTabIndex] : nullptr;
+
         // 确保当前标签页仍然有效
-        if (currentTab != getCurrentTab()) {
+        if (!currentTab || currentTabIndex != m_currentTabIndex) {
             return;
         }
 
         try {
+            // 【关键修复】再次强制重置模型，确保数据完全同步
+            if (currentTab->entryTableModel) {
+                currentTab->entryTableModel->forceDataReset();
+            }
+
+            // 【关键修复】确保表格视图的模型已正确设置
+            if (currentTab->entryTableView && currentTab->entryTableModel) {
+                QAbstractItemModel* currentModel = currentTab->entryTableView->model();
+                if (currentModel != currentTab->entryTableModel) {
+                    // 如果模型不匹配，重新设置
+                    currentTab->entryTableView->setModel(currentTab->entryTableModel);
+                }
+            }
+
             // 恢复视图更新
             if (currentTab->entryTableView) {
                 currentTab->entryTableView->setUpdatesEnabled(true);
@@ -3930,24 +4001,36 @@ void GXTStudio::onTabChanged(int index)
                 currentTab->tableList->setUpdatesEnabled(true);
             }
 
+            // 【关键修复】强制刷新视口，确保内容立即显示
+            if (currentTab->entryTableView) {
+                currentTab->entryTableView->viewport()->update();
+                currentTab->entryTableView->update();
+            }
+
             // 更新表格列表，这会设置正确的 currentTableIndex 并更新模型
             updateTableList();
 
             // 不再单独调用 updateEntryTable()，因为 updateTableList 已经更新了模型
             updateWindowTitle();
 
+            // 【关键修复】强制更新表格视图，确保数据立即显示
+            if (currentTab->entryTableView) {
+                currentTab->entryTableView->viewport()->repaint();
+                currentTab->entryTableView->repaint();
+            }
+
             // 触发一次内存清理
-            QTimer::singleShot(200, [this]() {
+            QTimer::singleShot(100, [this]() {
                 cleanupDelegatesCache();
                 QCoreApplication::processEvents();
             });
         } catch (...) {
             qWarning() << "Exception occurred during tab change";
             // 确保视图更新被重新启用
-            if (currentTab->entryTableView) {
+            if (currentTab && currentTab->entryTableView) {
                 currentTab->entryTableView->setUpdatesEnabled(true);
             }
-            if (currentTab->tableList) {
+            if (currentTab && currentTab->tableList) {
                 currentTab->tableList->setUpdatesEnabled(true);
             }
         }
@@ -4058,6 +4141,125 @@ void GXTStudio::closeTab(int index)
     
     // 最后移除数据
     m_fileTabs.erase(m_fileTabs.begin() + index);
+}
+
+// 处理标签页拖拽移动
+void GXTStudio::onTabMoved(int from, int to)
+{
+    // 【关键修复】标签页移动的完整解决方案
+    // 核心问题：QTabWidget 的 widget 顺序与 m_fileTabs 顺序不一致
+    // 解决方案：同步重新排序 widget 和 m_fileTabs
+
+    if (from < 0 || from >= static_cast<int>(m_fileTabs.size()) ||
+        to < 0 || to >= static_cast<int>(m_fileTabs.size())) {
+        return;
+    }
+
+    if (from == to) {
+        return;
+    }
+
+    // 记录是否移动了当前标签页
+    bool currentTabMoved = (from == m_currentTabIndex);
+
+    // 【关键修复】在删除 widget 之前，先保存标签页标题
+    QString tabTitle = m_tabWidget->tabText(from);
+
+    // 【关键修复】获取需要移动的 widget
+    QWidget* movedWidget = m_tabWidget->widget(from);
+
+    // 【关键修复】阻塞 QTabWidget 的信号，防止在移动过程中触发 currentChanged
+    m_tabWidget->blockSignals(true);
+
+    // 移除旧位置的 widget 和数据
+    m_tabWidget->removeTab(from);
+
+    // 【关键修复】在 m_fileTabs 中移动元素
+    FileTab temp = std::move(m_fileTabs[from]);
+    m_fileTabs.erase(m_fileTabs.begin() + from);
+
+    // 【关键修复】重新插入到目标位置
+    // 因为已经移除了 from 位置的元素，需要调整插入位置
+    int insertPos = (to > from) ? (to - 1) : to;
+    m_fileTabs.insert(m_fileTabs.begin() + insertPos, std::move(temp));
+
+    // 【关键修复】将 widget 重新插入到 QTabWidget 的目标位置
+    // insertTab 的正确参数顺序：index, widget, label
+    m_tabWidget->insertTab(to, movedWidget, tabTitle);
+
+    // 【关键修复】解除信号阻塞
+    m_tabWidget->blockSignals(false);
+
+    // 【关键修复】更新当前标签页索引
+    if (currentTabMoved) {
+        m_currentTabIndex = to;
+    } else {
+        // 如果当前标签页没有被移动，需要根据移动方向调整索引
+        if (from < m_currentTabIndex && to >= m_currentTabIndex) {
+            m_currentTabIndex--;
+        } else if (from > m_currentTabIndex && to <= m_currentTabIndex) {
+            m_currentTabIndex++;
+        }
+    }
+
+    // 验证索引有效性
+    if (m_currentTabIndex < 0) {
+        m_currentTabIndex = 0;
+    } else if (m_currentTabIndex >= static_cast<int>(m_fileTabs.size())) {
+        m_currentTabIndex = static_cast<int>(m_fileTabs.size()) - 1;
+    }
+
+    // 【关键修复】强制刷新所有标签页的模型连接
+    for (auto& tab : m_fileTabs) {
+        if (tab.entryTableModel) {
+            tab.entryTableModel->setTab(&tab);
+        }
+    }
+
+    // 【关键修复】只更新UI状态，不触发标签页切换
+    // 因为我们已经手动重新排序了widgets，不需要再次切换
+    updateWindowTitle();
+    updateStatusBar();
+    updateActions();
+
+    // 【关键修复】强制刷新当前标签页的UI
+    FileTab* currentTab = getCurrentTab();
+    if (currentTab) {
+        if (currentTab->entryTableView && currentTab->entryTableModel) {
+            // 确保模型正确设置
+            if (currentTab->entryTableView->model() != currentTab->entryTableModel) {
+                currentTab->entryTableView->setModel(currentTab->entryTableModel);
+            }
+
+            // 强制重置模型
+            currentTab->entryTableModel->forceDataReset();
+
+            // 清除委托缓存
+            if (auto* delegate = qobject_cast<OptimizedItemDelegate*>(currentTab->entryTableView->itemDelegate())) {
+                delegate->clearCache();
+            }
+
+            // 确保更新启用
+            currentTab->entryTableView->setUpdatesEnabled(true);
+            currentTab->entryTableView->viewport()->setUpdatesEnabled(true);
+
+            // 强制重绘
+            currentTab->entryTableView->viewport()->update();
+            currentTab->entryTableView->viewport()->repaint();
+        }
+
+        // 刷新左侧表格列表
+        if (currentTab->tableList) {
+            currentTab->tableList->setUpdatesEnabled(true);
+            currentTab->tableList->viewport()->setUpdatesEnabled(true);
+            updateTableList();
+        }
+
+        // 立即处理所有待处理事件
+        QCoreApplication::processEvents();
+    }
+
+    showLogMessage(QString("标签页已从位置 %1 移动到 %2").arg(from).arg(to));
 }
 
 // 更新方法
@@ -4232,10 +4434,13 @@ void GXTStudio::updateEntryTable()
         return;
     }
     
+    // 【关键修复】首先确保模型的tab指针正确
+    tab->entryTableModel->setTab(tab);
+    
     // 禁用更新以防止闪烁
     tab->entryTableView->setUpdatesEnabled(false);
     
-    // 强制刷新模型以确保数据同步
+    // 【关键修复】强制刷新模型以确保数据同步
     tab->entryTableModel->forceDataReset();
     
     // 清除委托缓存以确保正确的渲染
@@ -4244,11 +4449,20 @@ void GXTStudio::updateEntryTable()
         delegate->clearCache();
     }
     
+    // 【关键修复】确保表格视图的模型正确
+    if (tab->entryTableView->model() != tab->entryTableModel) {
+        tab->entryTableView->setModel(tab->entryTableModel);
+    }
+    
     // 清除视口缓存
     tab->entryTableView->viewport()->update();
     
     // 重新启用更新
     tab->entryTableView->setUpdatesEnabled(true);
+    
+    // 【关键修复】强制立即重绘，确保内容立即显示
+    tab->entryTableView->viewport()->repaint();
+    tab->entryTableView->repaint();
     
     // 强制完整刷新
     tab->entryTableView->update();
@@ -4415,7 +4629,7 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
 
         // 先设置当前标签页索引，这样updateTableList才能正常工作
         m_currentTabIndex = result.tabIndex;
-
+        
         // 创建实际的标签页内容和UI（内部会调用updateTableList）
         // 注意：这里传递m_fileTabs中元素的引用，而不是局部变量tab
         createTabContent(m_fileTabs[result.tabIndex], result.tabIndex);
@@ -4425,22 +4639,20 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
 
         showLogMessage(QString("成功加载 %1 (耗时: %2ms)").arg(tab.fileName).arg(parseTime));
 
-        // 延迟更新UI，确保所有组件都完全初始化
-        int tabIndex = result.tabIndex;
-        QTimer::singleShot(100, this, [this, tabIndex]() {
-            // 获取tab（tab已经添加到m_fileTabs中了）
-            if (tabIndex < 0 || tabIndex >= static_cast<int>(m_fileTabs.size())) {
-                return;
-            }
-            const auto& fileTab = m_fileTabs[tabIndex];
-
-            // 确保右侧表格显示第一个表的内容
-            if (!fileTab.isWHM && !fileTab.tables.empty()) {
-                switchToTable(0);
-            } else if (fileTab.isWHM && !fileTab.whmEntries.empty()) {
-                updateEntryTable();  // WHM文件直接更新表格
-            }
-        });
+        // 【性能优化】移除不必要的100ms延迟，立即显示内容
+        // 立即确保右侧表格显示第一个表的内容
+        const auto& fileTab = m_fileTabs[result.tabIndex];
+        
+        if (!fileTab.isWHM && !fileTab.tables.empty()) {
+            // GXT文件：立即切换到第一个表
+            switchToTable(0);
+        } else if (fileTab.isWHM && !fileTab.whmEntries.empty()) {
+            // WHM文件：立即更新表格
+            updateEntryTable();
+        }
+        
+        // 立即处理事件，确保UI立即更新
+        QCoreApplication::processEvents();
 
     } catch (const std::exception& e) {
         qCritical() << "处理解析结果时发生错误:" << e.what();
@@ -5336,6 +5548,26 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
 
     // 填充左侧表格列表
     updateTableList();
+    
+    // 【关键修复】强制刷新表格视图，确保内容立即显示
+    if (entryTableView && entryTableModel) {
+        // 确保模型正确设置
+        if (entryTableView->model() != entryTableModel) {
+            entryTableView->setModel(entryTableModel);
+        }
+        
+        // 强制重置模型以确保数据正确
+        entryTableModel->forceDataReset();
+        
+        // 强制立即重绘
+        entryTableView->viewport()->update();
+        entryTableView->update();
+        entryTableView->viewport()->repaint();
+        entryTableView->repaint();
+        
+        // 【性能优化】立即处理事件，确保UI立即更新显示
+        QCoreApplication::processEvents();
+    }
 }
 
 

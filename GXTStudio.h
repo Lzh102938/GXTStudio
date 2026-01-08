@@ -101,6 +101,7 @@ namespace FA {
 #include <QtWidgets/QToolBar>
 #include <QtWidgets/QStatusBar>
 #include <QtWidgets/QTabWidget>
+#include <QtWidgets/QTabBar>
 #include <QtWidgets/QTreeWidget>
 #include <QtWidgets/QTableWidget>
 #include <QtWidgets/QListWidget>
@@ -808,6 +809,7 @@ private slots:
     
     // 标签页操作
     void onTabChanged(int index);
+    void onTabMoved(int from, int to);  // 处理标签页拖拽移动
     void closeTab(int index);
     
     // 异步保存相关
@@ -1035,8 +1037,12 @@ public:
         beginResetModel();
         m_tab = tab;
         m_cachedRowCount = -1;
+        // 【关键修复】总是从tab获取最新的currentTableIndex，确保与标签页状态同步
         m_currentTableIndex = tab ? tab->currentTableIndex : -1;
         endResetModel();
+        
+        // 【关键修复】强制清除所有缓存，确保下次访问时重新计算
+        m_cachedRowCount = -1;
     }
     
     void setEditable(bool editable) { m_editable = editable; }
@@ -1061,12 +1067,14 @@ public:
     // 强制数据重置 - 用于表格切换时确保无残留
     void forceDataReset() {
         beginResetModel();
-        // 清除所有缓存
+        // 【关键修复】清除所有缓存
         m_cachedRowCount = -1;
-        m_currentTableIndex = -1;
         
+        // 【关键修复】从tab重新获取currentTableIndex，确保状态同步
         if (m_tab) {
             m_currentTableIndex = m_tab->currentTableIndex;
+            
+            // 【关键修复】根据最新的tab状态重新计算行数
             if (m_tab->isWHM) {
                 m_cachedRowCount = static_cast<int>(m_tab->whmEntries.size());
             } else if (m_currentTableIndex >= 0 && m_currentTableIndex < static_cast<int>(m_tab->tables.size())) {
@@ -1074,6 +1082,8 @@ public:
             } else {
                 m_cachedRowCount = 0;
             }
+        } else {
+            m_currentTableIndex = -1;
         }
         endResetModel();
     }
