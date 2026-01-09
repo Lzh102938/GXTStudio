@@ -62,25 +62,36 @@ bool GXTEditor::loadFromFile(const std::string& path)
 }
 
 // ===== UTF-8 到UTF-16LE 转换辅助函数 =====
-std::string utf8_to_utf16le(const std::string& utf8) {
+// 返回UTF-16LE整数列表（包含null终止符）
+std::vector<uint16_t> utf8_to_utf16le_vector(const std::string& utf8) {
     // 先将UTF-8转换为宽字符
     int wideCount = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
-    std::string result;
+    std::vector<uint16_t> result;
     if (wideCount == 0) {
-        result.push_back(0); // 至少有一个null终止符
+        result.push_back(0); // null终止符
         return result;
     }
     
     std::wstring wideString(wideCount, 0);
     MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, &wideString[0], wideCount);
     
-    // 将宽字符转换为UTF-16LE（包含null终止符，就像Python版本一样）
-    result.reserve(wideString.length() * 2);
+    // 将宽字符转换为UTF-16LE整数列表（包含null终止符）
     for (wchar_t c : wideString) {
-        result.push_back(c & 0xFF);
-        result.push_back((c >> 8) & 0xFF);
+        result.push_back(static_cast<uint16_t>(c));
     }
     
+    return result;
+}
+
+// 兼容旧代码的字节串版本
+std::string utf8_to_utf16le(const std::string& utf8) {
+    auto vec = utf8_to_utf16le_vector(utf8);
+    std::string result;
+    result.reserve(vec.size() * 2);
+    for (uint16_t code : vec) {
+        result.push_back(code & 0xFF);
+        result.push_back((code >> 8) & 0xFF);
+    }
     return result;
 }
 
@@ -221,150 +232,113 @@ bool GXTEditor::saveToFile(const std::string& path) {
 // 保存GTA VC格式 (GXT1) - 完全符合Python版本规范
 bool GXTEditor::saveAsGTA_VC(const std::string& path) {
     try {
-        std::cerr << "DEBUG: saveAsGTA_VC called with path: " << path << std::endl;
-        std::cerr << "DEBUG: Number of tables: " << tables.size() << std::endl;
-        
-        for (size_t i = 0; i < tables.size(); ++i) {
-            std::cerr << "DEBUG: Table " << i << ": " << tables[i].name << " with " << tables[i].entries.size() << " entries" << std::endl;
-        }
-        
         std::ofstream file = openFileForWriting(path);
         if (!file.is_open()) {
             std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
-            std::cerr << "Error: Possible reasons: path invalid, permission denied, or directory does not exist" << std::endl;
             return false;
         }
-        
-        std::cerr << "DEBUG: File opened successfully" << std::endl;
 
-        // 写入TABL头部 - Python版本没有版本头，直接从TABL开始
+        // 步骤1: 排序表 (MAIN优先，其他按字典序)
+        auto sorted_tables = tables;
+        std::sort(sorted_tables.begin(), sorted_tables.end(),
+            [](const GXTTable& a, const GXTTable& b) {
+                if (a.name == "MAIN") return true;
+                if (b.name == "MAIN") return false;
+                return a.name < b.name;
+            });
+
+        // 步骤2: 写入TABL头部
         file.write("TABL", 4);
-        uint32_t tablSize = static_cast<uint32_t>(tables.size() * 12); // 每个表12字节
-        file.write(reinterpret_cast<const char*>(&tablSize), sizeof(tablSize));
-        
-        // 预留TABL块空间，直接跳到数据区域
-        file.seekp(8 + tablSize, std::ios::beg);
-        if (!file.good()) {
-            std::cerr << "Error: Failed to seek in file" << std::endl;
-            return false;
-        }
-        
-        // 记录所有表的偏移量
-        std::unordered_map<std::string, uint32_t> tableOffsets;
+        uint32_t table_block_size = static_cast<uint32_t>(sorted_tables.size() * 12);
+        file.write(reinterpret_cast<const char*>(&table_block_size), sizeof(table_block_size));
 
-        // 处理每个表
-        for (const auto& table : tables) {
+        // 步骤3: 预留TABL块空间
+        std::map<std::string, uint32_t> table_offsets;
+        file.seekp(8 + table_block_size, std::ios::beg);
+
+        // 步骤4: 处理每个表
+        for (const auto& table : sorted_tables) {
             // 记录当前表位置
-            tableOffsets[table.name] = static_cast<uint32_t>(file.tellp());
+            table_offsets[table.name] = static_cast<uint32_t>(file.tellp());
 
-            // 写入表名（如果不是MAIN表）
+            // 如果不是MAIN表，先写8字节表名
             if (table.name != "MAIN") {
-                file.write(table.name.c_str(), (std::min)(table.name.size(), (size_t)8));
-                // 填充剩余字节到8字节
-                for (size_t i = table.name.size(); i < 8; ++i) {
-                    file.put('\0');
-                }
+                std::string name_padded = table.name;
+                if (name_padded.size() > 8) name_padded.resize(8);
+                name_padded.resize(8, '\0');
+                file.write(name_padded.c_str(), 8);
             }
-            
-            // 写入TKEY头部
-            file.write("TKEY", 4);
-            uint32_t keyBlockSize = static_cast<uint32_t>(table.entries.size() * 12); // VC格式: 偏移(4) + key(8) = 12字节
-            file.write(reinterpret_cast<const char*>(&keyBlockSize), sizeof(keyBlockSize));
-            
-            if (!file.good()) {
-                std::cerr << "Error: Failed to write TKEY header" << std::endl;
-                return false;
-            }
-            
-            // 预留TKEY条目空间
-            std::streampos keyEntriesPos = file.tellp();
-            file.seekp(keyBlockSize, std::ios::cur);
-            
-            // 写入TDAT头部
-            uint32_t dataBlockSize = 0;
-            std::vector<std::string> convertedValues; // 存储所有转换后的字符串
 
-            for (const auto& entry : table.entries) {
-                // 将UTF-8转换为UTF-16LE
-                auto utf16Data = utf8_to_utf16le(entry.value);
-                convertedValues.push_back(utf16Data);
-                // 计算正确的TDAT大小
-                dataBlockSize += static_cast<uint32_t>(utf16Data.size());
-            }
-            
+            // 写TKEY头部
+            file.write("TKEY", 4);
+            uint32_t key_block_size = static_cast<uint32_t>(table.entries.size() * 12);  // offset(4) + key(8) = 12
+            file.write(reinterpret_cast<const char*>(&key_block_size), sizeof(key_block_size));
+
+            // 预留TKEY条目空间（记录起始位置，然后相对跳过）
+            uint32_t key_entries_pos = static_cast<uint32_t>(file.tellp());
+            file.seekp(key_block_size, std::ios::cur);  // 相对跳过，就像Python的 f.seek(key_block_size, 1)
+
+            // 写TDAT头部
             file.write("TDAT", 4);
-            file.write(reinterpret_cast<const char*>(&dataBlockSize), sizeof(dataBlockSize));
             
-            if (!file.good()) {
-                std::cerr << "Error: Failed to write TDAT header" << std::endl;
-                std::cerr << "File state - good: " << file.good() << ", eof: " << file.eof() 
-                         << ", fail: " << file.fail() << ", bad: " << file.bad() << std::endl;
-                return false;
+            // 预计算TDAT块大小
+            uint32_t data_block_size = 0;
+            std::vector<std::vector<uint16_t>> converted_values;
+            for (const auto& entry : table.entries) {
+                auto utf16Data = utf8_to_utf16le_vector(entry.value);
+                converted_values.push_back(utf16Data);
+                data_block_size += static_cast<uint32_t>(utf16Data.size() * 2);
             }
             
-            std::cerr << "DEBUG: TDAT header written successfully" << std::endl;
-            
-            std::streampos tdatStart = file.tellp();
-            
+            file.write(reinterpret_cast<const char*>(&data_block_size), sizeof(data_block_size));
+            uint32_t tdat_start = static_cast<uint32_t>(file.tellp());
+
             // 写入字符串数据并记录偏移
-            std::vector<std::pair<std::string, uint32_t>> keyOffsets;
+            std::vector<std::pair<std::string, uint32_t>> key_offsets;
             for (size_t i = 0; i < table.entries.size(); ++i) {
                 const auto& entry = table.entries[i];
-                const auto& utf16Data = convertedValues[i];
-                
-                uint32_t offset = static_cast<uint32_t>(file.tellp()) - static_cast<uint32_t>(tdatStart);
-                keyOffsets.push_back({entry.key, offset});
-                
+                const auto& utf16Data = converted_values[i];
+
+                // 计算偏移量（相对于TDAT数据开始）
+                uint32_t offset = static_cast<uint32_t>(file.tellp()) - tdat_start;
+                key_offsets.push_back({entry.key, offset});
+
                 // 写入UTF-16LE数据
                 for (uint16_t code : utf16Data) {
                     file.write(reinterpret_cast<const char*>(&code), sizeof(uint16_t));
                 }
             }
-            
-            if (!file.good()) {
-                std::cerr << "Error: Failed to write TDAT data" << std::endl;
-                return false;
-            }
-            
+
             // 回填TKEY条目
-            file.seekp(keyEntriesPos);
-            for (const auto& [key, offset] : keyOffsets) {
+            file.seekp(key_entries_pos, std::ios::beg);
+            for (const auto& [key, offset] : key_offsets) {
+                // 写入offset（4字节）
                 file.write(reinterpret_cast<const char*>(&offset), sizeof(offset));
-                // 写入key，填充到8字节
-                file.write(key.c_str(), (std::min)(key.size(), (size_t)8));
-                for (size_t i = key.size(); i < 8; ++i) {
-                    file.put('\0');
-                }
+                // 写入key（8字节，填充）
+                std::string key_padded = key;
+                if (key_padded.size() > 8) key_padded.resize(8);
+                key_padded.resize(8, '\0');
+                file.write(key_padded.c_str(), 8);
             }
-            
-            if (!file.good()) {
-                std::cerr << "Error: Failed to write TKEY entries" << std::endl;
-                return false;
-            }
-            
-            file.seekp(0, std::ios::end); // 回到文件末尾
+
+            // 回到文件末尾
+            file.seekp(0, std::ios::end);
         }
-        
-        // 回填TABL条目
+
+        // 步骤5: 回填TABL条目
         file.seekp(8, std::ios::beg);
-        for (const auto& table : tables) {
-            // 写入表名，填充到8字节
-            file.write(table.name.c_str(), (std::min)(table.name.size(), (size_t)8));
-            for (size_t i = table.name.size(); i < 8; ++i) {
-                file.put('\0');
-            }
-            // 写入偏移量
-            uint32_t offset = tableOffsets[table.name];
+        for (const auto& table : sorted_tables) {
+            // 写入表名（8字节，填充）
+            std::string name_padded = table.name;
+            if (name_padded.size() > 8) name_padded.resize(8);
+            name_padded.resize(8, '\0');
+            file.write(name_padded.c_str(), 8);
+            // 写入偏移量（4字节）
+            uint32_t offset = table_offsets[table.name];
             file.write(reinterpret_cast<const char*>(&offset), sizeof(offset));
         }
-        
-        if (!file.good()) {
-            std::cerr << "Error: Failed to write TABL entries" << std::endl;
-            return false;
-        }
-        
+
         file.close();
-        std::cerr << "DEBUG: saveAsGTA_VC completed successfully, file saved" << std::endl;
         return true;
     }
     catch (const std::exception& e) {
@@ -1025,12 +999,12 @@ bool GXTEditor::saveAsGTA_III(const std::string& path) {
         uint32_t key_block_size = entry_count * 12; // 每个条目12字节：偏移(4) + 键(7) + null(1)
 
         // 预计算TDAT数据大小
-        std::vector<std::string> convertedValues;
+        std::vector<std::vector<uint16_t>> convertedValues;
         uint32_t data_block_size = 0;
         for (const auto& [key, value] : all_entries) {
-            auto utf16Data = utf8_to_utf16le(value);
+            auto utf16Data = utf8_to_utf16le_vector(value);
             convertedValues.push_back(utf16Data);
-            data_block_size += static_cast<uint32_t>(utf16Data.size());
+            data_block_size += static_cast<uint32_t>(utf16Data.size() * 2);
         }
         
         // 写入TKEY块头（没有版本头，直接开始）
@@ -1191,14 +1165,8 @@ bool GXTEditor::saveAsGTA_IV(const std::string& path) {
              
             for (const auto& entry : table.entries) {
                 str_offsets.push_back(cur_off);
-                // utf8_to_utf16le返回std::string，但我们需要转换为vector<uint16_t>
-                std::string utf16Str = utf8_to_utf16le(entry.value);
-                std::vector<uint16_t> utf16Data;
-                // 将字符串转换为uint16_t向量
-                for (size_t i = 0; i + 1 < utf16Str.size(); i += 2) {
-                    uint16_t code = static_cast<uint16_t>(utf16Str[i]) | (static_cast<uint16_t>(utf16Str[i + 1]) << 8);
-                    utf16Data.push_back(code);
-                }
+                // 转换为UTF-16LE整数列表
+                auto utf16Data = utf8_to_utf16le_vector(entry.value);
                 convertedValues.push_back(utf16Data);
                 cur_off += static_cast<uint32_t>(utf16Data.size() * 2); // UTF-16LE数据长度
             }
