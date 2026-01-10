@@ -1004,7 +1004,7 @@ bool GXTEditor::saveAsGTA_III(const std::string& path) {
         }
 
         // GTA III没有版本头，直接从TKEY块开始（像Python版本一样）
-        
+
         // 收集所有条目并按键排序（GTA III使用字典序）
         std::vector<std::pair<std::string, std::string>> all_entries;
         for (const auto& table : tables) {
@@ -1012,7 +1012,7 @@ bool GXTEditor::saveAsGTA_III(const std::string& path) {
                 all_entries.push_back({entry.key, entry.value});
             }
         }
-        
+
         // 按键名字典序排序
         std::sort(all_entries.begin(), all_entries.end(),
             [](const auto& a, const auto& b) {
@@ -1031,16 +1031,16 @@ bool GXTEditor::saveAsGTA_III(const std::string& path) {
             convertedValues.push_back(utf16Data);
             data_block_size += static_cast<uint32_t>(utf16Data.size() * 2);
         }
-        
+
         // 写入TKEY块头（没有版本头，直接开始）
         file.write("TKEY", 4);
         file.write(reinterpret_cast<const char*>(&key_block_size), sizeof(key_block_size));
-        
+
         // 预留TKEY条目空间，跳到TDAT块头位置
         file.seekp(8 + key_block_size);
         file.write("TDAT", 4);
         file.write(reinterpret_cast<const char*>(&data_block_size), sizeof(data_block_size));
-        
+
         // 计算数据起始位置
         uint32_t data_start_pos = 8 + key_block_size + 8; // TKEY头+TKEY数据+TDAT头
         uint32_t current_data_pos = data_start_pos;
@@ -1058,19 +1058,27 @@ bool GXTEditor::saveAsGTA_III(const std::string& path) {
             file.seekp(tkey_entry_pos);
             file.write(reinterpret_cast<const char*>(&offset), sizeof(offset));
 
-            // 写入键名字（7字节ASCII + 1字节null）
-            std::string key_padded = k;
-            if (key_padded.size() > 7) key_padded.resize(7);
-            key_padded.resize(7, '\0'); // 填充到7字节
+            // 写入键名字（7字节ASCII + 1字节null）- 完全按照Python的ljust(7, '\x00')方式
+            std::string key_padded;
+            key_padded.reserve(7);
+            key_padded.append(k);
+            // 如果长度不足7，用null字符左填充
+            while (key_padded.size() < 7) {
+                key_padded.push_back('\0');
+            }
+            // 如果长度超过7，截断到7
+            if (key_padded.size() > 7) {
+                key_padded.resize(7);
+            }
             file.write(key_padded.c_str(), 7);
             file.put('\0'); // 第8字节是null
-            
-            // 写入字符串数据到当前位置
+
+            // 写入字符串数据到当前位置（按照Python的struct.pack('<H', char)写入）
             file.seekp(current_data_pos);
             for (uint16_t code : utf16Data) {
                 file.write(reinterpret_cast<const char*>(&code), sizeof(uint16_t));
             }
-            
+
             // 更新当前位置
             current_data_pos += static_cast<uint32_t>(utf16Data.size() * 2);
         }
