@@ -40,14 +40,28 @@
 // 字符串转换函数
 std::string qstring_to_ansi(const QString& qstr) {
     if (qstr.isEmpty()) return "";
-    
+
     std::wstring wstr = qstr.toStdWString();
     int size = WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), (int)wstr.length(), nullptr, 0, nullptr, nullptr);
     if (size <= 0) return "";
-    
+
     std::string result(size, 0);
     WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), (int)wstr.length(), &result[0], size, nullptr, nullptr);
     return result;
+}
+
+// 标准化键（移除x、0x、0X前缀）
+std::string normalizeKeyStdString(const std::string& key) {
+    std::string normalized = key;
+    // 移除0x或0X前缀
+    if (normalized.length() >= 2 && (normalized.substr(0, 2) == "0x" || normalized.substr(0, 2) == "0X")) {
+        normalized = normalized.substr(2);
+    }
+    // 移除x前缀（兼容旧格式）
+    else if (normalized.length() >= 1 && normalized[0] == 'x') {
+        normalized = normalized.substr(1);
+    }
+    return normalized;
 }
 
 // MultiThreadProgressDialog 实现 - 简约高效设计
@@ -3433,7 +3447,9 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
 
     // 添加新条目
     GXTEntry newEntry;
-    newEntry.key = keyText.toStdString();
+    // 标准化键（移除x、0x、0X前缀）
+    std::string normalizedKey = normalizeKeyStdString(keyText.toStdString());
+    newEntry.key = normalizedKey;
     newEntry.value = valueText.toStdString();
     currentTable.entries.push_back(newEntry);
 

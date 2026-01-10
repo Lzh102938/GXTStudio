@@ -153,10 +153,15 @@ static uint32_t calculateJOAAT(const std::string& input) {
     return hash;
 }
 
-// 标准化键（去掉x前缀）
+// 标准化键（去掉x前缀或0x前缀）
 std::string GXTEditor::normalizeKey(const std::string& key) const {
     std::string normalized = key;
-    if (normalized.length() >= 1 && normalized[0] == 'x') {
+    // 移除0x或0X前缀
+    if (normalized.length() >= 2 && (normalized.substr(0, 2) == "0x" || normalized.substr(0, 2) == "0X")) {
+        normalized = normalized.substr(2);
+    }
+    // 移除x前缀（兼容旧格式）
+    else if (normalized.length() >= 1 && normalized[0] == 'x') {
         normalized = normalized.substr(1);
     }
     return normalized;
@@ -392,7 +397,8 @@ bool GXTEditor::saveAsGTA_SA(const std::string& path) {
             uint32_t key_size = static_cast<uint32_t>(table.entries.size() * 8);
             uint32_t data_size = 0;
             for (const auto& entry : table.entries) {
-                data_size += static_cast<uint32_t>(entry.value.size() + 1); // +1 for null terminator
+                // UTF-8编码：每个字符1字节 + null终止符1字节
+                data_size += static_cast<uint32_t>(entry.value.size() + 1);
             }
             table_info.push_back({table.name, table.entries, key_size, data_size});
         }
@@ -401,6 +407,9 @@ bool GXTEditor::saveAsGTA_SA(const std::string& path) {
         uint32_t fo_table_block = 12;  // TABL条目写入位置 (从12开始)
         uint32_t fo_key_block = 12 + table_block_size;  // TKEY块数据起始位置
         uint32_t key_block_offset = fo_key_block;  // 当前表的TKEY块偏移（记录在TABL中）
+
+        // 调试信息
+        std::cerr << "Saving GXT file with " << sorted_tables.size() << " tables" << std::endl;
 
         // Step 7: 处理每个表
         for (const auto& info : table_info) {
@@ -413,70 +422,76 @@ bool GXTEditor::saveAsGTA_SA(const std::string& path) {
             f.write(reinterpret_cast<const char*>(&key_block_offset), 4);
             fo_table_block += 12;
 
-            // 7.2: 写TKEY块头
+            // 7.2: 写TKEY块头 (表名前缀 + TKEY标记 + 大小)
             f.seekp(fo_key_block);
-            
-            // 对于非MAIN表，写表名前缀 (8字节)
+
+            // 对于非MAIN表，先写8字节表名
             if (info.table_name != "MAIN") {
                 f.write(table_name_padded.c_str(), 8);
             }
-            
+
             // 写TKEY标签和大小
             f.write("TKEY", 4);
             f.write(reinterpret_cast<const char*>(&info.key_block_size), 4);
-            
-            // 记录TKEY数据写入位置
-            uint32_t tkey_data_pos = static_cast<uint32_t>(f.tellp());
-            
-            // 相对跳过TKEY条目空间 (为数据腾出空间)
+
+            // 记录TKEY数据写入位置 (紧随TKEY头之后)
+            uint32_t fo_key_data = static_cast<uint32_t>(f.tellp());
+
+            // 相对跳过TKEY条目空间
             f.seekp(info.key_block_size, std::ios::cur);
 
             // 7.3: 写TDAT块头
             f.write("TDAT", 4);
             f.write(reinterpret_cast<const char*>(&info.data_block_size), 4);
-            
-            // 记录TDAT数据写入位置
-            uint32_t tdat_data_pos = static_cast<uint32_t>(f.tellp());
 
-            // 7.4: 构建TKEY和TDAT数据缓冲区
+            // 记录TDAT数据写入位置 (紧随TDAT头之后)
+            uint32_t tdat_offset = static_cast<uint32_t>(f.tellp());
+
+            // 7.4: 按照C++参考代码的方式逐条写入数据
             // 先创建条目与哈希的映射，便于排序
             struct KeyEntry {
                 uint32_t hash;
                 const GXTTableEntry* entry;
             };
             std::vector<KeyEntry> sorted_entries;
-            
+
+            std::cerr << "  Processing table '" << info.table_name << "' with " << info.entries.size() << " entries" << std::endl;
+
             for (const auto& entry : info.entries) {
-                // 对于GTA SA，直接解析十六进制键（键已经被标准化，没有0x前缀）
+                // 使用normalizeKey来移除所有可能的前缀（x、0x、0X）
+                std::string key_str = normalizeKey(entry.key);
+
                 uint32_t hash_key;
                 try {
-                    hash_key = std::stoul(entry.key, nullptr, 16);
+                    // 解析十六进制键
+                    hash_key = std::stoul(key_str, nullptr, 16);
                 } catch (const std::exception& e) {
-                    std::cerr << "Warning: Failed to convert key '" << entry.key << "': " << e.what() << std::endl;
+                    std::cerr << "Warning: Failed to convert key '" << entry.key << "' (normalized: '" << key_str << "'): " << e.what() << std::endl;
                     hash_key = 0;
                 }
                 sorted_entries.push_back({hash_key, &entry});
             }
-            
+
             // 按哈希值排序(GTA SA规范要求)
             std::sort(sorted_entries.begin(), sorted_entries.end(),
                 [](const KeyEntry& a, const KeyEntry& b) {
                     return a.hash < b.hash;
                 });
 
-            // 构建TKEY和TDAT数据缓冲区
-            std::vector<uint8_t> key_data;
-            std::vector<uint8_t> data_blocks;
-            
+            std::cerr << "  Writing " << sorted_entries.size() << " entries..." << std::endl;
+
+            // 按照Python参考代码批量写入TKEY和TDAT数据
+            std::vector<uint8_t> key_data;  // TKEY数据缓冲区
+            std::vector<std::vector<uint8_t>> data_blocks;  // TDAT数据块列表
+            uint32_t total_data_size = 0;  // 累计TDAT数据大小
+
             for (const auto& key_entry : sorted_entries) {
-                // 计算当前条目在TDAT中的偏移
-                uint32_t data_offset = static_cast<uint32_t>(data_blocks.size());
+                // 计算当前条目在TDAT中的偏移（从0开始，累加前面所有数据块大小）
+                uint32_t data_offset = total_data_size;
 
-                // 使用已解析的哈希值
-                uint32_t hash_key = key_entry.hash;
-
-                // 构建TKEY条目 (4字节偏移 + 4字节哈希值)
+                // 构建TKEY条目（4字节偏移 + 4字节哈希）
                 uint8_t* offset_ptr = reinterpret_cast<uint8_t*>(&data_offset);
+                uint32_t hash_key = key_entry.hash;  // 复制到非const变量
                 uint8_t* hash_ptr = reinterpret_cast<uint8_t*>(&hash_key);
                 for (int i = 0; i < 4; ++i) {
                     key_data.push_back(offset_ptr[i]);
@@ -484,27 +499,37 @@ bool GXTEditor::saveAsGTA_SA(const std::string& path) {
                 for (int i = 0; i < 4; ++i) {
                     key_data.push_back(hash_ptr[i]);
                 }
-                
-                // 构建TDAT数据 (UTF-8编码 + null终止符)
-                for (char c : key_entry.entry->value) {
-                    data_blocks.push_back(static_cast<uint8_t>(c));
+
+                std::cerr << "    Key: " << key_entry.entry->key << " -> Hash: 0x" << std::hex << key_entry.hash << std::dec
+                          << ", Offset: " << data_offset << std::endl;
+
+                // 构建TDAT数据块（UTF-8编码 + null终止符）
+                const std::string& value = key_entry.entry->value;
+                std::vector<uint8_t> data_block;
+                data_block.reserve(value.size() + 1);
+                for (char c : value) {
+                    data_block.push_back(static_cast<uint8_t>(c));
                 }
-                data_blocks.push_back('\0');
+                data_block.push_back('\0');  // 添加null终止符
+                data_blocks.push_back(data_block);
+
+                // 累加数据大小
+                total_data_size += static_cast<uint32_t>(data_block.size());
             }
 
-            // 7.5: 回写TKEY数据
-            f.seekp(tkey_data_pos);
+            // 批量写入TKEY数据
+            f.seekp(fo_key_data);
             if (!key_data.empty()) {
                 f.write(reinterpret_cast<const char*>(key_data.data()), key_data.size());
             }
 
-            // 7.6: 回写TDAT数据
-            f.seekp(tdat_data_pos);
-            if (!data_blocks.empty()) {
-                f.write(reinterpret_cast<const char*>(data_blocks.data()), data_blocks.size());
+            // 批量写入TDAT数据
+            f.seekp(tdat_offset);
+            for (const auto& data_block : data_blocks) {
+                f.write(reinterpret_cast<const char*>(data_block.data()), data_block.size());
             }
 
-            // 7.7: 更新下一个表的位置
+            // 7.5: 更新下一个表的位置
             fo_key_block = static_cast<uint32_t>(f.tellp());
             key_block_offset = fo_key_block;
         }
@@ -1080,7 +1105,7 @@ bool GXTEditor::saveAsGTA_IV(const std::string& path) {
 
         // 按照Python版本排序：MAIN表优先
         std::vector<size_t> tableOrder;
-        
+
         // 首先处理MAIN表
         for (size_t i = 0; i < tables.size(); ++i) {
             if (tables[i].name == "MAIN") {
@@ -1088,7 +1113,7 @@ bool GXTEditor::saveAsGTA_IV(const std::string& path) {
                 break;
             }
         }
-        
+
         // 然后处理其他表
         for (size_t i = 0; i < tables.size(); ++i) {
             if (tables[i].name != "MAIN") {
@@ -1121,11 +1146,12 @@ bool GXTEditor::saveAsGTA_IV(const std::string& path) {
             uint32_t tkey_data_size = static_cast<uint32_t>(table.entries.size() * 8); // 偏移(4) + 哈希(4) = 8字节
             file_offset += 8 + tkey_data_size; // 含头+数据
 
-            // TDAT
+            // TDAT - 按照Python代码计算：len(text.encode('utf-16le')) + 2
             uint32_t str_total_len = 0;
             for (const auto& entry : table.entries) {
-                auto utf16Data = utf8_to_utf16le(entry.value);
-                str_total_len += static_cast<uint32_t>(utf16Data.size() * 2); // UTF-16LE数据长度
+                auto utf16Data = utf8_to_utf16le(entry.value);  // 返回UTF-16LE字节串
+                // UTF-16LE数据长度 + 2字节null终止符
+                str_total_len += static_cast<uint32_t>(utf16Data.size() + 2);
             }
             file_offset += 8 + str_total_len; // 含头+数据
         }
@@ -1161,23 +1187,31 @@ bool GXTEditor::saveAsGTA_IV(const std::string& path) {
             // 计算字符串偏移量
             std::vector<uint32_t> str_offsets;
             uint32_t cur_off = 0;
-            std::vector<std::vector<uint16_t>> convertedValues;
-             
+            std::vector<std::vector<uint8_t>> data_blocks;  // 存储UTF-16LE数据块
+
             for (const auto& entry : table.entries) {
                 str_offsets.push_back(cur_off);
-                // 转换为UTF-16LE整数列表
-                auto utf16Data = utf8_to_utf16le_vector(entry.value);
-                convertedValues.push_back(utf16Data);
-                cur_off += static_cast<uint32_t>(utf16Data.size() * 2); // UTF-16LE数据长度
+                // 转换为UTF-16LE字节数组
+                auto utf16Data = utf8_to_utf16le(entry.value);
+                std::vector<uint8_t> data_block;
+                data_block.reserve(utf16Data.size() + 2);
+                for (char c : utf16Data) {
+                    data_block.push_back(static_cast<uint8_t>(c));
+                }
+                // 添加2字节null终止符
+                data_block.push_back(0x00);
+                data_block.push_back(0x00);
+                data_blocks.push_back(data_block);
+                cur_off += static_cast<uint32_t>(data_block.size());
             }
 
-            // 写入TKEY条目 (偏移+ 哈希)
+            // 写入TKEY条目 (偏移 + 哈希)
             for (size_t i = 0; i < table.entries.size(); ++i) {
                 const auto& entry = table.entries[i];
-                
+
                 // 写入偏移
                 file.write(reinterpret_cast<const char*>(&str_offsets[i]), sizeof(str_offsets[i]));
-                
+
                 // 键的哈希值就是键字符串本身（忽略0x前缀），但需要作为字节数值写入
                 std::string normalizedKey = normalizeKey(entry.key);
                 uint32_t hash_val;
@@ -1193,16 +1227,14 @@ bool GXTEditor::saveAsGTA_IV(const std::string& path) {
             // 写入TDAT块头
             file.write("TDAT", 4);
             uint32_t tdat_data_size = 0;
-            for (const auto& utf16Data : convertedValues) {
-                tdat_data_size += static_cast<uint32_t>(utf16Data.size() * 2);
+            for (const auto& data_block : data_blocks) {
+                tdat_data_size += static_cast<uint32_t>(data_block.size());
             }
             file.write(reinterpret_cast<const char*>(&tdat_data_size), sizeof(tdat_data_size));
 
             // 写入TDAT数据
-            for (const auto& utf16Data : convertedValues) {
-                for (uint16_t code : utf16Data) {
-                    file.write(reinterpret_cast<const char*>(&code), sizeof(uint16_t));
-                }
+            for (const auto& data_block : data_blocks) {
+                file.write(reinterpret_cast<const char*>(data_block.data()), data_block.size());
             }
         }
 
