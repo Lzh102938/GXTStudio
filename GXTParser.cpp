@@ -1102,3 +1102,114 @@ void GXTParser::exportWHMToTxt(const std::string& whmPath, const std::string& tx
     }
     out.write(buf.data(), (std::streamsize)buf.size());
 }
+
+// DAT文件解析方法（完全独立于WHM）
+// DAT格式：条目数(uint32) | 条目表(hash+offset) | blob大小(uint32) | 文本数据块
+bool GXTParser::parseDAT(const std::string& filePath, std::vector<DATEntry>& outEntries) const {
+    addParseLog("开始解析DAT文件: " + filePath);
+    
+    FILE* f = nullptr;
+    fopen_s(&f, filePath.c_str(), "rb");
+    if (!f) {
+        addParseLog("无法打开文件");
+        return false;
+    }
+
+    // 读取条目数量
+    uint32_t count = read_u32(f);
+    addParseLog("DAT文件包含 " + std::to_string(count) + " 个条目");
+    
+    // 预分配entries向量
+    std::vector<DATEntry> entries;
+    entries.reserve(count);
+    
+    // 读取条目（hash + offset）
+    for (uint32_t i = 0; i < count; i++) {
+        DATEntry entry;
+        entry.hash = read_u32(f);
+        entry.offset = read_u32(f);
+        entries.push_back(std::move(entry));
+    }
+
+    // 读取blob大小
+    uint32_t blob_size = read_u32(f);
+    long blob_start = ftell(f);
+    addParseLog("文本数据块大小 " + std::to_string(blob_size) + " 字节");
+
+    // 读取所有文本数据（一次性读取以提高速度）
+    std::unique_ptr<char[]> blob(new char[blob_size]);
+    size_t readn = fread(blob.get(), 1, blob_size, f);
+    if (readn != static_cast<size_t>(blob_size)) {
+        addParseLog("实际读取文本数据大小: " + std::to_string(readn) + " 字节");
+    }
+
+    // 解析每个条目的文本（使用 memchr 查找终止符）
+    int decodedCount = 0;
+    for (auto& entry : entries) {
+        if (static_cast<size_t>(entry.offset) < readn) {
+            const char* ptr = blob.get() + entry.offset;
+            size_t maxlen = readn - entry.offset;
+            const char* nul = (const char*)memchr(ptr, 0, maxlen);
+            size_t len = nul ? (size_t)(nul - ptr) : maxlen;
+            if (len == 0) {
+                entry.text.clear();
+            } else {
+                std::string raw;
+                raw.assign(ptr, len);
+                entry.text = this->guess_decode(raw);
+                decodedCount++;
+            }
+        } else {
+            entry.text = "[BINARY]";
+        }
+    }
+    
+    addParseLog("成功解码 " + std::to_string(decodedCount) + " 个DAT条目");
+
+    fclose(f);
+    outEntries = std::move(entries);
+    return true;
+}
+
+// DAT文件导出为文本
+void GXTParser::exportDATToTxt(const std::string& datPath, const std::string& txtPath) const {
+    std::vector<DATEntry> entries;
+    if (!parseDAT(datPath, entries)) {
+        addParseLog("无法解析DAT文件: " + datPath);
+        return;
+    }
+
+    // 按哈希值排序以保持输出一致
+    std::sort(entries.begin(), entries.end(), 
+        [](const DATEntry& a, const DATEntry& b) { return a.hash < b.hash; });
+
+    // 预分配输出缓冲（减少磁盘 I/O），换行使用 CRLF
+    size_t total = 0;
+    for (const auto& e : entries) {
+        total += 2 + 8 + 1; // 0x + 8 hex digits + '='
+        total += e.text.size();
+        total += 2; // CRLF
+    }
+    std::string buf;
+    buf.reserve(total + 16);
+
+    char hexbuf[16];
+    for (const auto& entry : entries) {
+        // 快速格式化 0xXXXXXXXX
+        int n = snprintf(hexbuf, sizeof(hexbuf), "0x%08X", entry.hash);
+        buf.append(hexbuf, n);
+        buf.push_back('=');
+        buf.append(entry.text);
+        buf.append("\r\n");
+    }
+
+    // 一次性写入
+    std::ofstream out(txtPath, std::ios::binary);
+    if (!out) {
+        addParseLog("无法创建输出文件: " + txtPath);
+        return;
+    }
+    out.write(buf.data(), (std::streamsize)buf.size());
+    addParseLog("DAT导出完成: " + txtPath);
+}
+

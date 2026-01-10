@@ -275,7 +275,9 @@ struct FileTab {
     QString fileName;
     std::vector<GXTTabl> tables;
     std::vector<WHMEntry> whmEntries;
+    std::vector<DATEntry> datEntries;  // DAT文件条目（完全独立于WHM）
     bool isWHM = false;
+    bool isDAT = false;  // 区分DAT和WHM文件
     bool isModified = false;
     int currentTableIndex = 0;
     GXTVersion version = GXTVersion::UNKNOWN; // 文件版本信息
@@ -522,6 +524,7 @@ struct ParseTask {
     QString fileName;
     std::string narrowPath;
     bool isWHM;
+    bool isDAT;  // 完全区分DAT和WHM
     int tabIndex;
 };
 
@@ -531,8 +534,10 @@ struct ParseResult {
     QString filePath;
     QString fileName;
     bool isWHM;
+    bool isDAT;  // 完全区分DAT和WHM
     std::vector<GXTTabl> tables;
     std::vector<WHMEntry> whmEntries;
+    std::vector<DATEntry> datEntries;  // DAT条目（完全独立）
     QString errorMessage;
     int tabIndex;
     QElapsedTimer parseTime;
@@ -555,6 +560,7 @@ public slots:
         result.filePath = task.filePath;
         result.fileName = task.fileName;
         result.isWHM = task.isWHM;
+        result.isDAT = task.isDAT;
         result.tabIndex = task.tabIndex;
         result.parseTime = timer;
         result.success = false;
@@ -568,7 +574,15 @@ public slots:
                 qDebug() << "解析日志:" << QString::fromStdString(msg);
             });
 
-            if (task.isWHM) {
+            if (task.isDAT) {
+                // 解析DAT文件（完全独立于WHM）
+                result.datEntries.clear();
+                result.success = parser.parseDAT(task.narrowPath, result.datEntries);
+                result.version = GXTVersion::UNKNOWN; // DAT文件没有版本信息
+                if (!result.success) {
+                    result.errorMessage = "DAT解析失败";
+                }
+            } else if (task.isWHM) {
                 // 解析WHM文件
                 result.whmEntries.clear();
                 result.success = parser.parseWHM(task.narrowPath, result.whmEntries);
@@ -633,6 +647,11 @@ public slots:
 private:
     // 保存WHM文件的辅助方法（用于SaveWorker）
     bool saveWHMDirectly(FileTab* tab, const std::string& path);
+    // DAT文件保存方法（完全独立于WHM）
+    bool saveDATDirectly(FileTab* tab, const std::string& path);
+    // Qt版本的保存方法，使用QString处理中文路径
+    bool saveWHMDirectlyQt(FileTab* tab, const QString& filePath);
+    bool saveDATDirectlyQt(FileTab* tab, const QString& filePath);
     
 signals:
     void saveProgress(int percentage, const QString& message);
@@ -992,6 +1011,7 @@ private:
     bool handleSaveError(const QString& operation, const std::exception& e, const QString& filePath);
     void logSaveOperation(const QString& operation, GXTVersion version, const QString& filePath, bool success);
     bool saveWHMDirectly(FileTab* tab, const QString& filePath);
+    bool saveDATDirectly(FileTab* tab, const QString& filePath);  // DAT文件保存方法（完全独立于WHM）
     
     // 版本兼容性检查
     std::vector<GXTVersion> getCompatibleVersions(GXTVersion sourceVersion);
@@ -1056,6 +1076,8 @@ public:
         m_currentTableIndex = m_tab->currentTableIndex;
         if (m_tab->isWHM) {
             m_cachedRowCount = static_cast<int>(m_tab->whmEntries.size());
+        } else if (m_tab->isDAT) {
+            m_cachedRowCount = static_cast<int>(m_tab->datEntries.size());
         } else if (m_currentTableIndex >= 0 && m_currentTableIndex < static_cast<int>(m_tab->tables.size())) {
             m_cachedRowCount = static_cast<int>(m_tab->tables[m_currentTableIndex].entries.size());
         } else {
@@ -1077,6 +1099,8 @@ public:
             // 【关键修复】根据最新的tab状态重新计算行数
             if (m_tab->isWHM) {
                 m_cachedRowCount = static_cast<int>(m_tab->whmEntries.size());
+            } else if (m_tab->isDAT) {
+                m_cachedRowCount = static_cast<int>(m_tab->datEntries.size());
             } else if (m_currentTableIndex >= 0 && m_currentTableIndex < static_cast<int>(m_tab->tables.size())) {
                 m_cachedRowCount = static_cast<int>(m_tab->tables[m_currentTableIndex].entries.size());
             } else {
@@ -1097,6 +1121,8 @@ public:
             int count = 0;
             if (m_tab->isWHM) {
                 count = static_cast<int>(m_tab->whmEntries.size());
+            } else if (m_tab->isDAT) {
+                count = static_cast<int>(m_tab->datEntries.size());
             } else if (!m_tab->tables.empty() && 
                        m_tab->currentTableIndex >= 0 && 
                        m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
@@ -1145,7 +1171,7 @@ public:
                     if (col == KeyColumn) {
                         // 缓存格式化结果
                         static thread_local QString hashStr;
-                        hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0')).toUpper();
+                        hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0'));
                         return hashStr;
                     } else {
                         // 安全地转换字符串，防止内存异常
@@ -1165,6 +1191,45 @@ public:
                 return QVariant();
             } catch (...) {
                 qWarning() << "Unknown exception during data access at row" << row;
+                return QVariant();
+            }
+        } else if (m_tab->isDAT) {
+            // DAT模式检查 - 与WHM完全独立处理
+            if (m_tab->datEntries.empty()) {
+                return QVariant();
+            }
+            
+            if (row < 0 || row >= static_cast<int>(m_tab->datEntries.size())) {
+                return QVariant();
+            }
+            
+            try {
+                // 显示和编辑角色
+                if (role == Qt::DisplayRole || role == Qt::EditRole) {
+                    const auto& entry = m_tab->datEntries[row];
+                    if (col == KeyColumn) {
+                        // 缓存格式化结果
+                        static thread_local QString hashStr;
+                        hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0'));
+                        return hashStr;
+                    } else {
+                        // 安全地转换字符串，防止内存异常
+                        try {
+                            return QString::fromStdString(entry.text);
+                        } catch (const std::exception& e) {
+                            qWarning() << "String conversion failed:" << e.what();
+                            return QStringLiteral("[转换失败]");
+                        } catch (...) {
+                            qWarning() << "Unknown exception during string conversion";
+                            return QStringLiteral("[未知错误]");
+                        }
+                    }
+                }
+            } catch (const std::exception& e) {
+                qWarning() << "DAT data access failed at row" << row << ":" << e.what();
+                return QVariant();
+            } catch (...) {
+                qWarning() << "Unknown exception during DAT data access at row" << row;
                 return QVariant();
             }
         } else {
@@ -1232,7 +1297,14 @@ public:
                     if (row < static_cast<int>(m_tab->whmEntries.size())) {
                         const auto& entry = m_tab->whmEntries[row];
                         tooltip = col == KeyColumn ? 
-                                  QString("0x%1").arg(entry.hash, 8, 16, QChar('0')).toUpper() :
+                                  QString("0x%1").arg(entry.hash, 8, 16, QChar('0')) :
+                                  QString::fromStdString(entry.text);
+                    }
+                } else if (m_tab->isDAT) {
+                    if (row < static_cast<int>(m_tab->datEntries.size())) {
+                        const auto& entry = m_tab->datEntries[row];
+                        tooltip = col == KeyColumn ? 
+                                  QString("0x%1").arg(entry.hash, 8, 16, QChar('0')) :
                                   QString::fromStdString(entry.text);
                     }
                 } else if (m_tab->currentTableIndex >= 0 && 
@@ -1260,8 +1332,9 @@ public:
     QVariant headerData(int section, Qt::Orientation orientation, int role = Qt::DisplayRole) const override {
         if (role != Qt::DisplayRole || orientation != Qt::Horizontal) return QVariant();
         static const QStringList whmHeaders = {"Hash", "值"};
+        static const QStringList datHeaders = {"Hash", "值"};  // DAT和WHM使用相同的表头
         static const QStringList gxtHeaders = {"键", "值"};
-        const QStringList& headers = (m_tab && m_tab->isWHM) ? whmHeaders : gxtHeaders;
+        const QStringList& headers = (m_tab && (m_tab->isWHM || m_tab->isDAT)) ? (m_tab->isDAT ? datHeaders : whmHeaders) : gxtHeaders;
         return (section < ColumnCount) ? headers[section] : QVariant();
     }
     
@@ -1291,6 +1364,16 @@ public:
                 if (row >= 0 && row < static_cast<int>(m_tab->whmEntries.size()) && 
                     !m_tab->whmEntries.empty() && col == ValueColumn) {
                     auto& entry = m_tab->whmEntries[row];
+                    if (entry.text != newValue) {
+                        entry.text = newValue;
+                        success = true;
+                    }
+                }
+            } else if (m_tab->isDAT) {
+                // DAT模式 - 与WHM完全独立
+                if (row >= 0 && row < static_cast<int>(m_tab->datEntries.size()) && 
+                    !m_tab->datEntries.empty() && col == ValueColumn) {
+                    auto& entry = m_tab->datEntries[row];
                     if (entry.text != newValue) {
                         entry.text = newValue;
                         success = true;

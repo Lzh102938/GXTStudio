@@ -32,6 +32,13 @@ struct WHMEntry {
     std::string text;
 };
 
+// DAT文件条目结构体（与WHMEntry分开，不混淆）
+struct DATEntry {
+    uint32_t hash;
+    uint32_t offset;
+    std::string text;
+};
+
 class GXTParser {
 private:
     std::vector<GXTTabl> tables;
@@ -55,6 +62,9 @@ public:
     void exportToTxt(const std::string& outDir) const;
     bool parseWHM(const std::string& filePath, std::vector<WHMEntry>& outEntries) const;
     void exportWHMToTxt(const std::string& whmPath, const std::string& txtPath) const;
+    // DAT文件处理方法（完全独立于WHM）
+    bool parseDAT(const std::string& filePath, std::vector<DATEntry>& outEntries) const;
+    void exportDATToTxt(const std::string& datPath, const std::string& txtPath) const;
     const std::vector<GXTTabl>& getTables() const { return tables; }
     void setLogCallback(std::function<void(const std::string&)> callback);
     void setEncoding(int encoding) { encodingType = encoding; }

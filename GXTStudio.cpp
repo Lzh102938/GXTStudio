@@ -1722,6 +1722,10 @@ void GXTStudio::saveAsFile()
         defaultExt = ".whm";
         filter = "WHM文件 (*.whm)";
         defaultPath = currentDir + "/" + baseName + "_copy" + defaultExt;
+    } else if (currentTab->isDAT) {
+        defaultExt = ".dat";
+        filter = "DAT文件 (*.dat)";
+        defaultPath = currentDir + "/" + baseName + "_copy" + defaultExt;
     } else if (currentTab->version != GXTVersion::UNKNOWN) {
         // GXT/GXT2文件，根据版本确定扩展名
         switch (currentTab->version) {
@@ -1776,6 +1780,9 @@ void GXTStudio::saveAsFile()
         if (currentTab->isWHM) {
             // 保存WHM文件
             success = saveWHMDirectly(currentTab, fileName);
+        } else if (currentTab->isDAT) {
+            // 保存DAT文件（与WHM类似，但完全独立）
+            success = saveDATDirectly(currentTab, fileName);
         } else {
             // 保存GXT文件
             GXTEditor editor;
@@ -1888,7 +1895,7 @@ void GXTStudio::exportCurrentFile()
                     if (i >= currentTab->whmEntries.size() || currentTab->whmEntries.empty()) break;
                     
                     const auto& entry = currentTab->whmEntries[i];
-                    QString hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0')).toUpper();
+                    QString hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0'));
                     QString line = QString("%1=%2").arg(hashStr, QString::fromStdString(entry.text));
                     allStream << line << Qt::endl;
                     
@@ -2315,7 +2322,7 @@ void GXTStudio::switchToTable(int newTableIndex)
 void GXTStudio::onAddTableClicked(const QModelIndex& index)
 {
     FileTab* currentTab = getCurrentTab();
-    if (!currentTab || currentTab->isWHM) return;
+    if (!currentTab || currentTab->isWHM || currentTab->isDAT) return;
     
     // 获取当前表名并建议一个新表名
     QString baseName = "新表";
@@ -2364,7 +2371,7 @@ void GXTStudio::onAddTableClicked(const QModelIndex& index)
 void GXTStudio::onEditTableName(const QModelIndex& index)
 {
     FileTab* currentTab = getCurrentTab();
-    if (!currentTab || currentTab->isWHM) return;
+    if (!currentTab || currentTab->isWHM || currentTab->isDAT) return;
     
     if (!index.isValid()) return;
     
@@ -2477,7 +2484,7 @@ void GXTStudio::performSearch(const QString& searchText)
             if (i >= tab->whmEntries.size() || tab->whmEntries.empty()) break;
             
             const auto& entry = tab->whmEntries[i];
-            QString text = QString("0x%1 %2").arg(entry.hash, 8, 16, QChar('0')).toUpper()
+            QString text = QString("0x%1 %2").arg(entry.hash, 8, 16, QChar('0'))
                            .arg(QString::fromStdString(entry.text));
             
             bool matched = false;
@@ -2697,7 +2704,7 @@ void GXTStudio::jumpToMatch(int matchIndex)
         }
         
         const auto& entry = tab->whmEntries[targetEntryIndex];
-        keyText = QString("0x%1").arg(entry.hash, 8, 16, QChar('0')).toUpper();
+        keyText = QString("0x%1").arg(entry.hash, 8, 16, QChar('0'));
         valueText = QString::fromStdString(entry.text);
     } else {
         tableName = QString::fromStdString(tab->tables[targetTableIndex].name);
@@ -4430,6 +4437,13 @@ void GXTStudio::updateTableList()
         tab->entryTableView->setUpdatesEnabled(true);
         tab->entryTableView->viewport()->update();
     }
+    
+    // 根据文件类型禁用/启用"添加表"按钮
+    // DAT和WHM文件不允许添加表
+    if (tab->addTableButton) {
+        tab->addTableButton->setEnabled(!tab->isWHM && !tab->isDAT);
+    }
+    
     updateStatusBar();
 }
 
@@ -4513,15 +4527,24 @@ void GXTStudio::updateStatusBar()
         // 显示文件版本信息
         if (currentTab->isWHM) {
             status += " | WHM";
+        } else if (currentTab->isDAT) {
+            status += " | DAT";
         } else {
             status += " | " + getVersionName(currentTab->version);
         }
 
-        int tableIndex = currentTab->currentTableIndex;
-        if (tableIndex >= 0 && tableIndex < static_cast<int>(currentTab->tables.size())) {
-            const auto& table = currentTab->tables[tableIndex];
-            status += " | 表: " + QString::fromStdString(table.name);
-            status += " | 条目: " + QString::number(table.entries.size());
+        // 显示条目数量（DAT和WHM都显示条目数）
+        if (currentTab->isWHM && !currentTab->whmEntries.empty()) {
+            status += " | 条目: " + QString::number(currentTab->whmEntries.size());
+        } else if (currentTab->isDAT && !currentTab->datEntries.empty()) {
+            status += " | 条目: " + QString::number(currentTab->datEntries.size());
+        } else {
+            int tableIndex = currentTab->currentTableIndex;
+            if (tableIndex >= 0 && tableIndex < static_cast<int>(currentTab->tables.size())) {
+                const auto& table = currentTab->tables[tableIndex];
+                status += " | 表: " + QString::fromStdString(table.name);
+                status += " | 条目: " + QString::number(table.entries.size());
+            }
         }
 
         if (currentTab->isModified) {
@@ -4571,8 +4594,9 @@ void GXTStudio::startAsyncParse(const QString& filePath)
     QFileInfo fileInfo(filePath);
     QString suffix = fileInfo.suffix().toLower();
 
-    // 判断文件类型
-    bool isWHM = (suffix == "whm" || suffix == "dat");
+    // 判断文件类型：完全区分DAT和WHM
+    bool isWHM = (suffix == "whm");
+    bool isDAT = (suffix == "dat");
 
     // 创建解析任务
     ParseTask task;
@@ -4580,9 +4604,10 @@ void GXTStudio::startAsyncParse(const QString& filePath)
     task.fileName = fileInfo.fileName();
     task.narrowPath = filePath.toLocal8Bit().toStdString();
     task.isWHM = isWHM;
+    task.isDAT = isDAT;
     task.tabIndex = static_cast<int>(m_fileTabs.size());
 
-    showLogMessage(QString("创建解析任务 - 索引: %1, WHM: %2").arg(task.tabIndex).arg(task.isWHM));
+    showLogMessage(QString("创建解析任务 - 索引: %1, WHM: %2, DAT: %3").arg(task.tabIndex).arg(task.isWHM).arg(task.isDAT));
 
     // 异步调用解析方法
     bool success = QMetaObject::invokeMethod(m_parseWorker, "parseFile",
@@ -4598,12 +4623,13 @@ void GXTStudio::startAsyncParse(const QString& filePath)
 
 void GXTStudio::onParseCompleted(const ParseResult& result)
 {
-    showLogMessage(QString("onParseCompleted 被调用 - 文件: %1, 成功: %2, 错误信息: %3, 表数量: %4, 条目数量: %5")
+    showLogMessage(QString("onParseCompleted 被调用 - 文件: %1, 成功: %2, 错误信息: %3, 表数量: %4, WHM条目: %5, DAT条目: %6")
                   .arg(result.fileName)
                   .arg(result.success)
                   .arg(result.errorMessage)
                   .arg(result.tables.size())
-                  .arg(result.isWHM ? result.whmEntries.size() : 0));
+                  .arg(result.isWHM ? result.whmEntries.size() : 0)
+                  .arg(result.isDAT ? result.datEntries.size() : 0));
 
     try {
         // 验证结果
@@ -4621,7 +4647,9 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
         tab.filePath = result.filePath;
         tab.tables = result.tables;
         tab.whmEntries = result.whmEntries;
+        tab.datEntries = result.datEntries;  // 设置DAT条目
         tab.isWHM = result.isWHM;
+        tab.isDAT = result.isDAT;  // 设置DAT标志
         tab.version = result.version;  // 设置版本信息
 
         // 插入到标签页列表
@@ -4635,10 +4663,11 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
         }
 
         // 诊断日志：确保版本信息被正确保存
-        showLogMessage(QString("版本信息已保存到FileTab - 版本: %1 (枚举值: %2), WHM: %3")
+        showLogMessage(QString("版本信息已保存到FileTab - 版本: %1 (枚举值: %2), WHM: %3, DAT: %4")
                       .arg(getVersionString(tab.version))
                       .arg(static_cast<int>(tab.version))
-                      .arg(tab.isWHM ? "是" : "否"));
+                      .arg(tab.isWHM ? "是" : "否")
+                      .arg(tab.isDAT ? "是" : "否"));
 
         // 计算解析时间
         qint64 parseTime = result.parseTime.elapsed();
@@ -4659,11 +4688,14 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
         // 立即确保右侧表格显示第一个表的内容
         const auto& fileTab = m_fileTabs[result.tabIndex];
         
-        if (!fileTab.isWHM && !fileTab.tables.empty()) {
+        if (!fileTab.isWHM && !fileTab.isDAT && !fileTab.tables.empty()) {
             // GXT文件：立即切换到第一个表
             switchToTable(0);
         } else if (fileTab.isWHM && !fileTab.whmEntries.empty()) {
             // WHM文件：立即更新表格
+            updateEntryTable();
+        } else if (fileTab.isDAT && !fileTab.datEntries.empty()) {
+            // DAT文件：立即更新表格（DAT和WHM使用相同的表格显示）
             updateEntryTable();
         }
         
@@ -6680,14 +6712,14 @@ bool GXTStudio::saveWHMDirectly(FileTab* tab, const QString& filePath)
         showLogMessage("错误：saveWHMDirectly - 不是WHM文件");
         return false;
     }
-    
+
     showLogMessage(QString("开始WHM直接保存 - 文件: %1, 条目数: %2")
                   .arg(filePath)
                   .arg(tab->whmEntries.size()));
     
     try {
         QFile file(filePath);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        if (!file.open(QIODevice::WriteOnly)) {
             QString errorMsg = QString("无法创建文件: %1 (错误: %2)")
                               .arg(filePath)
                               .arg(file.errorString());
@@ -6695,50 +6727,122 @@ bool GXTStudio::saveWHMDirectly(FileTab* tab, const QString& filePath)
             throw std::runtime_error(errorMsg.toStdString());
         }
         
-        showLogMessage("文件创建成功，开始写入数据");
+        showLogMessage("文件创建成功，开始写入二进制数据");
         
-        QTextStream stream(&file);
-        stream.setEncoding(QStringConverter::Utf8);
+        // 构建blob（文本数据块）
+        QByteArray blob;
+        QVector<uint32_t> offsets;
         
-        // 写入WHM格式的条目
-        int writtenCount = 0;
+        for (const auto& entry : tab->whmEntries) {
+            offsets.append(blob.size());
+            std::string text = entry.text;
+            blob.append(text.c_str(), text.length());
+            blob.append('\0'); // null终止符
+        }
+        
+        // 写入条目数
+        uint32_t count = static_cast<uint32_t>(tab->whmEntries.size());
+        file.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+        
+        // 写入条目表（hash + offset）
         for (size_t i = 0; i < tab->whmEntries.size(); ++i) {
-            // 安全检查
-            if (i >= tab->whmEntries.size() || tab->whmEntries.empty()) {
-                showLogMessage(QString("安全检查失败，索引超出范围: %1/%2")
-                              .arg(i)
-                              .arg(tab->whmEntries.size()));
-                break;
-            }
-            
-            const auto& entry = tab->whmEntries[i];
-            QString hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0')).toUpper();
-            QString line = QString("%1=%2").arg(hashStr, QString::fromStdString(entry.text));
-            
-            if (i < 5) { // 只记录前5个条目
-                showLogMessage(QString("写入条目 %1: %2").arg(i).arg(line.left(50)));
-            }
-            
-            stream << line << Qt::endl;
-            writtenCount++;
+            uint32_t hash = tab->whmEntries[i].hash;
+            uint32_t offset = offsets[i];
+            file.write(reinterpret_cast<const char*>(&hash), sizeof(uint32_t));
+            file.write(reinterpret_cast<const char*>(&offset), sizeof(uint32_t));
         }
         
-        if (tab->whmEntries.size() > 5) {
-            showLogMessage(QString("... 还有 %1 个条目已写入").arg(tab->whmEntries.size() - 5));
-        }
+        // 写入blob大小
+        uint32_t blobSize = static_cast<uint32_t>(blob.size());
+        file.write(reinterpret_cast<const char*>(&blobSize), sizeof(uint32_t));
+        
+        // 写入blob数据
+        file.write(blob);
         
         file.close();
         
-        showLogMessage(QString("WHM文件保存完成 - 文件: %1, 写入条目: %2/%3")
+        showLogMessage(QString("WHM文件保存完成 - 文件: %1, 条目: %2, blob大小: %3 字节")
                       .arg(QFileInfo(filePath).fileName())
-                      .arg(writtenCount)
-                      .arg(tab->whmEntries.size()));
+                      .arg(tab->whmEntries.size())
+                      .arg(blob.size()));
         
         return true;
         
     } catch (const std::exception& e) {
         showLogMessage(QString("WHM保存异常: %1").arg(e.what()));
         return handleSaveError("WHM文件保存", e, filePath);
+    }
+}// DAT文件保存方法（完全独立于WHM）
+bool GXTStudio::saveDATDirectly(FileTab* tab, const QString& filePath)
+{
+    if (!tab) {
+        showLogMessage("错误：saveDATDirectly - 标签页为空");
+        return false;
+    }
+    
+    if (!tab->isDAT) {
+        showLogMessage("错误：saveDATDirectly - 不是DAT文件");
+        return false;
+    }
+
+    showLogMessage(QString("开始DAT直接保存 - 文件: %1, 条目数: %2")
+                  .arg(filePath)
+                  .arg(tab->datEntries.size()));
+    
+    try {
+        QFile file(filePath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            QString errorMsg = QString("无法创建文件: %1 (错误: %2)")
+                              .arg(filePath)
+                              .arg(file.errorString());
+            showLogMessage(errorMsg);
+            throw std::runtime_error(errorMsg.toStdString());
+        }
+        
+        showLogMessage("文件创建成功，开始写入二进制数据");
+        
+        // 构建blob（文本数据块）
+        QByteArray blob;
+        QVector<uint32_t> offsets;
+        
+        for (const auto& entry : tab->datEntries) {
+            offsets.append(blob.size());
+            std::string text = entry.text;
+            blob.append(text.c_str(), text.length());
+            blob.append('\0'); // null终止符
+        }
+        
+        // 写入条目数
+        uint32_t count = static_cast<uint32_t>(tab->datEntries.size());
+        file.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+        
+        // 写入条目表（hash + offset）
+        for (size_t i = 0; i < tab->datEntries.size(); ++i) {
+            uint32_t hash = tab->datEntries[i].hash;
+            uint32_t offset = offsets[i];
+            file.write(reinterpret_cast<const char*>(&hash), sizeof(uint32_t));
+            file.write(reinterpret_cast<const char*>(&offset), sizeof(uint32_t));
+        }
+        
+        // 写入blob大小
+        uint32_t blobSize = static_cast<uint32_t>(blob.size());
+        file.write(reinterpret_cast<const char*>(&blobSize), sizeof(uint32_t));
+        
+        // 写入blob数据
+        file.write(blob);
+        
+        file.close();
+        
+        showLogMessage(QString("DAT文件保存完成 - 文件: %1, 条目: %2, blob大小: %3 字节")
+                      .arg(QFileInfo(filePath).fileName())
+                      .arg(tab->datEntries.size())
+                      .arg(blob.size()));
+        
+        return true;
+        
+    } catch (const std::exception& e) {
+        showLogMessage(QString("DAT保存异常: %1").arg(e.what()));
+        return handleSaveError("DAT文件保存", e, filePath);
     }
 }
 
@@ -6900,7 +7004,18 @@ void SaveWorker::saveFile(const SaveTask& task)
 
         // 处理WHM文件
         if (task.tabPtr->isWHM) {
-            success = saveWHMDirectly(task.tabPtr, task.filePath.toLocal8Bit().toStdString());
+            success = saveWHMDirectlyQt(task.tabPtr, task.filePath);
+            if (!success) {
+                result.errorMessage = "WHM文件保存失败 - 检查日志了解详情";
+                qDebug() << "SaveWorker::saveFile - WHM保存失败:" << task.filePath;
+            }
+        } else if (task.tabPtr->isDAT) {
+            // 处理DAT文件（完全独立于WHM）
+            success = saveDATDirectlyQt(task.tabPtr, task.filePath);
+            if (!success) {
+                result.errorMessage = "DAT文件保存失败 - 检查日志了解详情";
+                qDebug() << "SaveWorker::saveFile - DAT保存失败:" << task.filePath;
+            }
         } else {
             // 使用GXTEditor保存GXT文件
             GXTEditor editor;
@@ -6920,8 +7035,19 @@ void SaveWorker::saveFile(const SaveTask& task)
                 }
             }
 
-            // 执行保存
-            success = editor.saveToFile(task.filePath.toLocal8Bit().toStdString());
+            // 执行保存 - 使用Qt的QFile处理路径
+            QFile qfile(task.filePath);
+            if (!qfile.open(QIODevice::WriteOnly)) {
+                result.errorMessage = QString("无法打开GXT文件: %1").arg(qfile.errorString());
+                success = false;
+            } else {
+                std::string stdPath = task.filePath.toStdString();
+                success = editor.saveToFile(stdPath);
+                qfile.close();
+                if (!success) {
+                    result.errorMessage = "GXT文件保存失败";
+                }
+            }
         }
         
         emit saveProgress(100, "保存完成");
@@ -6929,16 +7055,18 @@ void SaveWorker::saveFile(const SaveTask& task)
         result.success = success;
         result.bytesWritten = success ? QFileInfo(task.filePath).size() : 0;
         
-        if (!success) {
-            result.errorMessage = "文件保存失败";
+        if (!success && result.errorMessage.isEmpty()) {
+            result.errorMessage = "文件保存失败 - 未知错误";
         }
         
     } catch (const std::exception& e) {
         result.success = false;
         result.errorMessage = QString("保存异常: %1").arg(e.what());
+        qDebug() << "SaveWorker::saveFile - 异常:" << result.errorMessage;
     } catch (...) {
         result.success = false;
         result.errorMessage = "未知保存异常";
+        qDebug() << "SaveWorker::saveFile - 未知异常";
     }
     
     result.elapsedMs = timer.elapsed();
@@ -6948,43 +7076,246 @@ void SaveWorker::saveFile(const SaveTask& task)
 bool SaveWorker::saveWHMDirectly(FileTab* tab, const std::string& path)
 {
     if (!tab || !tab->isWHM) {
+        qDebug() << "SaveWorker::saveWHMDirectly - tab无效或不是WHM文件";
         return false;
     }
     
     try {
-        // 使用C++直接保存WHM文件
-        std::ofstream file;
+        // 直接从QString转换为宽字符路径
+        std::wstring widePath(path.begin(), path.end());
         
-        // 转换UTF-8路径到宽字符以支持中文路径
-        int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
-        if (wideLen > 0) {
-            std::vector<wchar_t> widePath(wideLen);
-            MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, widePath.data(), wideLen);
-            file.open(widePath.data(), std::ios::binary);
-        } else {
-            file.open(path, std::ios::binary);
-        }
+        // 使用宽字符路径打开文件（支持中文）
+        std::ofstream file(widePath, std::ios::binary);
         
         if (!file.is_open()) {
+            qDebug() << "SaveWorker::saveWHMDirectly - 无法打开文件:" << path.c_str();
             return false;
         }
         
-        // WHM文件格式：每个条目为8字节哈希值 + 字符串数据
+        // 构建blob（文本数据块）
+        std::vector<uint32_t> offsets;
+        std::string blob;
+        
         for (const auto& entry : tab->whmEntries) {
-            // 写入8字节哈希值
-            file.write(reinterpret_cast<const char*>(&entry.hash), sizeof(entry.hash));
-            
-            // 写入UTF-8字符串数据（包含null终止符）
+            offsets.push_back(blob.size());
             const std::string& text = entry.text;
-            file.write(text.c_str(), text.length());
-            file.put('\0'); // null终止符
+            blob.append(text);
+            blob.push_back('\0'); // null终止符
+        }
+        
+        // 写入条目数
+        uint32_t count = static_cast<uint32_t>(tab->whmEntries.size());
+        file.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+        
+        // 写入条目表（hash + offset）
+        for (size_t i = 0; i < tab->whmEntries.size(); ++i) {
+            uint32_t hash = tab->whmEntries[i].hash;
+            uint32_t offset = offsets[i];
+            file.write(reinterpret_cast<const char*>(&hash), sizeof(uint32_t));
+            file.write(reinterpret_cast<const char*>(&offset), sizeof(uint32_t));
+        }
+        
+        // 写入blob大小
+        uint32_t blobSize = static_cast<uint32_t>(blob.size());
+        file.write(reinterpret_cast<const char*>(&blobSize), sizeof(uint32_t));
+        
+        // 写入blob数据
+        file.write(blob.c_str(), blob.size());
+        
+        // 检查写入是否成功
+        if (!file.good()) {
+            qDebug() << "SaveWorker::saveWHMDirectly - 文件写入失败";
+            file.close();
+            return false;
         }
         
         file.close();
+        
+        qDebug() << "SaveWorker::saveWHMDirectly - 成功保存WHM文件:" << path.c_str();
         return true;
         
     } catch (const std::exception& e) {
         qDebug() << "WHM保存异常:" << e.what();
+        return false;
+    }
+}
+
+// DAT文件保存方法（完全独立于WHM）
+bool SaveWorker::saveDATDirectly(FileTab* tab, const std::string& path)
+{
+    if (!tab || !tab->isDAT) {
+        qDebug() << "SaveWorker::saveDATDirectly - tab无效或不是DAT文件";
+        return false;
+    }
+    
+    try {
+        // 直接从std::string转换为宽字符路径
+        std::wstring widePath(path.begin(), path.end());
+        
+        // 使用宽字符路径打开文件（支持中文）
+        std::ofstream file(widePath, std::ios::binary);
+        
+        if (!file.is_open()) {
+            qDebug() << "SaveWorker::saveDATDirectly - 无法打开文件:" << path.c_str();
+            return false;
+        }
+        
+        // 构建blob（文本数据块）
+        std::vector<uint32_t> offsets;
+        std::string blob;
+        
+        for (const auto& entry : tab->datEntries) {
+            offsets.push_back(blob.size());
+            const std::string& text = entry.text;
+            blob.append(text);
+            blob.push_back('\0'); // null终止符
+        }
+        
+        // 写入条目数
+        uint32_t count = static_cast<uint32_t>(tab->datEntries.size());
+        file.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+        
+        // 写入条目表（hash + offset）
+        for (size_t i = 0; i < tab->datEntries.size(); ++i) {
+            uint32_t hash = tab->datEntries[i].hash;
+            uint32_t offset = offsets[i];
+            file.write(reinterpret_cast<const char*>(&hash), sizeof(uint32_t));
+            file.write(reinterpret_cast<const char*>(&offset), sizeof(uint32_t));
+        }
+        
+        // 写入blob大小
+        uint32_t blobSize = static_cast<uint32_t>(blob.size());
+        file.write(reinterpret_cast<const char*>(&blobSize), sizeof(uint32_t));
+        
+        // 写入blob数据
+        file.write(blob.c_str(), blob.size());
+        
+        // 检查写入是否成功
+        if (!file.good()) {
+            qDebug() << "SaveWorker::saveDATDirectly - 文件写入失败";
+            file.close();
+            return false;
+        }
+        
+        file.close();
+        
+        qDebug() << "SaveWorker::saveDATDirectly - 成功保存DAT文件:" << path.c_str();
+        return true;
+        
+    } catch (const std::exception& e) {
+        qDebug() << "DAT保存异常:" << e.what();
+        return false;
+    }
+}
+
+// Qt版本的WHM保存方法 - 使用QFile处理中文路径
+bool SaveWorker::saveWHMDirectlyQt(FileTab* tab, const QString& filePath)
+{
+    if (!tab || !tab->isWHM) {
+        qDebug() << "SaveWorker::saveWHMDirectlyQt - tab无效或不是WHM文件";
+        return false;
+    }
+    
+    try {
+        QFile file(filePath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            qDebug() << "SaveWorker::saveWHMDirectlyQt - 无法打开文件:" << filePath << "错误:" << file.errorString();
+            return false;
+        }
+        
+        // 构建blob（文本数据块）
+        std::vector<uint32_t> offsets;
+        std::string blob;
+        
+        for (const auto& entry : tab->whmEntries) {
+            offsets.push_back(blob.size());
+            const std::string& text = entry.text;
+            blob.append(text);
+            blob.push_back('\0'); // null终止符
+        }
+        
+        // 写入条目数
+        uint32_t count = static_cast<uint32_t>(tab->whmEntries.size());
+        file.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+        
+        // 写入条目表（hash + offset）
+        for (size_t i = 0; i < tab->whmEntries.size(); ++i) {
+            uint32_t hash = tab->whmEntries[i].hash;
+            uint32_t offset = offsets[i];
+            file.write(reinterpret_cast<const char*>(&hash), sizeof(uint32_t));
+            file.write(reinterpret_cast<const char*>(&offset), sizeof(uint32_t));
+        }
+        
+        // 写入blob大小
+        uint32_t blobSize = static_cast<uint32_t>(blob.size());
+        file.write(reinterpret_cast<const char*>(&blobSize), sizeof(uint32_t));
+        
+        // 写入blob数据
+        file.write(blob.c_str(), blob.size());
+        
+        file.close();
+        
+        qDebug() << "SaveWorker::saveWHMDirectlyQt - 成功保存WHM文件:" << filePath;
+        return true;
+        
+    } catch (const std::exception& e) {
+        qDebug() << "WHM保存异常:" << e.what();
+        return false;
+    }
+}
+
+// Qt版本的DAT保存方法 - 使用QFile处理中文路径
+bool SaveWorker::saveDATDirectlyQt(FileTab* tab, const QString& filePath)
+{
+    if (!tab || !tab->isDAT) {
+        qDebug() << "SaveWorker::saveDATDirectlyQt - tab无效或不是DAT文件";
+        return false;
+    }
+    
+    try {
+        QFile file(filePath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            qDebug() << "SaveWorker::saveDATDirectlyQt - 无法打开文件:" << filePath << "错误:" << file.errorString();
+            return false;
+        }
+        
+        // 构建blob（文本数据块）
+        std::vector<uint32_t> offsets;
+        std::string blob;
+        
+        for (const auto& entry : tab->datEntries) {
+            offsets.push_back(blob.size());
+            const std::string& text = entry.text;
+            blob.append(text);
+            blob.push_back('\0'); // null终止符
+        }
+        
+        // 写入条目数
+        uint32_t count = static_cast<uint32_t>(tab->datEntries.size());
+        file.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+        
+        // 写入条目表（hash + offset）
+        for (size_t i = 0; i < tab->datEntries.size(); ++i) {
+            uint32_t hash = tab->datEntries[i].hash;
+            uint32_t offset = offsets[i];
+            file.write(reinterpret_cast<const char*>(&hash), sizeof(uint32_t));
+            file.write(reinterpret_cast<const char*>(&offset), sizeof(uint32_t));
+        }
+        
+        // 写入blob大小
+        uint32_t blobSize = static_cast<uint32_t>(blob.size());
+        file.write(reinterpret_cast<const char*>(&blobSize), sizeof(uint32_t));
+        
+        // 写入blob数据
+        file.write(blob.c_str(), blob.size());
+        
+        file.close();
+        
+        qDebug() << "SaveWorker::saveDATDirectlyQt - 成功保存DAT文件:" << filePath;
+        return true;
+        
+    } catch (const std::exception& e) {
+        qDebug() << "DAT保存异常:" << e.what();
         return false;
     }
 }
@@ -7229,7 +7560,7 @@ void GXTStudio::onExecuteTranslate()
                 
                 const auto& entry = currentTab->whmEntries[i];
                 QString value = QString::fromStdString(entry.text);
-                QString key = QString("0x%1").arg(entry.hash, 8, 16, QChar('0')).toUpper();
+                QString key = QString("0x%1").arg(entry.hash, 8, 16, QChar('0'));
                 
                 // 跳过空值和过长数据
                 if (!value.trimmed().isEmpty() && value.length() <= 10000 && key.length() <= 1000) {
