@@ -34,6 +34,10 @@ set(PROJECT_SOURCES
     CodeTableConverter.cpp
     TextRenderWidget.h
     TextRenderWidget.cpp
+    CharTableParser.h
+    CharTableParser.cpp
+    CharTableWidget.h
+    CharTableWidget.cpp
 )
 
 qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})

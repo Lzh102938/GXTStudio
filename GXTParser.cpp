@@ -1115,13 +1115,32 @@ bool GXTParser::parseDAT(const std::string& filePath, std::vector<DATEntry>& out
         return false;
     }
 
+    // 获取文件大小以便进行基本合法性检查，防止误把其它二进制文件当作 DAT 来解析
+    std::fseek(f, 0, SEEK_END);
+    long file_size = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+
     // 读取条目数量
     uint32_t count = read_u32(f);
     addParseLog("DAT文件包含 " + std::to_string(count) + " 个条目");
-    
+
+    // 基本合理性检查：条目数与文件大小应匹配（每条目 8 字节），并且条目数不过大
+    const uint64_t minExpected = 4ULL + static_cast<uint64_t>(count) * 8ULL + 4ULL; // count + entries + blob_size
+    if (count == 0 || count > 2000000 || static_cast<uint64_t>(file_size) < minExpected) {
+        addParseLog(std::string("DAT 文件头不合法或大小与条目数不匹配（可能不是 DAT 文件）。文件大小=") + std::to_string(file_size) + std::string(" 期望至少=") + std::to_string(minExpected));
+        fclose(f);
+        return false;
+    }
+
     // 预分配entries向量
     std::vector<DATEntry> entries;
-    entries.reserve(count);
+    try {
+        entries.reserve(count);
+    } catch (const std::bad_alloc&) {
+        addParseLog("内存不足：无法为 DAT 条目分配空间");
+        fclose(f);
+        return false;
+    }
     
     // 读取条目（hash + offset）
     for (uint32_t i = 0; i < count; i++) {

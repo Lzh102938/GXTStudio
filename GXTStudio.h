@@ -166,6 +166,7 @@ class GXTStudio;
 class SmartTranslator;
 class TranslateConfigDialog;
 class TextRenderWidget;
+class CharTableWidget;
 
 // 多线程进度条窗口类 - 简约高效设计
 class MultiThreadProgressDialog : public QDialog {
@@ -268,6 +269,8 @@ struct TranslateResult;
 #include "TranslateConfigDialog.h"
 #include "SmartTranslator.h"
 #include "CodeTableConverter.h"
+#include "CharTableParser.h"
+#include "CharTableWidget.h"
 
 // FileTab结构体定义 - 需要在SaveTask之前定义
 struct FileTab {
@@ -278,6 +281,7 @@ struct FileTab {
     std::vector<DATEntry> datEntries;  // DAT文件条目（完全独立于WHM）
     bool isWHM = false;
     bool isDAT = false;  // 区分DAT和WHM文件
+    bool isCharTable = false;  // 字符表文件（VC/IV）
     bool isModified = false;
     int currentTableIndex = 0;
     GXTVersion version = GXTVersion::UNKNOWN; // 文件版本信息
@@ -300,6 +304,10 @@ struct FileTab {
     
     // 文本渲染预览控件
     class TextRenderWidget* textRenderWidget = nullptr;
+
+    // 字符表相关控件和数据
+    class CharTableWidget* charTableWidget = nullptr;  // 字符表显示控件
+    CharTableData charTableData;  // 字符表数据
     
     // 异步解析状态
     bool isParsing = false;
@@ -797,6 +805,9 @@ private slots:
     void onMountCodeTable(); // 挂载码表
     void onConvertCodeTable(); // 执行转换
     void onUnmountCodeTable(); // 卸载码表
+
+    // 字符表相关
+    void onCharTableCharacterSelected(uint16_t charCode, const QString& displayChar);
     
     // 工具方法
     void updateCodeTableButtonText(); // 更新码表按钮文本
@@ -859,6 +870,8 @@ private:
     QString getCardStyle(const QString& color) const;
     QString getButtonStyle(const QString& color, bool darker = false) const;
     QWidget* createWelcomeTab();
+    QWidget* createCharTableTab(const QString& fileName, const CharTableData& data); // 创建字符表标签页
+    bool loadCharTableFile(const QString& filePath, const QString& fileName); // 加载字符表文件
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -880,6 +893,7 @@ private:
     
     // 动作
     QAction* m_openAction;
+    QAction* m_openCharTableAction; // 打开字符表 DAT
     QAction* m_saveAction;
     QAction* m_saveAsAction;
     QAction* m_exportAction;

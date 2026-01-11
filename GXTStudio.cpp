@@ -12,6 +12,7 @@
 #include <QTextStream>
 #include <QClipboard>
 #include <QScrollBar>
+#include <QSlider>
 #include <QElapsedTimer>
 #include <QStyleFactory>
 #include <QDesktopServices>
@@ -1310,6 +1311,29 @@ void GXTStudio::setupToolBars()
     m_toolBar->addAction(m_saveAction);
     m_toolBar->addAction(m_saveAsAction);
     m_toolBar->addSeparator();
+    // 打开字符表（.dat）动作
+    m_openCharTableAction = new QAction("打开字符表", this);
+    m_openCharTableAction->setToolTip("打开 GTA 字符表（.dat）");
+    m_toolBar->addAction(m_openCharTableAction);
+    connect(m_openCharTableAction, &QAction::triggered, [this]() {
+        // 弹出文件选择对话框并加载字符表
+        QString filePath = QFileDialog::getOpenFileName(this, "打开字符表(.dat)", "", "DAT文件 (*.dat);;所有文件 (*.*)");
+        if (!filePath.isEmpty()) {
+            // 自动尝试以 VC 格式解析（wm_vcchs.dat），无需额外 CHARACTERS.txt
+            CharTableData data;
+            if (CharTableParser::loadGtaVc(filePath, data)) {
+                QWidget* tab = createCharTableTab(QFileInfo(filePath).fileName(), data);
+                m_tabWidget->addTab(tab, QFileInfo(filePath).fileName());
+                setCentralWidget(m_tabWidget);
+            } else if (CharTableParser::loadGtaIv(filePath, data)) {
+                QWidget* tab = createCharTableTab(QFileInfo(filePath).fileName(), data);
+                m_tabWidget->addTab(tab, QFileInfo(filePath).fileName());
+                setCentralWidget(m_tabWidget);
+            } else {
+                QMessageBox::warning(this, "加载失败", "无法解析该 .dat 文件为字符表，也无法作为 GTA_IV 文本表解析。\n(已尝试自动识别)");
+            }
+        }
+    });
     
     // 创建码表转换按钮和下拉菜单
     m_codeTableButton = new QToolButton(this);
@@ -2207,55 +2231,28 @@ void GXTStudio::showSaveSuccessDialog(const SaveResult& result)
     gridLayout->setSpacing(8);
     gridLayout->setContentsMargins(12, 12, 12, 12);
 
-    // 格式化文件大小
+    // 格式化文件大小并准备标题子布局（类型徽章 + 名称）
+    double sizeInBytes = static_cast<double>(result.bytesWritten);
     QString sizeText;
-    double sizeInBytes = result.bytesWritten;
-    if (sizeInBytes < 1024) {
-        sizeText = QString("%1 B").arg(result.bytesWritten);
-    } else if (sizeInBytes < 1024 * 1024) {
+    if (sizeInBytes <= 0) {
+        sizeText = "0 B";
+    } else if (sizeInBytes < 1024.0) {
+        sizeText = QString("%1 B").arg(static_cast<int>(sizeInBytes));
+    } else if (sizeInBytes < 1024.0 * 1024.0) {
         sizeText = QString("%1 KB").arg(sizeInBytes / 1024.0, 0, 'f', 2);
     } else {
         sizeText = QString("%1 MB").arg(sizeInBytes / (1024.0 * 1024.0), 0, 'f', 2);
     }
 
-    // 格式化时间
-    QString timeText;
-    if (result.elapsedMs < 1000) {
-        timeText = QString("%1 ms").arg(result.elapsedMs);
-    } else {
-        double seconds = result.elapsedMs / 1000.0;
-        timeText = QString("%1 s").arg(seconds, 0, 'f', 2);
-    }
+    // 耗时文本
+    QString timeText = QString("%1 ms").arg(result.elapsedMs);
 
-    // 获取文件类型
-    QFileInfo fileInfo(result.filePath);
-    QString fileExt = fileInfo.suffix().toUpper();
-    QString fileTypeText;
-    if (fileExt == "GXT") {
-        fileTypeText = "GXT 文件";
-    } else if (fileExt == "GXT2") {
-        fileTypeText = "GXT2 文件";
-    } else if (fileExt == "DAT") {
-        fileTypeText = "DAT 文件";
-    } else if (fileExt == "WHM") {
-        fileTypeText = "WHM 文件";
-    } else {
-        fileTypeText = QString("%1 文件").arg(fileExt);
-    }
-
-    // 行1: 文件名和类型
-    QLabel* fileNameLabel = new QLabel("文件:");
-    fileNameLabel->setObjectName("labelKey");
-    gridLayout->addWidget(fileNameLabel, 0, 0);
-
+    // 名称行布局和类型徽章（file type badge）
     QHBoxLayout* nameLayout = new QHBoxLayout();
-    nameLayout->setSpacing(6);
-    QLabel* fileNameValue = new QLabel(result.fileName);
-    fileNameValue->setObjectName("labelValue");
-    fileNameValue->setWordWrap(false);
-    nameLayout->addWidget(fileNameValue);
-
-    QLabel* typeBadge = new QLabel(fileTypeText);
+    nameLayout->setSpacing(8);
+    QLabel* typeBadge = new QLabel(QFileInfo(result.filePath).suffix().toUpper());
+    typeBadge->setFixedHeight(20);
+    typeBadge->setAlignment(Qt::AlignCenter);
     typeBadge->setStyleSheet("background-color: #e3f2fd; color: #1976d2; border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: bold;");
     nameLayout->addWidget(typeBadge);
     nameLayout->addStretch();
@@ -4785,6 +4782,41 @@ void GXTStudio::startAsyncParse(const QString& filePath)
     // 判断文件类型：完全区分DAT和WHM
     bool isWHM = (suffix == "whm");
     bool isDAT = (suffix == "dat");
+
+    // 如果是 .dat 文件，尝试判断是否为字符表文件
+    // 字符表特征：
+    // 1. GTA_VC: wm_vcchs.dat，固定大小 0x10000 * 2 = 131072 字节
+    // 2. GTA_IV: char_table.dat 或类似名称，大小不固定（UTF-16LE字符序列）
+    if (isDAT) {
+        qint64 fsize = fileInfo.size();
+        QString baseName = fileInfo.baseName().toLower();
+
+        // 检查是否为字符表文件（通过文件名模式或大小）
+        bool isCharTable = false;
+        if (fsize == 0x10000 * 2) {
+            // GTA_VC 字符表标准大小
+            isCharTable = true;
+        } else if (baseName.contains("char_table") || baseName.contains("wm_vcchs") ||
+                   baseName.contains("chs") || baseName.contains("char")) {
+            // GTA_IV 或其他字符表（通过文件名识别）
+            isCharTable = true;
+        }
+
+        if (isCharTable) {
+            CharTableData data;
+            if (CharTableParser::loadGtaVc(filePath, data)) {
+                QWidget* tab = createCharTableTab(fileInfo.fileName(), data);
+                m_tabWidget->addTab(tab, fileInfo.fileName());
+                return;
+            }
+            if (CharTableParser::loadGtaIv(filePath, data)) {
+                QWidget* tab = createCharTableTab(fileInfo.fileName(), data);
+                m_tabWidget->addTab(tab, fileInfo.fileName());
+                return;
+            }
+            // 若都失败，则继续当作普通 DAT 解析
+        }
+    }
 
     // 创建解析任务
     ParseTask task;
@@ -8873,4 +8905,84 @@ void GXTStudio::onTranslationTotalProgress(int completed, int total, const QStri
     Q_UNUSED(completed)
     Q_UNUSED(total)
     Q_UNUSED(message)
+}
+
+QWidget* GXTStudio::createCharTableTab(const QString& fileName, const CharTableData& data)
+{
+    QWidget* page = new QWidget();
+    QVBoxLayout* layout = new QVBoxLayout(page);
+    layout->setContentsMargins(8,8,8,8);
+    layout->setSpacing(6);
+
+    // Top controls: file name label + zoom slider + export button
+    QHBoxLayout* topRow = new QHBoxLayout();
+    QLabel* nameLabel = new QLabel(QString("%1 (%2 x %3)").arg(fileName).arg(data.cols).arg(data.rows));
+    nameLabel->setStyleSheet("font-weight:600; margin-left:6px;");
+    topRow->addWidget(nameLabel);
+    topRow->addStretch();
+
+    QLabel* zoomLabel = new QLabel("大小:");
+    topRow->addWidget(zoomLabel);
+    QSlider* zoomSlider = new QSlider(Qt::Horizontal);
+    zoomSlider->setRange(20, 128);
+    zoomSlider->setValue(48);
+    zoomSlider->setFixedWidth(160);
+    topRow->addWidget(zoomSlider);
+
+    QPushButton* exportBtn = new QPushButton("导出为图片");
+    topRow->addWidget(exportBtn);
+
+    layout->addLayout(topRow);
+
+    // CharTableWidget inside scroll area
+    CharTableWidget* widget = new CharTableWidget();
+    widget->setData(data);
+    widget->setCellSize(48);
+
+    QScrollArea* scroll = new QScrollArea();
+    scroll->setWidgetResizable(true);
+    scroll->setWidget(widget);
+    layout->addWidget(scroll);
+
+    // connect zoom
+    connect(zoomSlider, &QSlider::valueChanged, widget, &CharTableWidget::setCellSize);
+
+    // export button: render widget to image
+    connect(exportBtn, &QPushButton::clicked, [this, widget, fileName]() {
+        QString out = QFileDialog::getSaveFileName(this, "导出为PNG", QFileInfo(fileName).completeBaseName() + ".png", "PNG 图片 (*.png)");
+        if (out.isEmpty()) return;
+        QSize imgSize = widget->minimumSizeHint();
+        QImage image(imgSize, QImage::Format_ARGB32);
+        image.fill(Qt::transparent);
+        QPainter painter(&image);
+        widget->render(&painter);
+        image.save(out);
+        showLogMessage("已导出: " + out);
+    });
+
+    return page;
+}
+
+// 当字符表中选中某个字符时调用：尝试插入到当前编辑框，否则复制到剪贴板
+void GXTStudio::onCharTableCharacterSelected(uint16_t charCode, const QString& displayChar)
+{
+    FileTab* currentTab = getCurrentTab();
+    if (currentTab) {
+        // 优先插入到 valueEdit（如果存在并可编辑）
+        if (currentTab->valueEdit && currentTab->valueEdit->isEnabled()) {
+            QLineEdit* edit = currentTab->valueEdit;
+            int pos = edit->cursorPosition();
+            QString text = edit->text();
+            text.insert(pos, displayChar);
+            edit->setText(text);
+            edit->setCursorPosition(pos + displayChar.length());
+            showLogMessage(QString("已插入字符: %1 (0x%2)").arg(displayChar).arg(charCode, 0, 16));
+            return;
+        }
+    }
+
+    // 回退：复制到剪贴板
+    QClipboard* cb = QApplication::clipboard();
+    cb->setText(displayChar);
+    showLogMessage(QString("字符已复制到剪贴板: %1 (0x%2)").arg(displayChar).arg(charCode, 0, 16));
 }
