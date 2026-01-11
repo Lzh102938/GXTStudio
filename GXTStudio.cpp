@@ -2104,7 +2104,7 @@ void GXTStudio::toggleReadOnly(bool readOnly)
         }
         // 更新添加新表按钮状态
         if (tab.addTableButton) {
-            tab.addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM);
+            tab.addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM && !tab.isDAT);
         }
         // 更新添加条目按钮状态
         if (tab.addEntryButton) {
@@ -2154,174 +2154,213 @@ void GXTStudio::showSaveSuccessDialog(const SaveResult& result)
     dialog.setWindowTitle("保存成功");
     dialog.setWindowIcon(QIcon());
     dialog.setModal(true);
-    dialog.setMinimumWidth(480);
-    dialog.setMinimumHeight(240);
-    
-    // 设置现代风格
+    dialog.setMinimumWidth(500);
+    dialog.setMaximumWidth(500);
+
+    // 设置现代紧凑风格
     dialog.setStyleSheet(
-        "QDialog { background-color: #ffffff; border-radius: 6px; }"
+        "QDialog { background-color: #ffffff; }"
         "QLabel { color: #333333; }"
-        "QLabel#titleLabel { font-size: 14px; font-weight: bold; color: #27ae60; margin-bottom: 6px; }"
-        "QLabel#labelKey { font-size: 11px; font-weight: bold; color: #2c3e50; }"
-        "QLabel#labelValue { font-size: 11px; color: #34495e; }"
-        "QLabel#labelPath { font-size: 10px; color: #34495e; font-family: Consolas, monospace; background-color: #f8f9fa; padding: 5px; border-radius: 3px; border: 1px solid #ecf0f1; }"
-        "QPushButton { "
-        "  background-color: #27ae60; color: white; border: none; border-radius: 3px; "
-        "  padding: 6px 12px; font-weight: bold; font-size: 11px; "
-        "} "
-        "QPushButton:hover { background-color: #229954; } "
-        "QPushButton:pressed { background-color: #1e8449; }"
-        "QPushButton#pathButton { padding: 4px 8px; font-size: 12px; background-color: #95a5a6; min-width: 32px; }"
-        "QPushButton#pathButton:hover { background-color: #7f8c8d; }"
+        "QLabel#titleLabel { font-size: 15px; font-weight: bold; color: #27ae60; }"
+        "QLabel#labelKey { font-size: 10px; font-weight: bold; color: #5f6368; }"
+        "QLabel#labelValue { font-size: 11px; color: #202124; }"
+        "QLabel#labelHighlight { font-size: 11px; color: #27ae60; font-weight: bold; }"
+        "QLabel#labelPath { font-size: 10px; color: #5f6368; font-family: Consolas, 'Microsoft YaHei', monospace; background-color: #f1f3f4; padding: 6px; border-radius: 4px; }"
+        "QGroupBox { border: 1px solid #e8eaed; background-color: #fafbfc; border-radius: 8px; margin-top: 8px; }"
+        "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }"
+        "QPushButton#mainButton { background-color: #27ae60; color: white; border: none; border-radius: 6px; padding: 8px 24px; font-weight: bold; font-size: 12px; min-width: 80px; }"
+        "QPushButton#mainButton:hover { background-color: #229954; }"
+        "QPushButton#mainButton:pressed { background-color: #1e8449; }"
+        "QPushButton#actionButton { background-color: #f8f9fa; color: #5f6368; border: 1px solid #dadce0; border-radius: 6px; padding: 6px 10px; font-size: 11px; min-width: 32px; }"
+        "QPushButton#actionButton:hover { background-color: #e8eaed; border-color: #bdc1c6; }"
     );
-    
+
     QVBoxLayout* mainLayout = new QVBoxLayout(&dialog);
-    mainLayout->setContentsMargins(20, 16, 20, 16);
-    mainLayout->setSpacing(12);
-    
-    // 标题
-    QString titleText;
-    titleText += FA::QCheck;
-    titleText += " 文件保存成功";
-    QLabel* titleLabel = new QLabel(titleText);
+    mainLayout->setContentsMargins(20, 20, 20, 16);
+    mainLayout->setSpacing(10);
+
+    // 标题行 - 带图标和成功徽章
+    QHBoxLayout* titleLayout = new QHBoxLayout();
+    titleLayout->setSpacing(12);
+
+    QString iconText = QString(FA::QCheck);
+    QLabel* iconLabel = new QLabel(iconText);
+    QFont iconFont(FA::solidFontFamily());
+    iconFont.setPointSize(14);
+    iconLabel->setFont(iconFont);
+    iconLabel->setStyleSheet("color: #27ae60;");
+    titleLayout->addWidget(iconLabel);
+
+    QLabel* titleLabel = new QLabel("文件保存成功");
     titleLabel->setObjectName("titleLabel");
-    QFont faFont(FA::solidFontFamily());
-    faFont.setPointSize(11);
-    titleLabel->setFont(faFont);
-    mainLayout->addWidget(titleLabel);
-    
-    // 详情框
+    titleLabel->setStyleSheet("color: #27ae60;");
+    titleLayout->addWidget(titleLabel);
+
+    titleLayout->addStretch();
+    mainLayout->addLayout(titleLayout);
+
+    // 文件信息卡片
     QGroupBox* infoGroup = new QGroupBox();
-    infoGroup->setStyleSheet(
-        "QGroupBox { border: 1px solid #e0f6f0; background-color: #f0fdf9; border-radius: 4px; }"
-    );
-    
-    QVBoxLayout* gridLayout = new QVBoxLayout(infoGroup);
-    gridLayout->setSpacing(12);
-    gridLayout->setContentsMargins(16, 12, 16, 12);
-    
+    infoGroup->setFlat(true);
+
+    QGridLayout* gridLayout = new QGridLayout(infoGroup);
+    gridLayout->setSpacing(8);
+    gridLayout->setContentsMargins(12, 12, 12, 12);
+
     // 格式化文件大小
     QString sizeText;
-    if (result.bytesWritten < 1024) {
+    double sizeInBytes = result.bytesWritten;
+    if (sizeInBytes < 1024) {
         sizeText = QString("%1 B").arg(result.bytesWritten);
-    } else if (result.bytesWritten < 1024 * 1024) {
-        sizeText = QString("%1 KB").arg(result.bytesWritten / 1024.0, 0, 'f', 2);
+    } else if (sizeInBytes < 1024 * 1024) {
+        sizeText = QString("%1 KB").arg(sizeInBytes / 1024.0, 0, 'f', 2);
     } else {
-        sizeText = QString("%1 MB").arg(result.bytesWritten / (1024.0 * 1024.0), 0, 'f', 2);
+        sizeText = QString("%1 MB").arg(sizeInBytes / (1024.0 * 1024.0), 0, 'f', 2);
     }
-    
-    // 行1: 文件名
-    QHBoxLayout* row1 = new QHBoxLayout();
-    QLabel* fileNameLabel = new QLabel("文件名:");
+
+    // 格式化时间
+    QString timeText;
+    if (result.elapsedMs < 1000) {
+        timeText = QString("%1 ms").arg(result.elapsedMs);
+    } else {
+        double seconds = result.elapsedMs / 1000.0;
+        timeText = QString("%1 s").arg(seconds, 0, 'f', 2);
+    }
+
+    // 获取文件类型
+    QFileInfo fileInfo(result.filePath);
+    QString fileExt = fileInfo.suffix().toUpper();
+    QString fileTypeText;
+    if (fileExt == "GXT") {
+        fileTypeText = "GXT 文件";
+    } else if (fileExt == "GXT2") {
+        fileTypeText = "GXT2 文件";
+    } else if (fileExt == "DAT") {
+        fileTypeText = "DAT 文件";
+    } else if (fileExt == "WHM") {
+        fileTypeText = "WHM 文件";
+    } else {
+        fileTypeText = QString("%1 文件").arg(fileExt);
+    }
+
+    // 行1: 文件名和类型
+    QLabel* fileNameLabel = new QLabel("文件:");
     fileNameLabel->setObjectName("labelKey");
-    fileNameLabel->setFixedWidth(50);
+    gridLayout->addWidget(fileNameLabel, 0, 0);
+
+    QHBoxLayout* nameLayout = new QHBoxLayout();
+    nameLayout->setSpacing(6);
     QLabel* fileNameValue = new QLabel(result.fileName);
     fileNameValue->setObjectName("labelValue");
     fileNameValue->setWordWrap(false);
-    row1->addWidget(fileNameLabel);
-    row1->addWidget(fileNameValue);
-    row1->addStretch();
-    gridLayout->addLayout(row1);
-    
-    // 行2: 路径 (可复制，可打开文件夹)
-    QHBoxLayout* row2 = new QHBoxLayout();
+    nameLayout->addWidget(fileNameValue);
+
+    QLabel* typeBadge = new QLabel(fileTypeText);
+    typeBadge->setStyleSheet("background-color: #e3f2fd; color: #1976d2; border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: bold;");
+    nameLayout->addWidget(typeBadge);
+    nameLayout->addStretch();
+
+    gridLayout->addLayout(nameLayout, 0, 1);
+
+    // 行2: 文件路径
     QLabel* pathLabel = new QLabel("路径:");
     pathLabel->setObjectName("labelKey");
-    pathLabel->setFixedWidth(50);
-    
-    // 路径框 - 可选中和复制
+    gridLayout->addWidget(pathLabel, 1, 0);
+
     QLineEdit* pathEdit = new QLineEdit(result.filePath);
     pathEdit->setObjectName("labelPath");
     pathEdit->setReadOnly(true);
-    pathEdit->setFixedHeight(24);
+    pathEdit->setFixedHeight(26);
     pathEdit->setCursor(Qt::IBeamCursor);
-    
-    row2->addWidget(pathLabel);
-    row2->addWidget(pathEdit);
-    
-    // 打开文件夹按钮
-    QPushButton* openFolderBtn = new QPushButton();
-    openFolderBtn->setObjectName("pathButton");
-    openFolderBtn->setFixedSize(28, 24);
-    openFolderBtn->setToolTip("打开文件夹");
-    QString folderIconText;
-    folderIconText += FA::QFolder;
-    openFolderBtn->setText(folderIconText);
-    QFont faFont1(FA::solidFontFamily());
-    faFont1.setPointSize(11);
-    openFolderBtn->setFont(faFont1);
-    connect(openFolderBtn, &QPushButton::clicked, [result]() {
-        QFileInfo fileInfo(result.filePath);
-        QString folderPath = fileInfo.absolutePath();
-        QDesktopServices::openUrl(QUrl::fromLocalFile(folderPath));
-    });
-    row2->addWidget(openFolderBtn);
-    
-    // 复制按钮
-    QPushButton* copyBtn = new QPushButton();
-    copyBtn->setObjectName("pathButton");
-    copyBtn->setFixedSize(28, 24);
-    copyBtn->setToolTip("复制路径");
-    QString copyIconText;
-    copyIconText += FA::QClipboardList;
-    copyBtn->setText(copyIconText);
-    QFont faFont2(FA::solidFontFamily());
-    faFont2.setPointSize(11);
-    copyBtn->setFont(faFont2);
-    connect(copyBtn, &QPushButton::clicked, [result]() {
+    gridLayout->addWidget(pathEdit, 1, 1);
+
+    // 行3: 操作按钮
+    QHBoxLayout* buttonRowLayout = new QHBoxLayout();
+    buttonRowLayout->setSpacing(6);
+    buttonRowLayout->addStretch();
+
+    // 快捷按钮组
+    QPushButton* copyPathBtn = new QPushButton();
+    copyPathBtn->setObjectName("actionButton");
+    copyPathBtn->setFixedSize(70, 26);
+    copyPathBtn->setToolTip("复制路径");
+    copyPathBtn->setText(QString("%1").arg(FA::QClipboardList));
+    QFont copyFont(FA::solidFontFamily());
+    copyFont.setPointSize(10);
+    copyPathBtn->setFont(copyFont);
+    connect(copyPathBtn, &QPushButton::clicked, [result]() {
         QApplication::clipboard()->setText(result.filePath);
     });
-    row2->addWidget(copyBtn);
-    
-    gridLayout->addLayout(row2);
-    
-    // 行3: 文件大小和耗时
-    QHBoxLayout* row3 = new QHBoxLayout();
-    
-    QHBoxLayout* sizeLayout = new QHBoxLayout();
-    QLabel* sizeLabel = new QLabel("大小:");
-    sizeLabel->setObjectName("labelKey");
-    sizeLabel->setFixedWidth(50);
-    QLabel* sizeValue = new QLabel(sizeText);
-    sizeValue->setObjectName("labelValue");
-    sizeValue->setStyleSheet("QLabel#labelValue { color: #27ae60; font-weight: bold; }");
-    sizeLayout->addWidget(sizeLabel);
-    sizeLayout->addWidget(sizeValue);
-    sizeLayout->addSpacing(30);
-    row3->addLayout(sizeLayout);
-    
-    QHBoxLayout* timeLayout = new QHBoxLayout();
-    QLabel* timeLabel = new QLabel("耗时:");
-    timeLabel->setObjectName("labelKey");
-    timeLabel->setFixedWidth(50);
-    QLabel* timeValue = new QLabel(QString("%1 ms").arg(result.elapsedMs));
-    timeValue->setObjectName("labelValue");
-    timeValue->setStyleSheet("QLabel#labelValue { color: #3498db; font-weight: bold; }");
-    timeLayout->addWidget(timeLabel);
-    timeLayout->addWidget(timeValue);
-    timeLayout->addStretch();
-    row3->addLayout(timeLayout);
-    
-    gridLayout->addLayout(row3);
-    
-    mainLayout->addWidget(infoGroup, 0, Qt::AlignTop);
-    
-    // 空白区域
-    mainLayout->addStretch();
-    
-    // 按钮
+    buttonRowLayout->addWidget(copyPathBtn);
+
+    QPushButton* openFolderBtn = new QPushButton();
+    openFolderBtn->setObjectName("actionButton");
+    openFolderBtn->setFixedSize(80, 26);
+    openFolderBtn->setToolTip("打开文件夹");
+    openFolderBtn->setText(QString("%1").arg(FA::QFolder));
+    openFolderBtn->setFont(copyFont);
+    connect(openFolderBtn, &QPushButton::clicked, [result]() {
+        QFileInfo fi(result.filePath);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absolutePath()));
+    });
+    buttonRowLayout->addWidget(openFolderBtn);
+
+    QPushButton* copyNameBtn = new QPushButton();
+    copyNameBtn->setObjectName("actionButton");
+    copyNameBtn->setFixedSize(80, 26);
+    copyNameBtn->setToolTip("复制文件名");
+    copyNameBtn->setText(QString("%1").arg(FA::QFileAlt));
+    copyNameBtn->setFont(copyFont);
+    connect(copyNameBtn, &QPushButton::clicked, [result]() {
+        QFileInfo fi(result.filePath);
+        QApplication::clipboard()->setText(fi.fileName());
+    });
+    buttonRowLayout->addWidget(copyNameBtn);
+
+    gridLayout->addLayout(buttonRowLayout, 2, 0, 1, 2);
+
+    // 行4: 文件大小和耗时（紧凑布局）
+    QLabel* statsLabel = new QLabel("统计:");
+    statsLabel->setObjectName("labelKey");
+    gridLayout->addWidget(statsLabel, 3, 0);
+
+    QHBoxLayout* statsLayout = new QHBoxLayout();
+    statsLayout->setSpacing(15);
+
+    QLabel* sizeValue = new QLabel(QString("大小: %1").arg(sizeText));
+    sizeValue->setObjectName("labelHighlight");
+    sizeValue->setStyleSheet("color: #27ae60;");
+    statsLayout->addWidget(sizeValue);
+
+    QLabel* timeValue = new QLabel(QString("耗时: %1").arg(timeText));
+    timeValue->setObjectName("labelHighlight");
+    timeValue->setStyleSheet("color: #f39c12;");
+    statsLayout->addWidget(timeValue);
+
+    if (result.isNewPath) {
+        QLabel* newLabel = new QLabel("新保存");
+        newLabel->setStyleSheet("background-color: #fff3cd; color: #f39c12; border-radius: 4px; padding: 2px 8px; font-size: 10px; font-weight: bold;");
+        statsLayout->addWidget(newLabel);
+    }
+
+    statsLayout->addStretch();
+    gridLayout->addLayout(statsLayout, 3, 1);
+
+    mainLayout->addWidget(infoGroup);
+
+    // 底部按钮区域
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     buttonLayout->addStretch();
-    
+
     QPushButton* okButton = new QPushButton("确定");
-    okButton->setFixedWidth(80);
-    okButton->setFixedHeight(32);
+    okButton->setObjectName("mainButton");
     okButton->setCursor(Qt::PointingHandCursor);
+    okButton->setDefault(true);
     connect(okButton, &QPushButton::clicked, &dialog, &QDialog::accept);
     buttonLayout->addWidget(okButton);
-    
+
     mainLayout->addLayout(buttonLayout);
-    
+
     dialog.exec();
 }
 
@@ -5272,7 +5311,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     addTableButton->setMinimumHeight(38);
     addTableButton->setCursor(Qt::PointingHandCursor);
     addTableButton->setToolTip("创建新的表格");
-    addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM); // 根据只读模式和文件类型设置启用状态
+    addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM && !tab.isDAT); // 根据只读模式和文件类型设置启用状态
 
     // 保存按钮指针到tab结构中
     tab.addTableButton = addTableButton;
