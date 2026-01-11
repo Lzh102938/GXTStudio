@@ -5735,23 +5735,9 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     tab.caseSensitiveButton = caseSensitiveButton;
     tab.regexButton = regexButton;
     
-    // 计算标签页标题（优化显示）
-    QString title;
-    if (tab.isWHM) {
-        title = QString("%1 📄 (%2)").arg(tab.fileName.left(20), 
-                                         tab.fileName.length() > 20 ? "..." : "")
-               .arg(tab.whmEntries.size());
-    } else {
-        int totalEntries = 0;
-        for (const auto& table : tab.tables) {
-            totalEntries += static_cast<int>(table.entries.size());
-        }
-        QString shortName = tab.fileName.length() > 15 ? tab.fileName.left(15) + "..." : tab.fileName;
-        title = QString("%1 (%2/%3)").arg(QString("%1 %2").arg(shortName).arg(QString(FA::QClipboardList)),
-                                               QString::number(tab.tables.size()),
-                                               QString::number(totalEntries));
-    }
-    
+    // 计算标签页标题（只显示文件名）
+    QString title = tab.fileName;
+
     // 添加标签页到tabWidget
     m_tabWidget->insertTab(tabIndex, tabWidget, title);
     
