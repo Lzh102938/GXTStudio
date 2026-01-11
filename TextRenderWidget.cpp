@@ -568,8 +568,16 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
     QStringList lines = m_text.split('\n');
     QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
     QFontMetrics fm(currentFont);
-    int singleLineHeight = fm.height();
+    // 统一使用主字体和备用字体中较大的高度，确保中英文字符有足够的显示空间
+    QFontMetrics fm_fallback(m_fallbackFont);
+    int singleLineHeight = qMax(fm.height(), fm_fallback.height());
     int totalTextHeight = lines.size() * singleLineHeight;
+
+    // 计算中文字符缩放比例，使其与英文字符视觉高度一致
+    double fontScale = 1.0;
+    if (m_mainFontLoaded) {
+        fontScale = static_cast<double>(fm.height()) / static_cast<double>(fm_fallback.height());
+    }
 
     // 调试输出
     qDebug() << "Family:" << currentFont.family();
@@ -620,6 +628,14 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
                         for (const QChar& ch : part) {
                             // 为当前字符选择合适的字体
                             QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
+
+                            // 如果是中文字符且主字体已加载，按比例缩放使其与英文字符视觉高度一致
+                            if (needsFallbackFont(ch) && m_mainFontLoaded && fontScale < 1.0) {
+                                QFont scaledFont = charFont;
+                                scaledFont.setPointSizeF(charFont.pointSizeF() * fontScale);
+                                charFont = scaledFont;
+                            }
+
                             QFontMetrics fm_char(charFont);
                             int charWidth = fm_char.horizontalAdvance(ch);
 
@@ -684,6 +700,14 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
                         for (const QChar& ch : part) {
                             // 为当前字符选择合适的字体
                             QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
+
+                            // 如果是中文字符且主字体已加载，按比例缩放使其与英文字符视觉高度一致
+                            if (needsFallbackFont(ch) && m_mainFontLoaded && fontScale < 1.0) {
+                                QFont scaledFont = charFont;
+                                scaledFont.setPointSizeF(charFont.pointSizeF() * fontScale);
+                                charFont = scaledFont;
+                            }
+
                             QFontMetrics fm_char(charFont);
                             int charWidth = fm_char.horizontalAdvance(ch);
 
@@ -921,10 +945,19 @@ void TextRenderWidget::updateCachedPNG()
     // 计算文字的实际大小
     QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
     QFontMetrics fm(currentFont);
+    // 统一使用主字体和备用字体中较大的高度，确保中英文字符有足够的显示空间
+    QFontMetrics fm_fallback(m_fallbackFont);
+    int singleLineHeight = qMax(fm.height(), fm_fallback.height());
+
+    // 计算中文字符缩放比例，使其与英文字符视觉高度一致
+    double fontScale = 1.0;
+    if (m_mainFontLoaded) {
+        fontScale = static_cast<double>(fm.height()) / static_cast<double>(fm_fallback.height());
+    }
 
     QStringList lines = m_text.split('\n');
     int maxWidth = 0;
-    int totalHeight = lines.size() * fm.height();
+    int totalHeight = lines.size() * singleLineHeight;
 
     for (const QString& line : lines) {
         QString cleanLine = removeHiddenTokens(line);
@@ -977,9 +1010,18 @@ void TextRenderWidget::updateCachedPNG()
                     } else {
                         for (const QChar& ch : part) {
                             QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
+
+                            // 如果是中文字符且主字体已加载，按比例缩放使其与英文字符视觉高度一致
+                            if (needsFallbackFont(ch) && m_mainFontLoaded && fontScale < 1.0) {
+                                QFont scaledFont = charFont;
+                                scaledFont.setPointSizeF(charFont.pointSizeF() * fontScale);
+                                charFont = scaledFont;
+                            }
+
                             QFontMetrics fm_char(charFont);
                             int charWidth = fm_char.horizontalAdvance(ch);
-                            int baseline = yPos + fm_char.ascent();
+                            // 使用主字体的ascent作为统一的基线，确保中英文字符在同一水平线上
+                            int baseline = yPos + fm.ascent();
 
                         if (m_outlineEnabled) {
                             painter.save();
@@ -1000,7 +1042,7 @@ void TextRenderWidget::updateCachedPNG()
                     }
                 }
             }
-            yPos += fm.height();
+            yPos += singleLineHeight;
         }
     }
 
