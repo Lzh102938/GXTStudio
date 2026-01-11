@@ -5598,23 +5598,28 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         
         // 设置GTA版本 - 根据当前文件的版本设置正确的颜色映射
         int versionNum = 0;
-        switch (tab.version) {
-            case GXTVersion::GTA_III:
-                versionNum = 0;
-                break;
-            case GXTVersion::GTA_VC:
-                versionNum = 1;
-                break;
-            case GXTVersion::GTA_SA:
-                versionNum = 2;
-                break;
-            case GXTVersion::GTA_IV:
-                versionNum = 4;
-                break;
-            case GXTVersion::GXT2:
-            default:
-                versionNum = 2; // 默认为SA版本
-                break;
+        if (tab.isDAT) {
+            // DAT文件使用GTA IV的渲染方式
+            versionNum = 4;
+        } else {
+            switch (tab.version) {
+                case GXTVersion::GTA_III:
+                    versionNum = 0;
+                    break;
+                case GXTVersion::GTA_VC:
+                    versionNum = 1;
+                    break;
+                case GXTVersion::GTA_SA:
+                    versionNum = 2;
+                    break;
+                case GXTVersion::GTA_IV:
+                    versionNum = 4;
+                    break;
+                case GXTVersion::GXT2:
+                default:
+                    versionNum = 2; // 默认为SA版本
+                    break;
+            }
         }
         textRenderWidget->setGtaVersion(versionNum);
         
