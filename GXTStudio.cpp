@@ -1311,30 +1311,7 @@ void GXTStudio::setupToolBars()
     m_toolBar->addAction(m_saveAction);
     m_toolBar->addAction(m_saveAsAction);
     m_toolBar->addSeparator();
-    // 打开字符表（.dat）动作
-    m_openCharTableAction = new QAction("打开字符表", this);
-    m_openCharTableAction->setToolTip("打开 GTA 字符表（.dat）");
-    m_toolBar->addAction(m_openCharTableAction);
-    connect(m_openCharTableAction, &QAction::triggered, [this]() {
-        // 弹出文件选择对话框并加载字符表
-        QString filePath = QFileDialog::getOpenFileName(this, "打开字符表(.dat)", "", "DAT文件 (*.dat);;所有文件 (*.*)");
-        if (!filePath.isEmpty()) {
-            // 自动尝试以 VC 格式解析（wm_vcchs.dat），无需额外 CHARACTERS.txt
-            CharTableData data;
-            if (CharTableParser::loadGtaVc(filePath, data)) {
-                QWidget* tab = createCharTableTab(QFileInfo(filePath).fileName(), data);
-                m_tabWidget->addTab(tab, QFileInfo(filePath).fileName());
-                setCentralWidget(m_tabWidget);
-            } else if (CharTableParser::loadGtaIv(filePath, data)) {
-                QWidget* tab = createCharTableTab(QFileInfo(filePath).fileName(), data);
-                m_tabWidget->addTab(tab, QFileInfo(filePath).fileName());
-                setCentralWidget(m_tabWidget);
-            } else {
-                QMessageBox::warning(this, "加载失败", "无法解析该 .dat 文件为字符表，也无法作为 GTA_IV 文本表解析。\n(已尝试自动识别)");
-            }
-        }
-    });
-    
+
     // 创建码表转换按钮和下拉菜单
     m_codeTableButton = new QToolButton(this);
     m_codeTableButton->setText("码表转换(&C)");
@@ -4247,10 +4224,23 @@ void GXTStudio::onTabChanged(int index)
 
 void GXTStudio::closeTab(int index)
 {
-    if (index < 0 || index >= static_cast<int>(m_fileTabs.size())) {
+    // 检查标签页索引是否有效
+    if (index < 0 || index >= m_tabWidget->count()) {
         return;
     }
-    
+
+    // 检查是否为字符表标签页（不在 m_fileTabs 中）
+    if (index >= static_cast<int>(m_fileTabs.size())) {
+        // 直接关闭字符表标签页
+        QWidget* widget = m_tabWidget->widget(index);
+        m_tabWidget->removeTab(index);
+        if (widget) {
+            widget->deleteLater();
+        }
+        return;
+    }
+
+    // 处理普通 FileTab 标签页
     FileTab& tab = m_fileTabs[index];
     
     // 检查是否有未保存的更改
@@ -4804,17 +4794,21 @@ void GXTStudio::startAsyncParse(const QString& filePath)
 
         if (isCharTable) {
             CharTableData data;
+            int tabIndex = -1;
             if (CharTableParser::loadGtaVc(filePath, data)) {
                 QWidget* tab = createCharTableTab(fileInfo.fileName(), data);
-                m_tabWidget->addTab(tab, fileInfo.fileName());
-                return;
-            }
-            if (CharTableParser::loadGtaIv(filePath, data)) {
+                tabIndex = m_tabWidget->addTab(tab, fileInfo.fileName());
+            } else if (CharTableParser::loadGtaIv(filePath, data)) {
                 QWidget* tab = createCharTableTab(fileInfo.fileName(), data);
-                m_tabWidget->addTab(tab, fileInfo.fileName());
-                return;
+                tabIndex = m_tabWidget->addTab(tab, fileInfo.fileName());
             }
             // 若都失败，则继续当作普通 DAT 解析
+
+            // 自动切换到新打开的字符表标签页
+            if (tabIndex >= 0) {
+                m_tabWidget->setCurrentIndex(tabIndex);
+                return;
+            }
         }
     }
 

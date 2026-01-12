@@ -101,13 +101,11 @@ bool CharTableParser::loadGtaIv(const QString& datPath, CharTableData& out)
         return false;
     }
 
-    // 根据字符数量智能选择网格大小
-    int count = characters.size();
-    int cols = 16;
-    if (count > 1024) cols = 32;
-    if (count > 4096) cols = 64;
+    // 固定使用64列布局
+    int cols = 64;
 
     // 计算需要的行数
+    int count = characters.size();
     int rows = (count + cols - 1) / cols;
 
     // 填充输出结构

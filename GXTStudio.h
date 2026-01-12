@@ -893,7 +893,6 @@ private:
     
     // 动作
     QAction* m_openAction;
-    QAction* m_openCharTableAction; // 打开字符表 DAT
     QAction* m_saveAction;
     QAction* m_saveAsAction;
     QAction* m_exportAction;
