@@ -122,3 +122,83 @@ bool CharTableParser::loadGtaIv(const QString& datPath, CharTableData& out)
 
     return true;
 }
+
+bool CharTableParser::saveGtaVc(const QString& datPath, const CharTableData& data)
+{
+    if (data.type != CharTableData::GTA_VC) {
+        qWarning() << "数据类型不是GTA_VC格式";
+        return false;
+    }
+
+    QFile file(datPath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        qWarning() << "无法创建 dat 文件:" << datPath;
+        return false;
+    }
+
+    // 创建65536个条目的映射表，每个条目2字节(row, col)
+    QByteArray mappingTable(0x10000 * 2, 0);
+
+    // 默认所有位置为(63, 63)表示未使用
+    for (int i = 0; i < 0x10000; ++i) {
+        mappingTable[i * 2] = 63;
+        mappingTable[i * 2 + 1] = 63;
+    }
+
+    // 反向映射：从单元格位置到Unicode码点
+    for (int row = 0; row < data.rows; ++row) {
+        for (int col = 0; col < data.cols; ++col) {
+            int idx = row * data.cols + col;
+            if (idx < data.cells.size()) {
+                uint16_t codepoint = data.cells[idx];
+                if (codepoint != 0 && row < 64 && col < 64) {
+                    // 设置映射：codepoint -> (row, col)
+                    mappingTable[codepoint * 2] = static_cast<char>(row);
+                    mappingTable[codepoint * 2 + 1] = static_cast<char>(col);
+                }
+            }
+        }
+    }
+
+    qint64 written = file.write(mappingTable);
+    file.close();
+
+    if (written != mappingTable.size()) {
+        qWarning() << "写入 dat 文件不完整:" << datPath;
+        return false;
+    }
+
+    return true;
+}
+
+bool CharTableParser::saveGtaIv(const QString& datPath, const CharTableData& data)
+{
+    if (data.type != CharTableData::GTA_IV) {
+        qWarning() << "数据类型不是GTA_IV格式";
+        return false;
+    }
+
+    QFile file(datPath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        qWarning() << "无法创建 IV dat 文件:" << datPath;
+        return false;
+    }
+
+    // 写入BOM (Byte Order Mark for UTF-16LE)
+    file.putChar(0xFF);
+    file.putChar(0xFE);
+
+    // 按行优先顺序写入UTF-16LE字符序列
+    for (int idx = 0; idx < data.cells.size(); ++idx) {
+        uint16_t ch = data.cells[idx];
+        // 跳过空白字符
+        if (ch != 0x0000 && ch != 0x0020 && ch != 0x0009 && ch != 0x000A && ch != 0x000D) {
+            // 小端序：低字节在前，高字节在后
+            file.putChar(static_cast<char>(ch & 0xFF));
+            file.putChar(static_cast<char>((ch >> 8) & 0xFF));
+        }
+    }
+
+    file.close();
+    return true;
+}

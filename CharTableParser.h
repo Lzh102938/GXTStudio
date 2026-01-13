@@ -18,4 +18,8 @@ public:
     static bool loadGtaVc(const QString& datPath, CharTableData& out);
     // Load GTA:IV char table - best-effort (try reading as sequence of UTF-16LE characters)
     static bool loadGtaIv(const QString& datPath, CharTableData& out);
+    // Save GTA:VC char table
+    static bool saveGtaVc(const QString& datPath, const CharTableData& data);
+    // Save GTA:IV char table
+    static bool saveGtaIv(const QString& datPath, const CharTableData& data);
 };

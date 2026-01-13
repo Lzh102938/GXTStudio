@@ -1691,6 +1691,27 @@ void GXTStudio::saveFile()
         return;
     }
     
+    // 如果是字符表文件，直接保存
+    if (currentTab->isCharTable && currentTab->charTableWidget) {
+        const CharTableData& data = currentTab->charTableWidget->data();
+        bool success = false;
+
+        if (data.type == CharTableData::GTA_VC) {
+            success = CharTableParser::saveGtaVc(currentTab->filePath, data);
+        } else if (data.type == CharTableData::GTA_IV) {
+            success = CharTableParser::saveGtaIv(currentTab->filePath, data);
+        }
+
+        if (success) {
+            currentTab->isModified = false;
+            showLogMessage("字符表已保存: " + currentTab->filePath);
+            QMessageBox::information(this, "保存成功", "字符表已成功保存！");
+        } else {
+            QMessageBox::critical(this, "保存失败", "无法保存字符表文件");
+        }
+        return;
+    }
+    
     // 创建保存任务并提交到后台线程
     SaveTask task;
     task.tabPtr = currentTab;
@@ -4795,17 +4816,44 @@ void GXTStudio::startAsyncParse(const QString& filePath)
         if (isCharTable) {
             CharTableData data;
             int tabIndex = -1;
+            CharTableWidget* charTableWidget = nullptr;
+            
             if (CharTableParser::loadGtaVc(filePath, data)) {
-                QWidget* tab = createCharTableTab(fileInfo.fileName(), data);
-                tabIndex = m_tabWidget->addTab(tab, fileInfo.fileName());
+                charTableWidget = createCharTableTab(fileInfo.fileName(), data);
+                if (charTableWidget) {
+                    QWidget* parentPage = charTableWidget->property("parentPage").value<QWidget*>();
+                    if (parentPage) {
+                        tabIndex = m_tabWidget->addTab(parentPage, fileInfo.fileName());
+                    }
+                }
             } else if (CharTableParser::loadGtaIv(filePath, data)) {
-                QWidget* tab = createCharTableTab(fileInfo.fileName(), data);
-                tabIndex = m_tabWidget->addTab(tab, fileInfo.fileName());
+                charTableWidget = createCharTableTab(fileInfo.fileName(), data);
+                if (charTableWidget) {
+                    QWidget* parentPage = charTableWidget->property("parentPage").value<QWidget*>();
+                    if (parentPage) {
+                        tabIndex = m_tabWidget->addTab(parentPage, fileInfo.fileName());
+                    }
+                }
             }
+            
             // 若都失败，则继续当作普通 DAT 解析
-
-            // 自动切换到新打开的字符表标签页
-            if (tabIndex >= 0) {
+            if (tabIndex >= 0 && charTableWidget) {
+                // 创建FileTab结构体并添加到m_fileTabs
+                FileTab newTab;
+                newTab.filePath = filePath;
+                newTab.fileName = fileInfo.fileName();
+                newTab.isCharTable = true;
+                newTab.isWHM = false;
+                newTab.isDAT = false;
+                newTab.isModified = false;
+                newTab.version = GXTVersion::UNKNOWN;
+                newTab.charTableData = data;
+                newTab.charTableWidget = charTableWidget;
+                
+                m_fileTabs.push_back(newTab);
+                m_currentTabIndex = static_cast<int>(m_fileTabs.size()) - 1;
+                
+                // 自动切换到新打开的字符表标签页
                 m_tabWidget->setCurrentIndex(tabIndex);
                 return;
             }
@@ -8901,14 +8949,14 @@ void GXTStudio::onTranslationTotalProgress(int completed, int total, const QStri
     Q_UNUSED(message)
 }
 
-QWidget* GXTStudio::createCharTableTab(const QString& fileName, const CharTableData& data)
+CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const CharTableData& data)
 {
     QWidget* page = new QWidget();
     QVBoxLayout* layout = new QVBoxLayout(page);
     layout->setContentsMargins(8,8,8,8);
     layout->setSpacing(6);
 
-    // Top controls: file name label + zoom slider + export button
+    // Top controls: file name label + zoom slider + save button + export button
     QHBoxLayout* topRow = new QHBoxLayout();
     QLabel* nameLabel = new QLabel(QString("%1 (%2 x %3)").arg(fileName).arg(data.cols).arg(data.rows));
     nameLabel->setStyleSheet("font-weight:600; margin-left:6px;");
@@ -8923,23 +8971,53 @@ QWidget* GXTStudio::createCharTableTab(const QString& fileName, const CharTableD
     zoomSlider->setFixedWidth(160);
     topRow->addWidget(zoomSlider);
 
+    QPushButton* saveBtn = new QPushButton("保存");
+    saveBtn->setStyleSheet("background-color: #4CAF50; color: white; padding: 4px 12px;");
+    topRow->addWidget(saveBtn);
+
     QPushButton* exportBtn = new QPushButton("导出为图片");
     topRow->addWidget(exportBtn);
 
     layout->addLayout(topRow);
 
     // CharTableWidget inside scroll area
-    CharTableWidget* widget = new CharTableWidget();
+    CharTableWidget* widget = new CharTableWidget(page);
     widget->setData(data);
     widget->setCellSize(48);
 
-    QScrollArea* scroll = new QScrollArea();
+    QScrollArea* scroll = new QScrollArea(page);
     scroll->setWidgetResizable(true);
     scroll->setWidget(widget);
     layout->addWidget(scroll);
 
     // connect zoom
     connect(zoomSlider, &QSlider::valueChanged, widget, &CharTableWidget::setCellSize);
+
+    // save button: save modified char table
+    connect(saveBtn, &QPushButton::clicked, [this, widget, fileName]() {
+        FileTab* currentTab = getCurrentTab();
+        if (!currentTab || !currentTab->isCharTable) {
+            QMessageBox::warning(this, "保存失败", "当前标签页不是字符表文件");
+            return;
+        }
+
+        const CharTableData& data = widget->data();
+        bool success = false;
+
+        if (data.type == CharTableData::GTA_VC) {
+            success = CharTableParser::saveGtaVc(currentTab->filePath, data);
+        } else if (data.type == CharTableData::GTA_IV) {
+            success = CharTableParser::saveGtaIv(currentTab->filePath, data);
+        }
+
+        if (success) {
+            currentTab->isModified = false;
+            showLogMessage("字符表已保存: " + currentTab->filePath);
+            QMessageBox::information(this, "保存成功", "字符表已成功保存！");
+        } else {
+            QMessageBox::critical(this, "保存失败", "无法保存字符表文件");
+        }
+    });
 
     // export button: render widget to image
     connect(exportBtn, &QPushButton::clicked, [this, widget, fileName]() {
@@ -8954,7 +9032,9 @@ QWidget* GXTStudio::createCharTableTab(const QString& fileName, const CharTableD
         showLogMessage("已导出: " + out);
     });
 
-    return page;
+    // 返回CharTableWidget指针，但它的父窗口是page
+    widget->setProperty("parentPage", QVariant::fromValue<QWidget*>(page));
+    return widget;
 }
 
 // 当字符表中选中某个字符时调用：尝试插入到当前编辑框，否则复制到剪贴板

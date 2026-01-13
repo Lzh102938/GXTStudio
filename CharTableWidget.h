@@ -15,6 +15,10 @@ public:
     void setCellSize(int size);
     int cellSize() const { return m_cellSize; }
     QSize minimumSizeHint() const override;
+    
+    // 获取当前字符表数据
+    const CharTableData& data() const { return m_data; }
+    CharTableData& data() { return m_data; }
 
 protected:
     void paintEvent(QPaintEvent* ev) override;
@@ -22,6 +26,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
 
 private:
     // 字符缓存相关
@@ -38,6 +43,7 @@ private:
 
     QPixmap* getOrCreateCharPixmap(uint16_t charCode);
     void copySelectedCells();
+    void editCell(const QPoint& cellPos);
     QPoint getCellFromPos(const QPoint& pos);
     void normalizeSelection();
     void clearSelection();

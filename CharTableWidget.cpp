@@ -8,6 +8,8 @@
 #include <QKeyEvent>
 #include <QApplication>
 #include <QClipboard>
+#include <QInputDialog>
+#include <QMessageBox>
 
 // CacheKey 的哈希函数实现
 uint qHash(const CharTableWidget::CacheKey& key, uint seed) {
@@ -269,6 +271,17 @@ void CharTableWidget::keyPressEvent(QKeyEvent* event)
     QWidget::keyPressEvent(event);
 }
 
+void CharTableWidget::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        QPoint cell = getCellFromPos(event->pos());
+        if (cell.x() >= 0 && cell.y() >= 0) {
+            editCell(cell);
+        }
+    }
+    QWidget::mouseDoubleClickEvent(event);
+}
+
 void CharTableWidget::copySelectedCells()
 {
     if (m_selectionStart.x() == -1 || m_selectionEnd.x() == -1) return;
@@ -297,6 +310,40 @@ void CharTableWidget::copySelectedCells()
     if (!copiedText.isEmpty()) {
         QClipboard* clipboard = QApplication::clipboard();
         clipboard->setText(copiedText);
+    }
+}
+
+void CharTableWidget::editCell(const QPoint& cellPos)
+{
+    int row = cellPos.y();
+    int col = cellPos.x();
+    int idx = row * m_data.cols + col;
+    
+    if (idx < 0 || idx >= m_data.cells.size()) {
+        return;
+    }
+
+    uint16_t currentChar = m_data.cells[idx];
+    QString currentCharStr = (currentChar != 0) ? QChar(currentChar) : QString("空");
+    
+    bool ok = false;
+    QString text = QInputDialog::getText(this, "编辑字符",
+        QString("位置: [%1, %2]\n当前字符: %3\n输入新字符:").arg(row).arg(col).arg(currentCharStr),
+        QLineEdit::Normal, QString(), &ok);
+
+    if (ok && !text.isEmpty()) {
+        // 获取第一个字符的Unicode码点
+        uint16_t newCharCode = text.at(0).unicode();
+        
+        // 更新单元格数据
+        m_data.cells[idx] = newCharCode;
+        
+        // 清除该字符的缓存，以便重新渲染
+        CacheKey key{currentChar, m_cellSize};
+        m_charCache.remove(key);
+        
+        // 重绘单元格
+        update();
     }
 }
 

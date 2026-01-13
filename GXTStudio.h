@@ -870,7 +870,7 @@ private:
     QString getCardStyle(const QString& color) const;
     QString getButtonStyle(const QString& color, bool darker = false) const;
     QWidget* createWelcomeTab();
-    QWidget* createCharTableTab(const QString& fileName, const CharTableData& data); // 创建字符表标签页
+    CharTableWidget* createCharTableTab(const QString& fileName, const CharTableData& data); // 创建字符表标签页
     bool loadCharTableFile(const QString& filePath, const QString& fileName); // 加载字符表文件
 
 protected:
