@@ -1080,6 +1080,15 @@ public:
     
     void setEditable(bool editable) { m_editable = editable; }
     
+    // 加载SATKEY映射（静态方法，全局只加载一次）
+    static void loadSATKeyMap();
+    
+    // 查找SATKEY映射（静态方法）
+    static bool findSATKey(uint32_t hash, QString& outKey);
+    
+    // 反向查找：根据字符串查找hash（静态方法）
+    static bool findSATHash(const QString& key, uint32_t& outHash);
+    
     // 极简重置方法 - 强制更新以确保表格切换时无残留
     void resetModel() {
         if (!m_tab) return;
@@ -1266,8 +1275,26 @@ public:
                 if (role == Qt::DisplayRole || role == Qt::EditRole) {
                     const auto& entry = table.entries[row];
                     try {
-                        return col == KeyColumn ? QString::fromStdString(entry.key) 
-                                               : QString::fromStdString(entry.value);
+                        if (col == KeyColumn) {
+                            // 如果是GTA_SA版本，尝试使用SATKEY替换
+                            if (m_tab->version == GXTVersion::GTA_SA && !s_satKeyMap.isEmpty()) {
+                                // 将key（hex字符串）转换为uint32
+                                bool ok;
+                                uint32_t hash = QString::fromStdString(entry.key).toUInt(&ok, 16);
+                                if (ok) {
+                                    // 查找SATKEY映射
+                                    auto it = s_satKeyMap.find(hash);
+                                    if (it != s_satKeyMap.end()) {
+                                        // 找到匹配，返回SATKEY字符串
+                                        return it.value();
+                                    }
+                                }
+                            }
+                            // 如果没有找到匹配或不是GTA_SA版本，返回原始key
+                            return QString::fromStdString(entry.key);
+                        } else {
+                            return QString::fromStdString(entry.value);
+                        }
                     } catch (const std::exception& e) {
                         qWarning() << "String conversion failed at row" << row << ":" << e.what();
                         return QStringLiteral("[转换失败]");
@@ -1433,6 +1460,13 @@ private:
     // 性能优化缓存
     mutable int m_cachedRowCount;
     int m_currentTableIndex;
+    
+    // SATKEY映射（静态，全局共享）
+    static QMap<uint32_t, QString> s_satKeyMap;
+    
+public:
+    // 检查SATKEY映射是否为空（静态方法）
+    static bool isSATKeyMapEmpty();
 };
 
 // 优化的表格委托 - 支持预渲染和精确的文本高亮

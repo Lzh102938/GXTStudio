@@ -35,8 +35,12 @@
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QItemSelection>
+#include <QStringConverter>
 #include <windows.h>
 #include <fstream>
+
+// 初始化静态成员变量
+QMap<uint32_t, QString> GXTTableModel::s_satKeyMap;
 
 // 字符串转换函数
 std::string qstring_to_ansi(const QString& qstr) {
@@ -63,6 +67,99 @@ std::string normalizeKeyStdString(const std::string& key) {
         normalized = normalized.substr(1);
     }
     return normalized;
+}
+
+// 加载SATKEY映射（静态方法，全局只加载一次）
+void GXTTableModel::loadSATKeyMap() {
+    // 如果已经加载过，直接返回
+    if (!s_satKeyMap.isEmpty()) {
+        return;
+    }
+    
+    // 构建文件路径
+    QString keylistPath = QDir::current().filePath("keylist/SATKEY.lst");
+    
+    // 检查文件是否存在
+    if (!QFile::exists(keylistPath)) {
+        qWarning() << "SATKEY.lst文件不存在:" << keylistPath;
+        return;
+    }
+    
+    // 打开文件
+    QFile file(keylistPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "无法打开SATKEY.lst文件:" << keylistPath;
+        return;
+    }
+    
+    QTextStream stream(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    stream.setEncoding(QStringConverter::Utf8);
+#else
+    stream.setCodec("UTF-8");
+#endif
+    
+    int loadedCount = 0;
+    while (!stream.atEnd()) {
+        QString line = stream.readLine().trimmed();
+        
+        // 跳过空行和注释
+        if (line.isEmpty() || line.startsWith("#")) {
+            continue;
+        }
+        
+        // 按制表符分割
+        QStringList parts = line.split('\t');
+        if (parts.size() != 2) {
+            continue; // 格式不正确
+        }
+        
+        QString keyStr = parts[0].trimmed();
+        QString hashStr = parts[1].trimmed();
+        
+        // 解析hash（移除0x前缀并转换为uint32）
+        bool ok;
+        uint32_t hash = hashStr.toUInt(&ok, 16); // 16进制转换
+        if (!ok) {
+            qWarning() << "解析hash失败:" << hashStr;
+            continue;
+        }
+        
+        // 添加到映射
+        s_satKeyMap[hash] = keyStr;
+        loadedCount++;
+    }
+    
+    file.close();
+    
+    qDebug() << "成功加载" << loadedCount << "条SATKEY映射";
+}
+
+// 查找SATKEY映射（静态方法）
+bool GXTTableModel::findSATKey(uint32_t hash, QString& outKey) {
+    auto it = s_satKeyMap.find(hash);
+    if (it != s_satKeyMap.end()) {
+        outKey = it.value();
+        return true;
+    }
+    return false;
+}
+
+// 反向查找：根据字符串查找hash（静态方法）
+bool GXTTableModel::findSATHash(const QString& key, uint32_t& outHash) {
+    // 遍历映射表，查找匹配的key
+    for (auto it = s_satKeyMap.begin(); it != s_satKeyMap.end(); ++it) {
+        if (it.value() == key) {
+            outHash = it.key();
+            return true;
+        }
+    }
+    return false;
+}
+
+// 检查SATKEY映射是否为空（静态方法）
+bool GXTTableModel::isSATKeyMapEmpty() {
+    return s_satKeyMap.isEmpty();
 }
 
 // MultiThreadProgressDialog 实现 - 简约高效设计
@@ -862,6 +959,9 @@ GXTStudio::GXTStudio(QWidget *parent)
     // 更新状态
     updateActions();
     updateStatusBar();
+    
+    // 加载SATKEY映射
+    GXTTableModel::loadSATKeyMap();
     
     showLogMessage("GXTStudio 已启动");
 }
@@ -6781,12 +6881,60 @@ void GXTStudio::prepareEditorForSave(FileTab* tab, GXTEditor& editor)
         int failedCount = 0;
         for (size_t j = 0; j < table.entries.size(); ++j) {
             const auto& entry = table.entries[j];
+            
+            // 对于GTA_SA版本，进行key的反向转换
+            std::string saveKey = entry.key;
+            if (tab->version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
+                QString keyStr = QString::fromStdString(entry.key);
+                
+                // 检查是否是hex格式（以0x开头或全部是hex字符）
+                bool isHexFormat = false;
+                if (keyStr.startsWith("0x", Qt::CaseInsensitive)) {
+                    isHexFormat = true;
+                } else if (keyStr.length() == 8) {
+                    // 检查是否全部是hex字符
+                    bool allHex = true;
+                    for (const QChar& c : keyStr) {
+                        if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
+                            allHex = false;
+                            break;
+                        }
+                    }
+                    isHexFormat = allHex;
+                }
+                
+                // 如果不是hex格式，则需要反向转换
+                if (!isHexFormat) {
+                    uint32_t hash;
+                    // 尝试在SATKEY映射中反向查找
+                    if (GXTTableModel::findSATHash(keyStr, hash)) {
+                        // 找到了，转换为hex字符串
+                        saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
+                        if (j < 5) {
+                            showLogMessage(QString("  反向转换SATKEY: %1 -> 0x%2")
+                                          .arg(keyStr)
+                                          .arg(QString::fromStdString(saveKey)));
+                        }
+                    } else {
+                        // 没有找到，计算JAMCRC
+                        std::string upperKey = keyStr.toUpper().toStdString();
+                        hash = GXTEditor::calculateJAMCRC(upperKey);
+                        saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
+                        if (j < 5) {
+                            showLogMessage(QString("  计算JAMCRC: %1 -> 0x%2")
+                                          .arg(keyStr)
+                                          .arg(QString::fromStdString(saveKey)));
+                        }
+                    }
+                }
+            }
+            
             if (j < 5) { // 只记录前5个条目，避免日志过多
                 showLogMessage(QString("  添加条目: %1 = %2")
-                              .arg(QString::fromStdString(entry.key))
+                              .arg(QString::fromStdString(saveKey))
                               .arg(QString::fromStdString(entry.value).left(20)));
             }
-            bool addResult = editor.addEntry(tableIndex, entry.key, entry.value);
+            bool addResult = editor.addEntry(tableIndex, saveKey, entry.value);
             if (addResult) {
                 addedCount++;
             } else {

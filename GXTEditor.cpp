@@ -153,6 +153,13 @@ static uint32_t calculateJOAAT(const std::string& input) {
     return hash;
 }
 
+// JAMCRC哈希计算（GXT SA使用）
+static uint32_t calculateJAMCRC(const std::string& input) {
+    // JAMCRC是CRC32的变体：对CRC32结果取反
+    uint32_t crc = calculateCRC32(input);
+    return 0xFFFFFFFF ^ crc;
+}
+
 // 标准化键（去掉x前缀或0x前缀）
 std::string GXTEditor::normalizeKey(const std::string& key) const {
     std::string normalized = key;
@@ -758,7 +765,7 @@ bool GXTEditor::saveAsText(const std::string& path) {
 }
 
 // 简化的CRC32计算（实际应用中应使用标准CRC32算法）
-uint32_t GXTEditor::calculateCRC32(const std::string& str) const {
+uint32_t GXTEditor::calculateCRC32(const std::string& str) {
     // 这是一个简化的实现，实际应使用标准的CRC32算法
     uint32_t crc = 0xFFFFFFFF;
     for (char c : str) {
@@ -789,6 +796,13 @@ uint32_t GXTEditor::calculateJOAAT(const std::string& str) const {
     hash += (hash << 15);
     hash &= 0xFFFFFFFF;
     return hash;
+}
+
+// JAMCRC哈希算法（用于GTA SA）
+uint32_t GXTEditor::calculateJAMCRC(const std::string& str) {
+    // JAMCRC是CRC32的变体：对CRC32结果取反
+    uint32_t crc = calculateCRC32(str);
+    return 0xFFFFFFFF ^ crc;
 }
 
 size_t GXTEditor::getTableCount() const {

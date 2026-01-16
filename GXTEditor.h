@@ -77,8 +77,12 @@ public:
 private:
     // 辅助计算方法
     uint32_t calculateTDATSize(const GXTTable& table, int bitsPerChar) const;
-    uint32_t calculateCRC32(const std::string& str) const;
+    static uint32_t calculateCRC32(const std::string& str);
     uint32_t calculateJOAAT(const std::string& str) const;
+    
+public:
+    // JAMCRC哈希计算（静态方法，用于GTA SA）
+    static uint32_t calculateJAMCRC(const std::string& str);
     
     // 辅助函数：标准化键（去掉0x前缀）
     std::string normalizeKey(const std::string& key) const;
