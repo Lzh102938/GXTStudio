@@ -43,6 +43,38 @@
 QMap<uint32_t, QString> GXTTableModel::s_satKeyMap;
 QMap<uint32_t, QString> GXTTableModel::s_ivtKeyMap;
 
+// 简单的事件过滤器类，用于处理父容器resize事件
+class ResizeEventFilter : public QObject {
+public:
+    explicit ResizeEventFilter(QObject* parent = nullptr) : QObject(parent), m_button(nullptr), m_listWidget(nullptr) {}
+    
+    void setButton(QToolButton* button) { m_button = button; }
+    void setListWidget(QListWidget* listWidget) { m_listWidget = listWidget; }
+    
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override {
+        if (event->type() == QEvent::Resize && m_button && m_listWidget) {
+            QWidget* panel = qobject_cast<QWidget*>(obj);
+            if (panel) {
+                // 获取列表控件在父容器中的几何位置
+                QRect listRect = m_listWidget->geometry();
+                
+                // 按钮右对齐列表控件右侧，下移到底部留白区域
+                // 按钮大小为42x42，在底部50px的留白区域中，距离底部5px
+                int buttonX = listRect.right() - 42;  // 右对齐列表控件右侧
+                int buttonY = listRect.bottom() + 5;  // 下移到底部留白，距离底部5px
+                
+                m_button->move(buttonX, buttonY);
+            }
+        }
+        return false;
+    }
+    
+private:
+    QToolButton* m_button;
+    QListWidget* m_listWidget;
+};
+
 // 字符串转换函数
 std::string qstring_to_ansi(const QString& qstr) {
     if (qstr.isEmpty()) return "";
@@ -5566,89 +5598,81 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         tableList->setContextMenuPolicy(Qt::CustomContextMenu);
     }
     
-    leftLayout->addWidget(tableListLabel);
-    leftLayout->addWidget(tableList, 1);
+    // 创建表格列表面板容器
+    QWidget* tableListPanel = new QWidget();
+    QVBoxLayout* tableListPanelLayout = new QVBoxLayout(tableListPanel);
+    tableListPanelLayout->setContentsMargins(0, 0, 0, 0);
+    tableListPanelLayout->setSpacing(0);
+    tableListPanelLayout->addWidget(tableListLabel);
+    tableListPanelLayout->addWidget(tableList, 1);
     
-    // 创建添加表按钮容器 - 使用与主程序一致的扁平化设计
-    QWidget* addTableButtonContainer = new QWidget();
-    addTableButtonContainer->setMaximumHeight(45);
-    addTableButtonContainer->setMinimumHeight(40);
-    QHBoxLayout* addTableButtonLayout = new QHBoxLayout(addTableButtonContainer);
-    addTableButtonLayout->setContentsMargins(0, 8, 0, 0);
-    addTableButtonLayout->setSpacing(8);
+    // 为列表底部添加额外空间，防止按钮遮挡最后一项
+    tableListPanelLayout->addSpacing(55);  // 添加55px的底部空间（按钮42px + 底部距离5px + 8px额外空间）
     
-    // 创建添加新表按钮 - 与主程序欢迎页面按钮风格一致
-    QToolButton* addTableButton = new QToolButton();
-    addTableButton->setMinimumHeight(38);
+    // 创建圆形添加按钮 - 放在列表控件内侧右下角
+    QToolButton* addTableButton = new QToolButton(tableListPanel);
+    addTableButton->setFixedSize(42, 42);  // 设置固定大小为42x42，用于圆形
     addTableButton->setCursor(Qt::PointingHandCursor);
     addTableButton->setToolTip("创建新的表格");
-    addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM && !tab.isDAT); // 根据只读模式和文件类型设置启用状态
-
+    addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM && !tab.isDAT);
+    
     // 保存按钮指针到tab结构中
     tab.addTableButton = addTableButton;
-
-    // 使用统一的FA图标渲染方式
-    addTableButton->setText(QString("%1 添加新表").arg(QString(FA::QPlus)));
-    addTableButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    
+    // 使用U+f65e Font Awesome图标 - plus图标
+    addTableButton->setText(QChar(0xf65e));
+    addTableButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
 
     // 使用主程序欢迎页面的按钮样式风格（扁平化设计）
     QString buttonColor = "#3498db"; // 使用主程序的蓝色
     QString hoverColor = QColor(buttonColor).darker(120).name();
     QString pressedColor = QColor(buttonColor).darker(150).name();
 
-    // 设置样式表，显式指定FontAwesome字体族
+    // 设置圆形按钮样式
     QString addTableFontFamily = FA::solidFontFamily();
-    QString addTableButtonStyle;
-    if (addTableFontFamily.isEmpty()) {
-        // 如果字体加载失败，使用默认样式
-        addTableButtonStyle = QString(R"(
-            QToolButton {
-                background-color: %1;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 10px 16px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QToolButton:hover {
-                background-color: %2;
-            }
-            QToolButton:pressed {
-                background-color: %3;
-            }
-            QToolButton:disabled {
-                background-color: #e0e0e0;
-                color: #a0a0a0;
-            }
-        )").arg(buttonColor).arg(hoverColor).arg(pressedColor);
-    } else {
-        // 如果字体加载成功，显式指定字体族
-        addTableButtonStyle = QString(R"(
-            QToolButton {
-                background-color: %1;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 10px 16px;
-                font-size: 14px;
-                font-weight: bold;
-                font-family: '%4';
-            }
-            QToolButton:hover {
-                background-color: %2;
-            }
-            QToolButton:pressed {
-                background-color: %3;
-            }
-            QToolButton:disabled {
-                background-color: #e0e0e0;
-                color: #a0a0a0;
-            }
-        )").arg(buttonColor).arg(hoverColor).arg(pressedColor).arg(addTableFontFamily);
-    }
+    QString addTableButtonStyle = QString(R"(
+        QToolButton {
+            background-color: %1;
+            color: white;
+            border: none;
+            border-radius: 21px;  /* 设置为宽度的一半，形成圆形 */
+            font-size: 18px;
+            font-weight: bold;
+            padding: 0px;  /* 移除内边距 */
+            margin: 0px;   /* 移除外边距 */
+        }
+        QToolButton:hover {
+            background-color: %2;
+        }
+        QToolButton:pressed {
+            background-color: %3;
+        }
+        QToolButton:disabled {
+            background-color: #e0e0e0;
+            color: #a0a0a0;
+        }
+    )").arg(buttonColor).arg(hoverColor).arg(pressedColor);
     addTableButton->setStyleSheet(addTableButtonStyle);
-    addTableButton->setFont(QFont("Microsoft YaHei", 13, QFont::Bold));
+    
+    // 如果Font Awesome字体可用，使用它以确保图标居中
+    if (!addTableFontFamily.isEmpty()) {
+        addTableButton->setFont(FA::solidFont(18));
+    } else {
+        addTableButton->setFont(QFont("Microsoft YaHei", 16, QFont::Bold));
+    }
+    
+    // 初始定位按钮：右对齐列表控件右侧，下移到底部留白区域
+    // 按钮大小为42x42，在底部50px的留白区域中，距离底部5px
+    QRect listRect = tableList->geometry();
+    int buttonX = listRect.right() - 42;  // 右对齐列表控件右侧
+    int buttonY = listRect.bottom() + 5;  // 下移到底部留白，距离底部5px
+    addTableButton->move(buttonX, buttonY);
+    
+    // 当父容器大小改变时，重新定位按钮
+    ResizeEventFilter* resizeFilter = new ResizeEventFilter(tableListPanel);
+    resizeFilter->setButton(addTableButton);
+    resizeFilter->setListWidget(tableList);
+    tableListPanel->installEventFilter(resizeFilter);
     
     // 连接信号
     connect(addTableButton, &QToolButton::clicked, this, [this]() {
@@ -5660,11 +5684,8 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         }
     });
     
-    // 添加到布局，使按钮居中
-    addTableButtonLayout->addStretch();
-    addTableButtonLayout->addWidget(addTableButton);
-    addTableButtonLayout->addStretch();
-    leftLayout->addWidget(addTableButtonContainer);
+    // 将表格列表面板添加到左侧布局
+    leftLayout->addWidget(tableListPanel);
     
     // 创建右侧面板容器
     QWidget* rightPanel = new QWidget();
@@ -5804,10 +5825,9 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
             }
         )");
 
-        // 添加按钮 - 与主程序风格一致
-        QPushButton* addEntryButton = new QPushButton("添加");
-        addEntryButton->setMinimumWidth(90);
-        addEntryButton->setMinimumHeight(32);
+        // 添加按钮 - 使用FA7符号U+002b (plus图标)
+        QPushButton* addEntryButton = new QPushButton(QChar(0x002b));
+        addEntryButton->setFixedSize(32, 32);  // 与文本框高度一致（32px）
         addEntryButton->setEnabled(!m_isReadOnly);
 
         QString buttonColor = "#3498db";
@@ -5819,9 +5839,9 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
                 background-color: %1;
                 color: white;
                 border: none;
-                border-radius: 8px;
-                padding: 8px 20px;
-                font-size: 14px;
+                border-radius: 6px;  /* 与文本框圆角一致（6px） */
+                padding: 0px;  /* 移除内边距 */
+                font-size: 12px;  /* 与文本框字体大小一致 */
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -5836,7 +5856,13 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
             }
         )").arg(buttonColor).arg(hoverColor).arg(pressedColor));
 
-        addEntryButton->setFont(QFont("Microsoft YaHei", 13, QFont::Bold));
+        // 使用Font Awesome字体渲染U+002b图标
+        QString addEntryFontFamily = FA::solidFontFamily();
+        if (!addEntryFontFamily.isEmpty()) {
+            addEntryButton->setFont(FA::solidFont(12));  // 与文本框字体大小一致（12px）
+        } else {
+            addEntryButton->setFont(QFont("Microsoft YaHei", 12, QFont::Bold));
+        }
 
         // 设置伸缩因子
         keyEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);

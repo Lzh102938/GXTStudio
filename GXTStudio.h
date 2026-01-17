@@ -138,6 +138,7 @@ namespace FA {
 #include <QtCore/QThread>
 #include <QtCore/QMimeData>
 #include <QtCore/QUrl>
+#include <QToolTip>
 #include "GXTEditor.h"
 #include <QDrag>
 #include <QtCore/QMutex>
@@ -1725,6 +1726,9 @@ public:
         editor->setClearButtonEnabled(false); // 禁用清除按钮以避免布局问题
         editor->setFrame(false);
         
+        // 安装事件过滤器来处理Alt键显示Unicode hex
+        editor->installEventFilter(const_cast<OptimizedItemDelegate*>(this));
+        
         return editor;
     }
     
@@ -1830,8 +1834,33 @@ public:
     bool eventFilter(QObject* watched, QEvent* event) override {
         if (event->type() == QEvent::KeyPress) {
             QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
-            QTableView* tableView = qobject_cast<QTableView*>(watched);
             
+            // 检查是否是QLineEdit的Alt键事件（用于显示Unicode hex）
+            QLineEdit* lineEdit = qobject_cast<QLineEdit*>(watched);
+            if (lineEdit && keyEvent->key() == Qt::Key_Alt) {
+                QString selectedText = lineEdit->selectedText();
+                if (!selectedText.isEmpty()) {
+                    // 生成Unicode hex信息
+                    QString unicodeInfo;
+                    for (int i = 0; i < selectedText.length(); ++i) {
+                        QChar ch = selectedText[i];
+                        ushort unicode = ch.unicode();
+                        unicodeInfo += QString("'%1' = U+%2")
+                            .arg(ch)
+                            .arg(unicode, 4, 16, QChar('0'))
+                            .toUpper();
+                        if (i < selectedText.length() - 1) {
+                            unicodeInfo += "\n";
+                        }
+                    }
+                    
+                    // 显示tooltip
+                    QToolTip::showText(lineEdit->mapToGlobal(QPoint(0, -30)), unicodeInfo, lineEdit);
+                    return true;
+                }
+            }
+            
+            QTableView* tableView = qobject_cast<QTableView*>(watched);
             if (tableView && tableView->selectionModel()) {
                 QModelIndex currentIndex = tableView->selectionModel()->currentIndex();
                 
