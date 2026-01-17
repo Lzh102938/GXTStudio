@@ -84,6 +84,9 @@ public:
     // JAMCRC哈希计算（静态方法，用于GTA SA）
     static uint32_t calculateJAMCRC(const std::string& str);
     
+    // GTA4哈希计算（静态方法，用于GTA IV）
+    static uint32_t calculateGTA4Hash(const std::string& str);
+    
     // 辅助函数：标准化键（去掉0x前缀）
     std::string normalizeKey(const std::string& key) const;
 };

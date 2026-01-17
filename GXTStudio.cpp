@@ -41,6 +41,7 @@
 
 // 初始化静态成员变量
 QMap<uint32_t, QString> GXTTableModel::s_satKeyMap;
+QMap<uint32_t, QString> GXTTableModel::s_ivtKeyMap;
 
 // 字符串转换函数
 std::string qstring_to_ansi(const QString& qstr) {
@@ -135,10 +136,86 @@ void GXTTableModel::loadSATKeyMap() {
     qDebug() << "成功加载" << loadedCount << "条SATKEY映射";
 }
 
+// 加载IVTKEY映射（静态方法，全局只加载一次）
+void GXTTableModel::loadIVTKeyMap() {
+    // 如果已经加载过，直接返回
+    if (!s_ivtKeyMap.isEmpty()) {
+        return;
+    }
+    
+    // 构建文件路径
+    QString keylistPath = QDir::current().filePath("keylist/IVTKEY.lst");
+    
+    // 检查文件是否存在
+    if (!QFile::exists(keylistPath)) {
+        qWarning() << "IVTKEY.lst文件不存在:" << keylistPath;
+        return;
+    }
+    
+    // 打开文件
+    QFile file(keylistPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "无法打开IVTKEY.lst文件:" << keylistPath;
+        return;
+    }
+    
+    QTextStream stream(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    stream.setEncoding(QStringConverter::Utf8);
+#else
+    stream.setCodec("UTF-8");
+#endif
+    
+    int loadedCount = 0;
+    while (!stream.atEnd()) {
+        QString line = stream.readLine().trimmed();
+        
+        // 跳过空行和注释
+        if (line.isEmpty() || line.startsWith("#")) {
+            continue;
+        }
+        
+        // 按制表符分割
+        QStringList parts = line.split('\t');
+        if (parts.size() != 2) {
+            continue; // 格式不正确
+        }
+        
+        QString keyStr = parts[0].trimmed();
+        QString hashStr = parts[1].trimmed();
+        
+        // 解析hash（移除0x前缀并转换为uint32）
+        bool ok;
+        uint32_t hash = hashStr.toUInt(&ok, 16); // 16进制转换
+        if (!ok) {
+            qWarning() << "解析hash失败:" << hashStr;
+            continue;
+        }
+        
+        // 添加到映射
+        s_ivtKeyMap[hash] = keyStr;
+        loadedCount++;
+    }
+    
+    file.close();
+    
+    qDebug() << "成功加载" << loadedCount << "条IVTKEY映射";
+}
+
 // 查找SATKEY映射（静态方法）
 bool GXTTableModel::findSATKey(uint32_t hash, QString& outKey) {
     auto it = s_satKeyMap.find(hash);
     if (it != s_satKeyMap.end()) {
+        outKey = it.value();
+        return true;
+    }
+    return false;
+}
+
+// 查找IVTKEY映射（静态方法）
+bool GXTTableModel::findIVTKey(uint32_t hash, QString& outKey) {
+    auto it = s_ivtKeyMap.find(hash);
+    if (it != s_ivtKeyMap.end()) {
         outKey = it.value();
         return true;
     }
@@ -157,9 +234,26 @@ bool GXTTableModel::findSATHash(const QString& key, uint32_t& outHash) {
     return false;
 }
 
+// 反向查找：根据字符串查找IVT hash（静态方法）
+bool GXTTableModel::findIVTHash(const QString& key, uint32_t& outHash) {
+    // 遍历映射表，查找匹配的key
+    for (auto it = s_ivtKeyMap.begin(); it != s_ivtKeyMap.end(); ++it) {
+        if (it.value() == key) {
+            outHash = it.key();
+            return true;
+        }
+    }
+    return false;
+}
+
 // 检查SATKEY映射是否为空（静态方法）
 bool GXTTableModel::isSATKeyMapEmpty() {
     return s_satKeyMap.isEmpty();
+}
+
+// 检查IVTKEY映射是否为空（静态方法）
+bool GXTTableModel::isIVTKeyMapEmpty() {
+    return s_ivtKeyMap.isEmpty();
 }
 
 // MultiThreadProgressDialog 实现 - 简约高效设计
@@ -962,6 +1056,9 @@ GXTStudio::GXTStudio(QWidget *parent)
     
     // 加载SATKEY映射
     GXTTableModel::loadSATKeyMap();
+    
+    // 加载IVTKEY映射
+    GXTTableModel::loadIVTKeyMap();
     
     showLogMessage("GXTStudio 已启动");
 }
@@ -6922,6 +7019,50 @@ void GXTStudio::prepareEditorForSave(FileTab* tab, GXTEditor& editor)
                         saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
                         if (j < 5) {
                             showLogMessage(QString("  计算JAMCRC: %1 -> 0x%2")
+                                          .arg(keyStr)
+                                          .arg(QString::fromStdString(saveKey)));
+                        }
+                    }
+                }
+            }
+            // 对于GTA_IV版本，进行key的反向转换
+            else if (tab->version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                QString keyStr = QString::fromStdString(entry.key);
+                
+                // 检查是否是hex格式（以0x开头或全部是hex字符）
+                bool isHexFormat = false;
+                if (keyStr.startsWith("0x", Qt::CaseInsensitive)) {
+                    isHexFormat = true;
+                } else if (keyStr.length() == 8) {
+                    // 检查是否全部是hex字符
+                    bool allHex = true;
+                    for (const QChar& c : keyStr) {
+                        if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
+                            allHex = false;
+                            break;
+                        }
+                    }
+                    isHexFormat = allHex;
+                }
+                
+                // 如果不是hex格式，则需要反向转换
+                if (!isHexFormat) {
+                    uint32_t hash;
+                    // 尝试在IVTKEY映射中反向查找
+                    if (GXTTableModel::findIVTHash(keyStr, hash)) {
+                        // 找到了，转换为hex字符串
+                        saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
+                        if (j < 5) {
+                            showLogMessage(QString("  反向转换IVTKEY: %1 -> 0x%2")
+                                          .arg(keyStr)
+                                          .arg(QString::fromStdString(saveKey)));
+                        }
+                    } else {
+                        // 没有找到，计算GTA4哈希
+                        hash = GXTEditor::calculateGTA4Hash(keyStr.toStdString());
+                        saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
+                        if (j < 5) {
+                            showLogMessage(QString("  计算GTA4哈希: %1 -> 0x%2")
                                           .arg(keyStr)
                                           .arg(QString::fromStdString(saveKey)));
                         }

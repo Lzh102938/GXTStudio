@@ -805,6 +805,35 @@ uint32_t GXTEditor::calculateJAMCRC(const std::string& str) {
     return 0xFFFFFFFF ^ crc;
 }
 
+// GTA4哈希计算（用于GTA IV）
+uint32_t GXTEditor::calculateGTA4Hash(const std::string& str) {
+    uint32_t ret_hash = 0;
+    
+    for (char c : str) {
+        char processed_char = c;
+        
+        // A-Z 转小写
+        if (c >= 'A' && c <= 'Z') {
+            processed_char = c + 32;
+        }
+        // 反斜杠替换
+        else if (c == '\\') {
+            processed_char = '/';
+        }
+        
+        uint8_t c_val = static_cast<uint8_t>(processed_char) & 0xFF;
+        uint32_t tmp = (ret_hash + c_val) & 0xFFFFFFFF;
+        uint32_t mult = (1025 * tmp) & 0xFFFFFFFF;
+        ret_hash = ((mult >> 6) ^ mult) & 0xFFFFFFFF;
+    }
+    
+    uint32_t a = (9 * ret_hash) & 0xFFFFFFFF;
+    uint32_t a_x = (a ^ (a >> 11)) & 0xFFFFFFFF;
+    ret_hash = (32769 * a_x) & 0xFFFFFFFF;
+    
+    return ret_hash;
+}
+
 size_t GXTEditor::getTableCount() const {
     return tables.size();
 }
