@@ -2348,7 +2348,17 @@ void GXTStudio::toggleReadOnly(bool readOnly)
             tab.tableList->setEditTriggers(QAbstractItemView::DoubleClicked);
         }
         if (tab.entryTableView) {
-            tab.entryTableView->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked);
+            // 在只读模式下仍然允许选择，但不触发编辑
+            if (m_isReadOnly) {
+                tab.entryTableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                // 设置选择行为为行选择，允许用户选择整个行
+                tab.entryTableView->setSelectionBehavior(QAbstractItemView::SelectRows);
+                tab.entryTableView->setSelectionMode(QAbstractItemView::ExtendedSelection);
+            } else {
+                tab.entryTableView->setEditTriggers(QAbstractItemView::DoubleClicked);
+                tab.entryTableView->setSelectionBehavior(QAbstractItemView::SelectRows);
+                tab.entryTableView->setSelectionMode(QAbstractItemView::ExtendedSelection);
+            }
         }
         if (tab.entryTableModel) {
             tab.entryTableModel->setEditable(!m_isReadOnly);
@@ -2359,17 +2369,17 @@ void GXTStudio::toggleReadOnly(bool readOnly)
         }
         // 更新添加条目按钮状态
         if (tab.addEntryButton) {
-            tab.addEntryButton->setEnabled(!m_isReadOnly && !tab.isWHM);
+            tab.addEntryButton->setEnabled(!m_isReadOnly);
         }
     }
-
-    // 更新码表转换按钮状态
-    if (m_codeTableButton) {
-        m_codeTableButton->setEnabled(!m_isReadOnly);
+    
+    // 更新菜单项文本
+    m_readOnlyAction->setText(m_isReadOnly ? "退出只读模式" : "只读模式");
+    
+    // 更新状态栏
+    if (m_statusLabel) {
+        m_statusLabel->setText(QString("状态: %1").arg(m_isReadOnly ? "只读" : "编辑"));
     }
-
-    updateActions();
-    showLogMessage(readOnly ? "切换到只读模式" : "切换到编辑模式");
 }
 
 // 视图操作槽函数
@@ -5889,8 +5899,8 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         
         // 创建文本渲染预览窗格
         TextRenderWidget* textRenderWidget = new TextRenderWidget();
-        textRenderWidget->setMaximumHeight(60);
-        textRenderWidget->setMinimumHeight(60);
+        textRenderWidget->setMaximumHeight(40);
+        textRenderWidget->setMinimumHeight(40);
         rightLayout->addWidget(textRenderWidget);
         
         // 设置GTA版本 - 根据当前文件的版本设置正确的颜色映射

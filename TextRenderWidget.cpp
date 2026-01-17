@@ -128,8 +128,8 @@ TextRenderWidget::TextRenderWidget(QWidget* parent)
     setAttribute(Qt::WA_OpaquePaintEvent); // 不透明绘制，减少合成，提升性能
     setAttribute(Qt::WA_NoSystemBackground); // 禁用系统背景，手动绘制
     setAttribute(Qt::WA_NativeWindow); // 使用原生窗口，启用GPU硬件加速
-    setMinimumHeight(60);  // 进一步减小最小高度
-    setMaximumHeight(60);  // 进一步减小最大高度
+    setMinimumHeight(40);  // 降低最小高度
+    setMaximumHeight(40);  // 降低最大高度
     setMinimumWidth(400);
     setAutoFillBackground(false);
 
@@ -148,12 +148,13 @@ void TextRenderWidget::setupUI()
     mainLayout->setContentsMargins(2, 2, 2, 2);
     mainLayout->setSpacing(2);
     
-    // 设置背景色和边框
+    // 设置现代化灰色背景和圆角矩形样式
     setStyleSheet(R"(
         TextRenderWidget {
-            background-color: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
+            background-color: #f0f0f0;
+            border: 1px solid #d0d0d0;
+            border-radius: 8px;
+            padding: 2px;
         }
     )");
     
@@ -169,46 +170,71 @@ void TextRenderWidget::showContextMenu(const QPoint& pos)
 {
     QMenu contextMenu(this);
     
-    // 设置菜单样式 - 更紧凑
+    // 设置现代化菜单样式
     contextMenu.setStyleSheet(R"(
         QMenu {
             background-color: #ffffff;
-            border: 1px solid #dee2e6;
-            border-radius: 4px;
-            padding: 2px;
+            border: 1px solid #cccccc;
+            border-radius: 6px;
+            padding: 4px;
         }
         QMenu::item {
-            padding: 4px 12px;
-            border-radius: 3px;
-            font-size: 11px;
+            padding: 6px 16px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #333333;
+            background-color: transparent;
         }
         QMenu::item:selected {
-            background-color: #e9ecef;
+            background-color: #f0f0f0;
+        }
+        QMenu::separator {
+            height: 1px;
+            background: #e0e0e0;
+            margin: 4px 0;
+        }
+        QMenu::indicator {
+            background-color: transparent;
+        }
+        QMenu::left-arrow, QMenu::right-arrow {
+            background-color: transparent;
+        }
+        QMenu::scroller {
+            background-color: transparent;
+        }
+        QWidget {
+            background-color: #ffffff;
         }
         QCheckBox {
-            font-family: "Microsoft YaHei";
-            font-size: 11px;
+            font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+            font-size: 12px;
             color: #495057;
-            padding: 2px 6px;
+            padding: 4px 8px;
+            background-color: transparent;
         }
         QLabel {
-            font-family: "Microsoft YaHei";
-            font-size: 11px;
+            font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+            font-size: 12px;
             color: #495057;
-            padding: 2px 6px;
+            padding: 4px 8px;
+            background-color: transparent;
         }
         QSpinBox {
-            font-family: "Microsoft YaHei";
-            font-size: 11px;
+            font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+            font-size: 12px;
             border: 1px solid #ced4da;
-            border-radius: 3px;
-            padding: 1px 4px;
+            border-radius: 4px;
+            padding: 3px 6px;
             background-color: white;
-            min-width: 50px;
+            min-width: 60px;
+        }
+        QSpinBox:focus {
+            border: 1px solid #80bdff;
+            outline: none;
         }
     )");
     
-    // 创建自定义控件 - 更紧凑的布局
+    // 创建自定义控件 - 更现代化的布局
     QWidgetAction* outlineAction = new QWidgetAction(&contextMenu);
     QCheckBox* outlineCheckBox = new QCheckBox("描边");
     outlineCheckBox->setChecked(m_outlineEnabled);
@@ -224,16 +250,16 @@ void TextRenderWidget::showContextMenu(const QPoint& pos)
     QWidgetAction* sizeAction = new QWidgetAction(&contextMenu);
     QWidget* sizeWidget = new QWidget();
     QHBoxLayout* sizeLayout = new QHBoxLayout(sizeWidget);
-    sizeLayout->setContentsMargins(4, 1, 4, 1);
-    sizeLayout->setSpacing(4);
+    sizeLayout->setContentsMargins(8, 2, 8, 2);
+    sizeLayout->setSpacing(6);
     
     QLabel* sizeLabel = new QLabel("大小:");
-    sizeLabel->setStyleSheet("font-family: 'Microsoft YaHei'; font-size: 11px; color: #495057;");
+    sizeLabel->setStyleSheet("font-family: 'Microsoft YaHei', 'Segoe UI'; font-size: 12px; color: #495057;");
     
     QSpinBox* sizeSpinBox = new QSpinBox();
     sizeSpinBox->setRange(8, 32);  // 减小字体范围
     sizeSpinBox->setValue(m_fontSize);
-    sizeSpinBox->setMinimumWidth(45);
+    sizeSpinBox->setMinimumWidth(50);
     connect(sizeSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, &TextRenderWidget::onFontSizeChanged);
     
     sizeLayout->addWidget(sizeLabel);
@@ -526,21 +552,17 @@ void TextRenderWidget::drawGradientBackground(QPainter* painter)
 {
     QRect rect = this->rect();
     
-    // 创建线性渐变：从顶部白色 -> 中间灰色 -> 底部白色
-    QLinearGradient gradient(0, rect.top(), 0, rect.bottom());
+    // 使用现代化灰色背景填充
+    painter->fillRect(rect, QColor(240, 240, 240));  // #f0f0f0
     
-    // 渐变stops
-    gradient.setColorAt(0.0, m_gradientEdgeColor);      // 顶部白色
-    gradient.setColorAt(0.5, m_gradientMiddleColor);    // 中间灰色
-    gradient.setColorAt(1.0, m_gradientEdgeColor);     // 底部白色
-    
-    // 绘制渐变背景
-    painter->fillRect(rect, gradient);
-    
-    // 绘制边框
-    painter->setPen(QColor(200, 200, 200));
+    // 绘制圆角边框
+    painter->setPen(QPen(QColor(208, 208, 208), 1));  // #d0d0d0
     painter->setBrush(Qt::NoBrush);
-    painter->drawRect(rect);
+    
+    // 使用抗锯齿绘制圆角矩形
+    QPainterPath path;
+    path.addRoundedRect(rect, 8, 8);  // 8像素圆角
+    painter->drawPath(path);
 }
 
 // 判断是否为隐藏标记（不显示在文本中）
@@ -562,8 +584,8 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
     }
     
     QRect rect = this->rect();
-    QRect textRect = rect.adjusted(8, 2, -8, -2);  // 更紧凑的边距
-    
+    QRect textRect = rect.adjusted(10, 6, -10, -6);  // 增加边距使外观更现代化
+
     // 计算文本总高度用于垂直居中
     QStringList lines = m_text.split('\n');
     QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
@@ -669,7 +691,7 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
         }
 
         int xPos = textRect.left();
-        int yPos = textRect.top() + startY + i * singleLineHeight;
+        int yPos = startY + i * singleLineHeight;
 
         // 统一的基线：使用主字体的ascent，确保不同字体的字符在同一水平线上
         int baseline = yPos + fm.ascent();

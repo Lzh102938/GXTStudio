@@ -1403,6 +1403,8 @@ public:
     Qt::ItemFlags flags(const QModelIndex& index) const override {
         if (!index.isValid()) return Qt::NoItemFlags;
         auto flags = QAbstractTableModel::flags(index);
+        // 始终允许选择，但在只读模式下不允许编辑
+        flags |= Qt::ItemIsSelectable | Qt::ItemIsEnabled;
         return m_editable ? (flags | Qt::ItemIsEditable) : flags;
     }
     
@@ -1835,9 +1837,9 @@ public:
         if (event->type() == QEvent::KeyPress) {
             QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
             
-            // 检查是否是QLineEdit的Alt键事件（用于显示Unicode hex）
+            // 检查是否是QLineEdit的Ctrl键事件（用于显示Unicode hex）
             QLineEdit* lineEdit = qobject_cast<QLineEdit*>(watched);
-            if (lineEdit && keyEvent->key() == Qt::Key_Alt) {
+            if (lineEdit && (keyEvent->modifiers() & Qt::ControlModifier) && keyEvent->key() != Qt::Key_C) {
                 QString selectedText = lineEdit->selectedText();
                 if (!selectedText.isEmpty()) {
                     // 生成Unicode hex信息
@@ -1865,6 +1867,43 @@ public:
                 QModelIndex currentIndex = tableView->selectionModel()->currentIndex();
                 
                 if (currentIndex.isValid()) {
+                    // Ctrl+C 复制选中内容
+                    if ((keyEvent->modifiers() & Qt::ControlModifier) && keyEvent->key() == Qt::Key_C) {
+                        // 获取选中区域的文本
+                        QModelIndexList selectedIndexes = tableView->selectionModel()->selectedIndexes();
+                        if (!selectedIndexes.isEmpty()) {
+                            QString clipboardText;
+                            // 按行和列组织数据
+                            std::map<int, std::map<int, QString>> selectedData;
+                            
+                            for (const QModelIndex& idx : selectedIndexes) {
+                                QString value = idx.data(Qt::DisplayRole).toString();
+                                selectedData[idx.row()][idx.column()] = value;
+                            }
+                            
+                            // 按顺序拼接数据
+                            auto it = selectedData.begin();
+                            while (it != selectedData.end()) {
+                                auto colIt = it->second.begin();
+                                while (colIt != it->second.end()) {
+                                    clipboardText += colIt->second;
+                                    if (std::next(colIt) != it->second.end()) {
+                                        clipboardText += "\t"; // 使用制表符分隔列
+                                    }
+                                    ++colIt;
+                                }
+                                if (std::next(it) != selectedData.end()) {
+                                    clipboardText += "\n"; // 使用换行符分隔行
+                                }
+                                ++it;
+                            }
+                            
+                            // 复制到剪贴板
+                            QApplication::clipboard()->setText(clipboardText);
+                        }
+                        return true;
+                    }
+                    
                     // F2键进入编辑模式
                     if (keyEvent->key() == Qt::Key_F2) {
                         tableView->edit(currentIndex);
