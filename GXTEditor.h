@@ -110,6 +110,15 @@ public:
     
     // 辅助函数：标准化键（去掉0x前缀）
     std::string normalizeKey(const std::string& key) const;
+    
+    // IVTKEY映射相关（用于GTA IV）
+    static void LoadIVTKeyMap();
+    static bool FindIVTKey(const std::string& key, uint32_t& outHash);
+    
+private:
+    // IVTKEY映射（静态，全局共享）
+    static std::unordered_map<std::string, uint32_t> s_ivtKeyMap;
+    static bool s_ivtKeyMapLoaded;
 };
 
 #endif // GXT_EDITOR_H

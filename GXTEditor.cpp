@@ -10,6 +10,13 @@
 #include <QString>
 #include <unordered_map>
 #include <vector>
+#include <QFile>
+#include <QTextStream>
+#include <QDir>
+
+// IVTKEY映射静态成员定义
+std::unordered_map<std::string, uint32_t> GXTEditor::s_ivtKeyMap;
+bool GXTEditor::s_ivtKeyMapLoaded = false;
 
 // 构造函数实现
 GXTEditor::GXTEditor()
@@ -1273,9 +1280,22 @@ bool GXTEditor::saveAsGTA_IV(const std::string& path) {
                 // 写入偏移
                 file.write(reinterpret_cast<const char*>(&str_offsets[i]), sizeof(str_offsets[i]));
 
-                // 使用GTA4哈希算法计算键的哈希值
+                // 标准化键
                 std::string normalizedKey = normalizeKey(entry.key);
-                uint32_t hash_val = calculateGTA4Hash(normalizedKey);
+                uint32_t hash_val;
+                
+                // 先尝试解析为十六进制（如果已经是hash值）
+                try {
+                    hash_val = std::stoul(normalizedKey, nullptr, 16);
+                } catch (const std::exception&) {
+                    // 不是hex格式，需要查找或计算hash
+                    // 先在IVTKEY映射中查找（类似于SA版本的SATKEY逻辑）
+                    if (!FindIVTKey(normalizedKey, hash_val)) {
+                        // 没有找到，计算GTA4哈希
+                        hash_val = calculateGTA4Hash(normalizedKey);
+                    }
+                }
+                
                 file.write(reinterpret_cast<const char*>(&hash_val), sizeof(hash_val));
             }
 
@@ -1368,4 +1388,80 @@ unsigned int CKeyGen::AppendStringToKey(unsigned int hash, const char *str) {
         hash = keyTable[(unsigned char)hash ^ *str++] ^ (hash >> 8);
     return hash;
 }
+
+// 加载IVTKEY映射（静态方法，全局只加载一次）
+void GXTEditor::LoadIVTKeyMap() {
+    // 如果已经加载过，直接返回
+    if (s_ivtKeyMapLoaded) {
+        return;
+    }
+    
+    // 构建文件路径
+    QString keylistPath = QDir::current().filePath("keylist/IVTKEY.lst");
+    
+    // 检查文件是否存在
+    if (!QFile::exists(keylistPath)) {
+        std::cerr << "IVTKEY映射文件不存在: " << keylistPath.toStdString() << std::endl;
+        s_ivtKeyMapLoaded = true; // 标记为已加载，避免重复尝试
+        return;
+    }
+    
+    // 打开文件
+    QFile file(keylistPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        std::cerr << "无法打开IVTKEY映射文件: " << keylistPath.toStdString() << std::endl;
+        s_ivtKeyMapLoaded = true; // 标记为已加载
+        return;
+    }
+    
+    QTextStream stream(&file);
+    int loadedCount = 0;
+    
+    // 逐行读取文件
+    while (!stream.atEnd()) {
+        QString line = stream.readLine().trimmed();
+        
+        // 跳过空行和注释行
+        if (line.isEmpty() || line.startsWith("#") || line.startsWith("//")) {
+            continue;
+        }
+        
+        // 解析格式: hash key (例如: 0x12345678 SOME_KEY)
+        QStringList parts = line.split(" ", Qt::SkipEmptyParts);
+        if (parts.size() >= 2) {
+            QString hashStr = parts[0].trimmed();
+            QString keyStr = parts[1].trimmed();
+            
+            // 转换hash字符串为uint32
+            bool ok;
+            uint32_t hash = hashStr.toUInt(&ok, 16);
+            
+            if (ok) {
+                // 添加到映射表（key -> hash）
+                s_ivtKeyMap[keyStr.toStdString()] = hash;
+                loadedCount++;
+            }
+        }
+    }
+    
+    file.close();
+    s_ivtKeyMapLoaded = true;
+    
+    std::cout << "成功加载 " << loadedCount << " 条IVTKEY映射" << std::endl;
+}
+
+// 在IVTKEY映射中查找key对应的hash
+bool GXTEditor::FindIVTKey(const std::string& key, uint32_t& outHash) {
+    if (!s_ivtKeyMapLoaded) {
+        LoadIVTKeyMap();
+    }
+    
+    auto it = s_ivtKeyMap.find(key);
+    if (it != s_ivtKeyMap.end()) {
+        outHash = it->second;
+        return true;
+    }
+    return false;
+}
+
 
