@@ -91229,3 +91229,27 @@ ZOOM_PC	0x245BC61C
 ZSOLTMATH	0xA52EC459
 _AUTOAIM	0x78031656
 _PC	0xB356A2EA
+Skip Intro	0xAEAE49BB
+Skip Menu   0xB0A5E309
+Windowed    0x9D2B9488
+Borderless  0x18084D77
+Focus Loss  0x306888FF
+LightSyncRGB    0x09E5AD71
+FPS Counter 0x41749BA3
+Letterbox   0xB520CA6F
+Pillarbox   0x433E320A
+Alt. Dialogues  0xC46E486C
+Check Updates   0x76CBD5C1
+Raw Input   0x802A7E42
+Always Run  0x96B99FF4
+Cover Centering 0x4B1865ED
+CenterDelayFoot 0xB79AA725
+CenterDelayVeh  0x1D36C4B3
+CamTurnSpeedVeh 0xBAB5C322
+Gamepad Icons   0x8764F795
+Motion Blur 0x054B928B
+Bloom   0x4D0DDED7
+Console Gamma   0x19C06F9F
+Auto Exposure   0x73C6F73B
+Screen Filter   0xFE71BEF8
+Depth of Field  0x107856EB
