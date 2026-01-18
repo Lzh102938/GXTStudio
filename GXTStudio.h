@@ -1521,48 +1521,19 @@ public:
     
     // 优化的文本绘制和高亮 - 使用预渲染缓存和斑马纹
     void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        // 创建缓存键
-        CacheKey key;
-        key.text = index.data(Qt::DisplayRole).toString();
-        key.searchText = m_searchText;
-        key.width = option.rect.width();
-        key.fontFamily = option.font.family();
-        key.fontSize = option.font.pointSize();
-        key.selected = (option.state & QStyle::State_Selected);
-        key.row = index.row();
-        key.isMonospace = (index.column() == 0); // 第一列（键列）使用等宽字体
-        
-        // 尝试从缓存获取结果
-        if (m_cache.contains(key)) {
-            const CacheValue& cache = m_cache.value(key);
-            // 绘制缓存的背景
-            if (key.selected) {
-                painter->fillRect(option.rect, option.palette.highlight());
-                painter->setPen(option.palette.highlightedText().color());
-            } else {
-                // 绘制斑马纹背景
-                paintZebraBackground(painter, option, index.row());
-                painter->setPen(option.palette.text().color());
-            }
-            // 绘制缓存的内容
-            painter->drawPixmap(option.rect.topLeft(), cache.pixmap);
+        // 【性能优化】快速路径：直接绘制，不使用缓存（避免缓存创建和查找开销）
+        QString text = index.data(Qt::DisplayRole).toString();
+        if (text.isEmpty()) {
             return;
         }
         
         // 绘制背景
-        QStyleOptionViewItem opt = option;
-        initStyleOption(&opt, index);
-        
         if (option.state & QStyle::State_Selected) {
             painter->fillRect(option.rect, option.palette.highlight());
         } else {
             // 绘制斑马纹背景
             paintZebraBackground(painter, option, index.row());
         }
-        
-        // 获取文本
-        QString text = index.data(Qt::DisplayRole).toString();
-        if (text.isEmpty()) return;
         
         // 设置文本颜色
         if (option.state & QStyle::State_Selected) {
@@ -1571,10 +1542,8 @@ public:
             painter->setPen(option.palette.text().color());
         }
         
-        // 设置字体并启用抗锯齿
+        // 设置字体
         QFont font = option.font;
-        
-        // 第一列（键列）使用等宽字体，第二列（值列）使用微软雅黑
         if (index.column() == 0) {
             font.setFamily("Consolas, 'Courier New', monospace");
             font.setStyleHint(QFont::Monospace);
@@ -1582,102 +1551,26 @@ public:
         } else {
             font.setFamily("Microsoft YaHei");
         }
-        
-        font.setHintingPreference(QFont::PreferNoHinting); // 减少字体提示以获得更平滑的效果
+        font.setHintingPreference(QFont::PreferNoHinting);
         painter->setFont(font);
         
-        // 启用高质量渲染
-        painter->setRenderHint(QPainter::Antialiasing, true);
-        painter->setRenderHint(QPainter::TextAntialiasing, true);
-        painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
-        
-        // 计算文本绘制区域
+        // 计算文本区域
         QRect textRect = option.rect.adjusted(4, 2, -4, -2);
         
-        // 创建缓存用的pixmap
-        QPixmap cachePixmap(option.rect.size());
-        cachePixmap.fill(Qt::transparent);
-        QPainter cachePainter(&cachePixmap);
-        cachePainter.setPen(painter->pen());
-        
-        // 第一列（键列）使用等宽字体，第二列（值列）使用微软雅黑
-        QFont cacheFont = font;
-        if (index.column() == 0) {
-            cacheFont.setFamily("Consolas, 'Courier New', monospace");
-            cacheFont.setStyleHint(QFont::Monospace);
-            cacheFont.setFixedPitch(true);
-        } else {
-            cacheFont.setFamily("Microsoft YaHei");
-        }
-        
-        cachePainter.setFont(cacheFont);
-        cachePainter.setRenderHint(QPainter::Antialiasing, true);
-        cachePainter.setRenderHint(QPainter::TextAntialiasing, true);
-        cachePainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        
-        // 转换到缓存坐标系
-        QRect cacheTextRect = textRect.translated(-option.rect.topLeft());
-
-        
-        // 如果没有搜索文本，直接绘制文本
-        if (m_searchText.isEmpty()) {
-            QString displayText = cachePainter.fontMetrics().elidedText(text, Qt::ElideRight, cacheTextRect.width());
-            cachePainter.drawText(cacheTextRect, Qt::AlignLeft | Qt::AlignVCenter, displayText);
-            
-            // 保存到缓存
-            CacheValue cacheValue;
-            cacheValue.pixmap = cachePixmap;
-            checkCacheSize();
-            m_cache.insert(key, cacheValue);
-            
-            painter->drawPixmap(option.rect.topLeft(), cachePixmap);
-            return;
-        }
-        
-        // 检查是否包含搜索文本（根据caseSensitive标志设置大小写敏感）
-        Qt::CaseSensitivity cs = m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
-        bool containsSearch = m_searchText.isEmpty() ? false : text.contains(m_searchText, cs);
-        
-        if (containsSearch && !m_searchText.isEmpty()) {
-            // 使用预计算的高亮位置
+        // 【性能优化】检查是否有搜索文本且匹配
+        if (!m_searchText.isEmpty() && text.contains(m_searchText, 
+            m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
+            // 有搜索匹配，使用高亮绘制
             QVector<int> matchPositions = findMatchPositions(text);
-            
-            // 如果没有匹配，使用标准绘制
-            if (matchPositions.isEmpty()) {
-                QString normalText = cachePainter.fontMetrics().elidedText(text, Qt::ElideRight, cacheTextRect.width());
-                cachePainter.drawText(cacheTextRect, Qt::AlignLeft | Qt::AlignVCenter, normalText);
-                
-                CacheValue cacheValue;
-                cacheValue.pixmap = cachePixmap;
-                checkCacheSize();
-                m_cache.insert(key, cacheValue);
-                
-                painter->drawPixmap(option.rect.topLeft(), cachePixmap);
+            if (!matchPositions.isEmpty()) {
+                renderTextWithHighlight(painter, text, matchPositions, textRect);
                 return;
             }
-            
-            // 优化的文本和高亮绘制
-            renderTextWithHighlight(&cachePainter, text, matchPositions, cacheTextRect);
-            
-            // 保存到缓存
-            CacheValue cacheValue;
-            cacheValue.pixmap = cachePixmap;
-            checkCacheSize();
-            m_cache.insert(key, cacheValue);
-            
-            painter->drawPixmap(option.rect.topLeft(), cachePixmap);
-        } else {
-            // 没有匹配，直接绘制文本
-            QString displayText = cachePainter.fontMetrics().elidedText(text, Qt::ElideRight, cacheTextRect.width());
-            cachePainter.drawText(cacheTextRect, Qt::AlignLeft | Qt::AlignVCenter, displayText);
-            
-            CacheValue cacheValue;
-            cacheValue.pixmap = cachePixmap;
-            checkCacheSize();
-            m_cache.insert(key, cacheValue);
-            
-            painter->drawPixmap(option.rect.topLeft(), cachePixmap);
         }
+        
+        // 普通绘制（快速路径）
+        QString displayText = painter->fontMetrics().elidedText(text, Qt::ElideRight, textRect.width());
+        painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, displayText);
     }
     
     // 标准编辑器创建
@@ -1976,11 +1869,10 @@ private:
     bool m_useRegex = false;  // 是否使用正则表达式
     bool m_caseSensitive = false;  // 是否区分大小写
     
-    // 缓存结构 - 简化设计以避免哈希计算问题
+    // 缓存结构 - 优化设计：移除宽度依赖，因为宽度变化频繁导致缓存失效
     struct CacheKey {
         QString text;
         QString searchText;
-        int width;
         QString fontFamily;  // 用字体族名称代替完整的QFont对象
         int fontSize;
         bool selected;
@@ -1988,10 +1880,9 @@ private:
         bool isMonospace;
         
         bool operator==(const CacheKey& other) const {
-            return text == other.text && searchText == other.searchText && 
-                   width == other.width && fontFamily == other.fontFamily && 
-                   fontSize == other.fontSize && selected == other.selected && 
-                   row == other.row && isMonospace == other.isMonospace;
+            return text == other.text && searchText == other.searchText &&
+                   fontFamily == other.fontFamily && fontSize == other.fontSize &&
+                   selected == other.selected && row == other.row && isMonospace == other.isMonospace;
         }
     };
     
@@ -2032,13 +1923,12 @@ private:
     friend inline uint qHash(const CacheKey& key, uint seed = 0) {
         uint h1 = qHash(key.text, seed);
         uint h2 = qHash(key.searchText, h1);
-        uint h3 = qHash(key.width, h2);
-        uint h4 = qHash(key.fontFamily, h3);
-        uint h5 = qHash(key.fontSize, h4);
-        uint h6 = qHash(key.selected, h5);
-        uint h7 = qHash(key.row, h6);
-        uint h8 = qHash(key.isMonospace, h7);
-        return h8;
+        uint h3 = qHash(key.fontFamily, h2);
+        uint h4 = qHash(key.fontSize, h3);
+        uint h5 = qHash(key.selected, h4);
+        uint h6 = qHash(key.row, h5);
+        uint h7 = qHash(key.isMonospace, h6);
+        return h7;
     }
     
     // 预计算匹配位置

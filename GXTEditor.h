@@ -5,6 +5,27 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <cctype>
+
+// CKeyGen类 - 用于计算SA文件的hash
+class CKeyGen {
+private:
+    // Precalculated table of 256 CRC32 hash keys computed according to the polynomial 0xEDB88320.
+    static const unsigned int keyTable[256];
+
+public:
+    // Hash a string till the specified number of characters.
+    static unsigned int GetKey(const char *str, int len);
+
+    // Hash a string till a null-terminator is found.
+    static unsigned int GetKey(const char *str);
+
+    // Hash a string till a null-terminator is found by converting lowercase characters to uppercase.
+    static unsigned int GetUppercaseKey(const char *str);
+
+    // Append a string to the hash key of a previously hashed string.
+    static unsigned int AppendStringToKey(unsigned int hash, const char *str);
+};
 
 struct GXTTableEntry {
     std::string key;

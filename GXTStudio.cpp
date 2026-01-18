@@ -2373,8 +2373,33 @@ void GXTStudio::toggleReadOnly(bool readOnly)
         }
     }
     
-    // 更新菜单项文本
-    m_readOnlyAction->setText(m_isReadOnly ? "退出只读模式" : "只读模式");
+    // 更新菜单项文本和动作状态 - 保持文本固定为"只读模式"
+    m_readOnlyAction->setText("只读模式");
+    updateActions(); // 【修复】更新保存按钮等动作的状态
+    
+    // 【修复】更新码表转换按钮和下拉菜单状态
+    if (m_codeTableButton) {
+        bool enabled = !m_isReadOnly;
+        m_codeTableButton->setEnabled(enabled);
+        
+        // 更新下拉菜单中的动作状态
+        if (m_mountCodeTableAction) {
+            m_mountCodeTableAction->setEnabled(enabled);
+        }
+        if (m_convertCodeTableAction) {
+            // 转换菜单项只有在已挂载码表且非只读模式下才启用
+            bool canConvert = enabled && m_codeTableConverter && m_codeTableConverter->isTableMounted();
+            m_convertCodeTableAction->setEnabled(canConvert);
+        }
+        if (m_unmountCodeTableAction) {
+            // 卸载菜单项只有在已挂载码表且非只读模式下才启用
+            bool canUnmount = enabled && m_codeTableConverter && m_codeTableConverter->isTableMounted();
+            m_unmountCodeTableAction->setEnabled(canUnmount);
+        }
+        
+        // 更新按钮文本
+        updateCodeTableButtonText();
+    }
     
     // 更新状态栏
     if (m_statusLabel) {
@@ -3209,8 +3234,9 @@ void GXTStudio::onMountCodeTable()
     // 挂载码表
     if (m_codeTableConverter->mountTable(filePath)) {
         // 挂载成功
-        m_convertCodeTableAction->setEnabled(true);
-        m_unmountCodeTableAction->setEnabled(true);
+        bool enabled = !m_isReadOnly;
+        m_convertCodeTableAction->setEnabled(enabled);
+        m_unmountCodeTableAction->setEnabled(enabled);
 
         // 更新按钮的信号连接：从挂载切换到转换
         disconnect(m_codeTableButton, &QToolButton::clicked, this, &GXTStudio::onMountCodeTable);
@@ -5007,6 +5033,35 @@ void GXTStudio::updateActions()
     m_closeAction->setEnabled(hasFile);
     m_findAction->setEnabled(hasFile);
     m_replaceAction->setEnabled(hasFile && !m_isReadOnly);
+    
+    // 【修复】更新添加新表按钮状态（确保在只读模式下按钮是禁用的）
+    if (currentTab && currentTab->addTableButton) {
+        currentTab->addTableButton->setEnabled(!m_isReadOnly && !currentTab->isWHM && !currentTab->isDAT);
+    }
+    
+    // 【修复】更新码表转换按钮和下拉菜单状态
+    if (m_codeTableButton) {
+        bool enabled = !m_isReadOnly;
+        m_codeTableButton->setEnabled(enabled);
+        
+        // 更新下拉菜单中的动作状态
+        if (m_mountCodeTableAction) {
+            m_mountCodeTableAction->setEnabled(enabled);
+        }
+        if (m_convertCodeTableAction) {
+            // 转换菜单项只有在已挂载码表且非只读模式下才启用
+            bool canConvert = enabled && m_codeTableConverter && m_codeTableConverter->isTableMounted();
+            m_convertCodeTableAction->setEnabled(canConvert);
+        }
+        if (m_unmountCodeTableAction) {
+            // 卸载菜单项只有在已挂载码表且非只读模式下才启用
+            bool canUnmount = enabled && m_codeTableConverter && m_codeTableConverter->isTableMounted();
+            m_unmountCodeTableAction->setEnabled(canUnmount);
+        }
+        
+        // 更新按钮文本
+        updateCodeTableButtonText();
+    }
 }
 
 // 以下函数是头文件中声明但未实现的槽函数，添加空实现以修复链接错误
@@ -5202,6 +5257,9 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
         
         // 立即处理事件，确保UI立即更新
         QCoreApplication::processEvents();
+        
+        // 【修复】更新动作状态，确保保存按钮和添加表按钮状态正确
+        updateActions();
 
     } catch (const std::exception& e) {
         qCritical() << "处理解析结果时发生错误:" << e.what();
@@ -5976,7 +6034,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     // 设置视口大小策略以优化渲染
     entryTableView->viewport()->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     
-    // 连接滚动事件以实现懒加载
+    // 【性能优化】连接滚动事件 - 使用防抖减少重绘频率
     connect(entryTableView->verticalScrollBar(), &QScrollBar::valueChanged, this, 
             [this, entryTableView](int value) {
                 // 懒加载：当滚动到接近底部时预加载数据
@@ -5988,9 +6046,6 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
                     // 这里可以添加预加载逻辑
                     Q_UNUSED(value);
                     Q_UNUSED(triggerPoint);
-                    
-                    // 强制视口重绘以确保虚拟滚动正常工作
-                    entryTableView->viewport()->update();
                 }
             });
     
@@ -6173,6 +6228,9 @@ void GXTStudio::setupTableOptimizations(QTableView* table)
     // 批处理模式优化（类似虚拟滚动）
     // QTableView没有setUniformRowHeights方法，使用固定行高代替
     table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10); // 所有行高相同以优化性能
+    
+    // 【性能优化】禁用不必要的滚动提示
+    table->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn); // 始终显示滚动条，避免动态显示/隐藏导致的重排
     
     // 启用缓存优化
     table->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
@@ -7049,12 +7107,12 @@ void GXTStudio::prepareEditorForSave(FileTab* tab, GXTEditor& editor)
                                           .arg(QString::fromStdString(saveKey)));
                         }
                     } else {
-                        // 没有找到，计算JAMCRC
+                        // 【修改】没有找到，使用CKeyGen计算hash（模拟游戏引擎的hash算法）
                         std::string upperKey = keyStr.toUpper().toStdString();
-                        hash = GXTEditor::calculateJAMCRC(upperKey);
+                        hash = CKeyGen::GetUppercaseKey(upperKey.c_str());
                         saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
                         if (j < 5) {
-                            showLogMessage(QString("  计算JAMCRC: %1 -> 0x%2")
+                            showLogMessage(QString("  使用CKeyGen计算hash: %1 -> 0x%2")
                                           .arg(keyStr)
                                           .arg(QString::fromStdString(saveKey)));
                         }
