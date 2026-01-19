@@ -30,6 +30,7 @@ public:
 struct GXTTableEntry {
     std::string key;
     std::string value;
+    std::string originalKey;  // 原始键值（用于显示，如DUMMY_l11）
 };
 
 struct GXTTable {

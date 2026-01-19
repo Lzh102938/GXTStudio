@@ -91230,26 +91230,71 @@ ZSOLTMATH	0xA52EC459
 _AUTOAIM	0x78031656
 _PC	0xB356A2EA
 Skip Intro	0xAEAE49BB
-Skip Menu   0xB0A5E309
-Windowed    0x9D2B9488
-Borderless  0x18084D77
-Focus Loss  0x306888FF
-LightSyncRGB    0x09E5AD71
-FPS Counter 0x41749BA3
-Letterbox   0xB520CA6F
-Pillarbox   0x433E320A
-Alt. Dialogues  0xC46E486C
-Check Updates   0x76CBD5C1
-Raw Input   0x802A7E42
-Always Run  0x96B99FF4
-Cover Centering 0x4B1865ED
-CenterDelayFoot 0xB79AA725
-CenterDelayVeh  0x1D36C4B3
-CamTurnSpeedVeh 0xBAB5C322
-Gamepad Icons   0x8764F795
-Motion Blur 0x054B928B
-Bloom   0x4D0DDED7
-Console Gamma   0x19C06F9F
-Auto Exposure   0x73C6F73B
-Screen Filter   0xFE71BEF8
-Depth of Field  0x107856EB
+Skip Menu	0xB0A5E309
+Windowed	0x9D2B9488
+Borderless	0x18084D77
+Focus Loss	0x306888FF
+LightSyncRGB	0x09E5AD71
+FPS Counter	0x41749BA3
+Letterbox	0xB520CA6F
+Pillarbox	0x433E320A
+Alt. Dialogues	0xC46E486C
+Check Updates	0x76CBD5C1
+Raw Input	0x802A7E42
+Always Run	0x96B99FF4
+Cover Centering	0x4B1865ED
+CenterDelayFoot	0xB79AA725
+CenterDelayVeh	0x1D36C4B3
+CamTurnSpeedVeh	0xBAB5C322
+Gamepad Icons	0x8764F795
+Motion Blur	0x054B928B
+Bloom	0x4D0DDED7
+Console Gamma	0x19C06F9F
+Auto Exposure	0x73C6F73B
+Screen Filter	0xFE71BEF8
+Depth of Field	0x107856EB
+TreeFX	0x307998DC
+Sun Shafts	0xCC655E80
+Antialiasing	0xE0B355DC
+FPS Limiter	0xBBA6F70A
+ExtraNightShad	0xF21CB9F1
+Lampposts	0xD3935EE7
+LamppLampostsHeadl	0x19B2F31E
+LampHeadlVNS	0xE3B1714E
+Tree Alpha	0xB5869920
+UnclampLighting	0xECC74EC8
+Shadow Filter	0x6B0EA00D
+HeadlightShadow	0x38369CB0
+Timed Events	0x778DA567
+Tone Mapping	0xD0EDA77A
+Volumetric Fog	0x6F3DCD88
+Zoomed Movement	0x66D1B3E5
+Distant Lights	0x0CFEF366
+CenteredVehCam	0x35DC55F9
+CenteredFootCam	0xF9B5E0E9
+Camera Shake	0xE0302579
+CutscAudioSync	0xEE525EAD
+CutscAudioSync0	0x0DDFD94A
+CutscAudioSync1	0x482CCDE3
+Turn Indicators	0x0D367BA4
+WinterEvent0	0x94ADC57F
+WinterEvent1	0xCF553AD9
+HalloweenEvent0	0xB694E088
+HalloweenEvent1	0xAC53CC06
+TranspMapMenu	0x860FB5ED
+Extra Streaming	0x4B2B36AD
+FF_SM	0x8A3BFC47
+Graphics API	0xEB59D064
+FF_RESTART	0xBEE02604
+Extended Sniper	0x89913CFC
+Bullet Traces	0xA944959B
+POLICE3	0x71FA16EA
+FF_WARN0	0x76ABE295
+FF_WARN1	0x7415DD69
+FF_WARN2	0x5B382BAE
+FF_WARN3	0x487B0634
+FF_WARN4	0x8F99146F
+FF_WARN5	0xBDCDF0D8
+FF_WARN6	0xEF72D425
+FF_WARN7	0x9D78B02E
+DUMMY_l11	0xE7E555EB

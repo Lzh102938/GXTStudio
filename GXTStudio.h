@@ -761,6 +761,25 @@ public:
     
     // 提供给码表转换器的公共方法
     void updateEntryTable();
+    
+    // 格式化键值显示（添加0x前缀）
+    static QString formatKeyForDisplay(const QString& key) {
+        QString formattedKey = key;
+        // 如果是8位hex字符，添加0x前缀
+        if (formattedKey.length() == 8) {
+            bool allHex = true;
+            for (const QChar& c : formattedKey) {
+                if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
+                    allHex = false;
+                    break;
+                }
+            }
+            if (allHex) {
+                formattedKey = "0x" + formattedKey;
+            }
+        }
+        return formattedKey;
+    }
 
 private slots:
     // 文件操作
@@ -1312,8 +1331,41 @@ public:
                                     }
                                 }
                             }
-                            // 如果没有找到匹配或不是GTA_SA/IV版本，返回原始key
-                            return QString::fromStdString(entry.key);
+                            // 优先显示原始键值（如果存在）
+                            if (!entry.originalKey.empty()) {
+                                return QString::fromStdString(entry.originalKey);
+                            }
+                            
+                            // 如果没有原始键值，检查是否是lst中的键
+                            QString keyStr = QString::fromStdString(entry.key);
+                            uint32_t hash = keyStr.toUInt(nullptr, 16);
+                            
+                            if (m_tab->version == GXTVersion::GTA_SA && !s_satKeyMap.isEmpty()) {
+                                auto it = s_satKeyMap.find(hash);
+                                if (it != s_satKeyMap.end()) {
+                                    return it.value();
+                                }
+                            } else if (m_tab->version == GXTVersion::GTA_IV && !s_ivtKeyMap.isEmpty()) {
+                                auto it = s_ivtKeyMap.find(hash);
+                                if (it != s_ivtKeyMap.end()) {
+                                    return it.value();
+                                }
+                            }
+                            
+                            // 最后，如果是8位hex字符，添加0x前缀
+                            if (keyStr.length() == 8) {
+                                bool allHex = true;
+                                for (const QChar& c : keyStr) {
+                                    if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
+                                        allHex = false;
+                                        break;
+                                    }
+                                }
+                                if (allHex) {
+                                    keyStr = "0x" + keyStr;
+                                }
+                            }
+                            return keyStr;
                         } else {
                             return QString::fromStdString(entry.value);
                         }
@@ -1374,9 +1426,50 @@ public:
                     const auto& table = m_tab->tables[m_tab->currentTableIndex];
                     if (row < static_cast<int>(table.entries.size())) {
                         const auto& entry = table.entries[row];
-                        tooltip = col == KeyColumn ? 
-                                  QString::fromStdString(entry.key) :
-                                  QString::fromStdString(entry.value);
+                        if (col == KeyColumn) {
+                            // 优先显示原始键值（如果存在）
+                            if (!entry.originalKey.empty()) {
+                                tooltip = QString::fromStdString(entry.originalKey);
+                            } else {
+                                // 如果没有原始键值，检查是否是lst中的键
+                                QString keyStr = QString::fromStdString(entry.key);
+                                uint32_t hash = keyStr.toUInt(nullptr, 16);
+                                
+                                bool foundInLst = false;
+                                if (m_tab->version == GXTVersion::GTA_SA && !s_satKeyMap.isEmpty()) {
+                                    auto it = s_satKeyMap.find(hash);
+                                    if (it != s_satKeyMap.end()) {
+                                        tooltip = it.value();
+                                        foundInLst = true;
+                                    }
+                                } else if (m_tab->version == GXTVersion::GTA_IV && !s_ivtKeyMap.isEmpty()) {
+                                    auto it = s_ivtKeyMap.find(hash);
+                                    if (it != s_ivtKeyMap.end()) {
+                                        tooltip = it.value();
+                                        foundInLst = true;
+                                    }
+                                }
+                                
+                                // 最后，如果是8位hex字符，添加0x前缀
+                                if (!foundInLst) {
+                                    if (keyStr.length() == 8) {
+                                        bool allHex = true;
+                                        for (const QChar& c : keyStr) {
+                                            if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
+                                                allHex = false;
+                                                break;
+                                            }
+                                        }
+                                        if (allHex) {
+                                            keyStr = "0x" + keyStr;
+                                        }
+                                    }
+                                    tooltip = keyStr;
+                                }
+                            }
+                        } else {
+                            tooltip = QString::fromStdString(entry.value);
+                        }
                     }
                 }
                 

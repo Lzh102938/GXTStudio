@@ -759,7 +759,24 @@ bool GXTEditor::saveAsText(const std::string& path) {
 
             // 写入每个条目
             for (const auto& entry : tbl.entries) {
-                file << entry.key << "=" << entry.value << "\n";
+                std::string outputKey = entry.key;
+                
+                // 检查是否需要添加0x前缀
+                // 如果key是8位hex字符（GTA IV的hash），添加0x前缀
+                if (outputKey.length() == 8) {
+                    bool allHex = true;
+                    for (char c : outputKey) {
+                        if (!isxdigit(c)) {
+                            allHex = false;
+                            break;
+                        }
+                    }
+                    if (allHex) {
+                        outputKey = "0x" + outputKey;
+                    }
+                }
+                
+                file << outputKey << "=" << entry.value << "\n";
             }
 
             file << "\n";
