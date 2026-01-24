@@ -1769,16 +1769,16 @@ void GXTStudio::setupSaveThread()
 
 void GXTStudio::setupResizeOptimizations()
 {
-    // 创建防抖定时器 - 增加延迟以减少计算频率
+    // 创建防抖定时器 - 增加延迟以大幅减少计算频率
     m_resizeDebouncer = new QTimer(this);
     m_resizeDebouncer->setSingleShot(true);
-    m_resizeDebouncer->setInterval(200); // 增加到200ms
+    m_resizeDebouncer->setInterval(400); // 增加到400ms，大幅减少触发频率
     connect(m_resizeDebouncer, &QTimer::timeout, this, &GXTStudio::performDelayedResize);
     m_lastWindowSize = size();
     
     // 创建缓存清理定时器
     m_cleanupTimer = new QTimer(this);
-    m_cleanupTimer->setInterval(30000); // 30秒清理一次缓存
+    m_cleanupTimer->setInterval(60000); // 60秒清理一次，减少频率
     connect(m_cleanupTimer, &QTimer::timeout, this, &GXTStudio::cleanupDelegatesCache);
     m_cleanupTimer->start();
 }
@@ -1815,17 +1815,13 @@ void GXTStudio::performDelayedResize()
     QHeaderView* header = currentTab->entryTableView->horizontalHeader();
     if (!header) return;
     
-    // 暂停更新以减少闪烁
-    currentTab->entryTableView->setUpdatesEnabled(false);
-    
     // 缓存当前宽度，避免重复计算
     static int lastTotalWidth = -1;
     int totalWidth = currentTab->entryTableView->viewport()->width();
     
     // 避免对相同宽度重复计算
-    if (lastTotalWidth == totalWidth) {
+    if (abs(lastTotalWidth - totalWidth) < 10) { // 增加阈值到10px
         currentTab->cache.layoutNeedsUpdate = false;
-        currentTab->entryTableView->setUpdatesEnabled(true);
         return;
     }
     
@@ -1849,14 +1845,6 @@ void GXTStudio::performDelayedResize()
     }
     
     currentTab->cache.layoutNeedsUpdate = false;
-    
-    // 重新启用更新并延迟刷新
-    currentTab->entryTableView->setUpdatesEnabled(true);
-    QTimer::singleShot(5, [currentTab]() {
-        if (currentTab && currentTab->entryTableView) {
-            currentTab->entryTableView->viewport()->update();
-        }
-    });
 }
 
 void GXTStudio::cleanupDelegatesCache()
@@ -6235,97 +6223,92 @@ void GXTStudio::setupTableOptimizations(QTableView* table)
     table->setWordWrap(false);
     table->setAlternatingRowColors(false); // 禁用，使用自定义斑马纹
     table->setShowGrid(false);
-    table->setSelectionBehavior(QAbstractItemView::SelectItems); // 改为选择单元格而不是整行
+    table->setSelectionBehavior(QAbstractItemView::SelectItems);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
     
-    // 虚拟滚动优化设置 - 禁用不透明绘制以使用系统背景
-    table->setAttribute(Qt::WA_StaticContents, true);
-    table->setAttribute(Qt::WA_OpaquePaintEvent, false);
-    table->setAttribute(Qt::WA_NoSystemBackground, false);
-    table->setAutoFillBackground(true);
+    // 【关键优化】虚拟滚动优化设置 - 提升渲染性能
+    table->setAttribute(Qt::WA_StaticContents, true);      // 静态内容，减少重绘
+    table->setAttribute(Qt::WA_OpaquePaintEvent, true);   // 启用不透明绘制，减少合成开销
+    table->setAttribute(Qt::WA_NoSystemBackground, true);  // 禁用系统背景，减少绘制层级
+    table->setAutoFillBackground(false);                  // 禁用自动填充背景
+    table->setAttribute(Qt::WA_PaintOnScreen, true);      // 直接在屏幕上绘制，跳过中间缓冲
     
-    // 启用视口优化
+    // 【关键优化】视口优化
     table->viewport()->setAttribute(Qt::WA_StaticContents, true);
-    table->viewport()->setAttribute(Qt::WA_OpaquePaintEvent, false);
-    table->viewport()->setAttribute(Qt::WA_NoSystemBackground, false);
-    table->viewport()->setAutoFillBackground(true);
+    table->viewport()->setAttribute(Qt::WA_OpaquePaintEvent, true);
+    table->viewport()->setAttribute(Qt::WA_NoSystemBackground, true);
+    table->viewport()->setAutoFillBackground(false);
+    table->viewport()->setAttribute(Qt::WA_PaintOnScreen, true);
     
     // 表头优化
     table->verticalHeader()->setVisible(false);
-    table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);  // 增加行高适应更大字体
+    table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);
     
     auto* header = table->horizontalHeader();
-    // 设置表头固定高度，减少占用空间
-    header->setFixedHeight(28);  // 固定高度28像素，比原来的默认高度更紧凑
+    header->setFixedHeight(28);
     if (table->model() && table->model()->columnCount() > 0) {
-    // 统一处理：键列固定宽度精确显示10个字符（GXT和WHM相同）
-    header->setSectionResizeMode(0, QHeaderView::Fixed);
-    int keyColumnWidth = calculateKeyColumnWidth();
+        header->setSectionResizeMode(0, QHeaderView::Fixed);
+        int keyColumnWidth = calculateKeyColumnWidth();
         header->resizeSection(0, keyColumnWidth);
-        
-        header->setSectionResizeMode(1, QHeaderView::Stretch);          // 值列拉伸
+        header->setSectionResizeMode(1, QHeaderView::Stretch);
     }
     header->setStretchLastSection(false);
     header->setHighlightSections(false);
     
-    // 滚动条优化 - 启用像素级滚动以获得更平滑的体验
-    table->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    // 滚动条优化 - 始终显示避免布局抖动
+    table->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     table->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     table->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     
-    // 启用拖拽优化
+    // 禁用拖拽
     table->setDragEnabled(false);
     table->setDragDropMode(QAbstractItemView::NoDragDrop);
     table->setDropIndicatorShown(false);
-    
-    // 批处理模式优化（类似虚拟滚动）
-    // QTableView没有setUniformRowHeights方法，使用固定行高代替
-    table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10); // 所有行高相同以优化性能
-    
-    // 【性能优化】禁用不必要的滚动提示
-    table->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn); // 始终显示滚动条，避免动态显示/隐藏导致的重排
-    
-    // 启用缓存优化
-    table->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
-    
-    // 禁用不必要的功能
-    table->setAutoScroll(false);
-    table->setTabKeyNavigation(true);
-    
-    // 确保选择和滚动时正确重绘
-    connect(table->selectionModel(), &QItemSelectionModel::selectionChanged, this, [table]() {
-        if (table->isVisible()) {
-            table->viewport()->update();
-        }
-    });
-    
-    // 滚动时确保完全重绘
-    connect(table->verticalScrollBar(), &QScrollBar::valueChanged, this, [table]() {
-        if (table->isVisible()) {
-            table->viewport()->repaint(); // 使用repaint而不是update确保立即重绘
-        }
-    });
-    
-    // 禁用不必要特性
-    table->setAutoScroll(false);
-    table->setDragEnabled(false);
     table->setAcceptDrops(false);
     
-    // 列宽由header->resizeSection()统一设置，不需要重复设置
+    // 批处理模式优化
+    table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);
+    
+    // 编辑触发器
+    table->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+    
+    // 【关键优化】禁用不必要的功能以提升性能
+    table->setAutoScroll(false);
+    table->setTabKeyNavigation(true);
+    table->setMouseTracking(false);           // 禁用鼠标跟踪减少事件处理
+    table->setFocusPolicy(Qt::StrongFocus);    // 优化焦点策略
+    
+    // 【关键优化】移除selectionChanged和valueChanged连接，减少不必要的重绘
+    // 这些连接会导致频繁的视口更新，严重影响性能
+    
+    // 启用统一的行高，优化布局计算
+    table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);
 }
 
 int GXTStudio::calculateKeyColumnWidth()
 {
-    // 计算键列宽度：确保能显示10个字符
-    QFont monospaceFont("Consolas, 'Courier New', monospace");
-    monospaceFont.setPointSize(m_fontSize);
-    monospaceFont.setHintingPreference(QFont::PreferFullHinting);
-    monospaceFont.setStyleStrategy(QFont::PreferAntialias);
-    QFontMetrics metrics(monospaceFont);
+    // 【性能优化】使用缓存的字体和度量，避免重复创建
+    static QFont cachedFont;
+    static QFontMetrics cachedMetrics(cachedFont);
+    static int cachedFontSize = -1;
+    
+    // 只在字体大小变化时才重新计算
+    if (cachedFontSize != m_fontSize) {
+        cachedFont.setFamily("Consolas");
+        cachedFont.setPointSize(m_fontSize);
+        cachedFont.setStyleHint(QFont::Monospace);
+        cachedFont.setFixedPitch(true);
+        cachedFont.setHintingPreference(QFont::PreferFullHinting);
+        cachedFont.setStyleStrategy(QFont::PreferAntialias);
+        
+        cachedMetrics = QFontMetrics(cachedFont);
+        cachedFontSize = m_fontSize;
+    }
     
     // 使用10个字符宽的字符串进行测试，确保宽度准确
-    QString testString = "000123456789"; // 确切的10个字符
-    int width = metrics.horizontalAdvance(testString);
+    static const QString testString = "000123456789"; // 确切的10个字符
+    const int width = cachedMetrics.horizontalAdvance(testString);
     
     // 添加少量边距确保显示完整
     return width + 8; // 添加边距防止截断
@@ -6541,85 +6524,42 @@ QString DraggableTableList::createTempTableFile(int tableIndex, const QString& t
 
 void GXTStudio::resizeEvent(QResizeEvent* event)
 {
-    // 暂停重绘以减少闪烁
-    setUpdatesEnabled(false);
-    
+    // 调用父类resizeEvent
     QMainWindow::resizeEvent(event);
     
-    // 更严格的尺寸变化过滤，减少不必要的计算
+    // 更严格的尺寸变化过滤，大幅减少不必要的计算
     QSize newSize = event->size();
-    QSize oldSize = m_lastWindowSize; // 使用缓存的尺寸而不是oldSize
+    QSize oldSize = m_lastWindowSize;
     
     int widthDiff = newSize.width() - oldSize.width();
-    int heightDiff = newSize.height() - oldSize.height();
     
-    // 忽略小的尺寸变化，减少触发频率
-    if (abs(widthDiff) < 20 && abs(heightDiff) < 20) {
-        setUpdatesEnabled(true);
+    // 【关键优化1】忽略小的宽度变化，提高阈值到30px
+    if (abs(widthDiff) < 30) {
+        // 宽度变化太小，直接返回，不做任何处理
         return;
     }
     
-    // 只有在宽度显著变化时才需要调整列宽
+    // 【关键优化2】只有在宽度显著变化时才调整列宽
     bool needsColumnResize = abs(widthDiff) >= 50;
     
-    if (needsColumnResize) {
-        // 停止之前的防抖定时器
-        if (m_resizeDebouncer && m_resizeDebouncer->isActive()) {
+    if (needsColumnResize && m_resizeDebouncer) {
+        // 停止之前的防抖定时器，重置防抖
+        if (m_resizeDebouncer->isActive()) {
             m_resizeDebouncer->stop();
         }
         
-        // 清除当前标签页的所有缓存
+        // 【关键优化3】只标记需要更新，不立即执行任何操作
         FileTab* currentTab = getCurrentTab();
         if (currentTab) {
-            // 禁用表格更新以防止闪烁
-            if (currentTab->entryTableView) {
-                currentTab->entryTableView->setUpdatesEnabled(false);
-            }
-            
-            // 清除委托缓存
-            if (currentTab->entryTableView) {
-                if (auto* delegate = qobject_cast<OptimizedItemDelegate*>(currentTab->entryTableView->itemDelegate())) {
-                    delegate->clearCache();
-                }
-            }
-            
-            // 清除模型缓存
-            if (currentTab->entryTableModel) {
-                currentTab->entryTableModel->forceDataReset();
-            }
-            
-            // 强制清除视口
-            if (currentTab->entryTableView) {
-                currentTab->entryTableView->viewport()->update();
-            }
-            
             currentTab->cache.layoutNeedsUpdate = true;
         }
         
-        // 启动新的防抖定时器
-        if (m_resizeDebouncer) {
-            m_resizeDebouncer->start();
-        }
+        // 启动新的防抖定时器，延迟执行实际操作
+        m_resizeDebouncer->start();
     }
     
     // 记录新的大小
     m_lastWindowSize = newSize;
-    
-    // 重新启用更新
-    setUpdatesEnabled(true);
-    
-    // 延迟更新以减少闪烁
-    QTimer::singleShot(10, [this]() {
-        FileTab* currentTab = getCurrentTab();
-        if (currentTab && currentTab->entryTableView) {
-            // 重新启用表格更新
-            currentTab->entryTableView->setUpdatesEnabled(true);
-            // 强制完整刷新
-            currentTab->entryTableView->viewport()->update();
-            currentTab->entryTableView->update();
-        }
-        update();
-    });
 }
 
 

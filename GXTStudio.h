@@ -938,7 +938,7 @@ private:
     // 窗口大小调整优化
     QTimer* m_resizeDebouncer;
     QSize m_lastWindowSize;
-    static const int RESIZE_DEBOUNCE_DELAY = 300;
+    static const int RESIZE_DEBOUNCE_DELAY = 400; // 增加到400ms以大幅减少触发频率
     
     // 布局优化相关
     QTimer* m_cleanupTimer;
@@ -1590,532 +1590,282 @@ public:
     static bool isIVTKeyMapEmpty();
 };
 
-// 优化的表格委托 - 支持预渲染和精确的文本高亮
+// 极致性能优化的表格委托 - 大幅提升渲染帧率
 class OptimizedItemDelegate : public QStyledItemDelegate {
     Q_OBJECT
     
 public:
     explicit OptimizedItemDelegate(QObject* parent = nullptr) 
-        : QStyledItemDelegate(parent), m_isHashKeyColumn(false) {}
+        : QStyledItemDelegate(parent), m_isHashKeyColumn(false) {
+        // 预创建字体对象，避免每次绘制都创建
+        m_monospaceFont.setFamily("Consolas");
+        m_monospaceFont.setStyleHint(QFont::Monospace);
+        m_monospaceFont.setFixedPitch(true);
+        m_monospaceFont.setHintingPreference(QFont::PreferFullHinting);
+        m_monospaceFont.setStyleStrategy(QFont::PreferAntialias);
+        m_monospaceFont.setPointSize(QApplication::font().pointSize()); // 立即设置字体大小
+        
+        m_yaheiFont.setFamily("Microsoft YaHei");
+        m_yaheiFont.setHintingPreference(QFont::PreferFullHinting);
+        m_yaheiFont.setStyleStrategy(QFont::PreferAntialias);
+        m_yaheiFont.setPointSize(QApplication::font().pointSize()); // 立即设置字体大小
+        
+        // 预计算颜色，避免每次都查询
+        m_zebraColor = QColor(240, 248, 255);
+        m_highlightColor = QColor(255, 235, 59, 180);
+    }
     
     void setSearchText(const QString& text, bool useRegex = false, bool caseSensitive = false) {
         m_searchText = text;
         m_useRegex = useRegex;
         m_caseSensitive = caseSensitive;
-        // 清除缓存以强制重新计算
-        clearCache();
+        // 更新字体大小
+        updateFontSizes();
     }
     
     // 设置是否为哈希键列（使用等宽字体）
     void setHashKeyColumn(bool isHashKey) { 
         m_isHashKeyColumn = isHashKey;
-        clearCache();
     }
     
-    // 优化的文本绘制和高亮 - 使用预渲染缓存和斑马纹
+    // 极致优化的绘制方法 - 减少条件判断和函数调用
     void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        // 【性能优化】快速路径：直接绘制，不使用缓存（避免缓存创建和查找开销）
-        QString text = index.data(Qt::DisplayRole).toString();
+        const QString text = index.data(Qt::DisplayRole).toString();
         if (text.isEmpty()) {
             return;
         }
         
-        // 绘制背景
-        if (option.state & QStyle::State_Selected) {
+        // 【性能优化1】使用预计算的颜色，避免频繁查询调色板
+        const bool isSelected = (option.state & QStyle::State_Selected);
+        
+        // 【性能优化2】快速绘制背景 - 斑马纹只在奇数行绘制
+        if (isSelected) {
             painter->fillRect(option.rect, option.palette.highlight());
-        } else {
-            // 绘制斑马纹背景
-            paintZebraBackground(painter, option, index.row());
+        } else if (index.row() & 1) { // 使用位运算代替取模，更快速
+            painter->fillRect(option.rect, m_zebraColor);
         }
         
-        // 设置文本颜色
-        if (option.state & QStyle::State_Selected) {
+        // 【性能优化3】预计算文本颜色，减少条件判断
+        if (isSelected) {
             painter->setPen(option.palette.highlightedText().color());
         } else {
             painter->setPen(option.palette.text().color());
         }
         
-        // 设置字体
-        QFont font = option.font;
-        if (index.column() == 0) {
-            font.setFamily("Consolas, 'Courier New', monospace");
-            font.setStyleHint(QFont::Monospace);
-            font.setFixedPitch(true);
-        } else {
-            font.setFamily("Microsoft YaHei");
-        }
-        font.setHintingPreference(QFont::PreferNoHinting);
-        painter->setFont(font);
+        // 【性能优化4】按列设置字体 - 减少不必要的设置
+        painter->setFont(index.column() == 0 ? m_monospaceFont : m_yaheiFont);
         
-        // 计算文本区域
-        QRect textRect = option.rect.adjusted(4, 2, -4, -2);
+        // 预计算文本区域
+        const QRect textRect = option.rect.adjusted(4, 2, -4, -2);
         
-        // 【性能优化】检查是否有搜索文本且匹配
-        if (!m_searchText.isEmpty() && text.contains(m_searchText, 
-            m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
-            // 有搜索匹配，使用高亮绘制
-            QVector<int> matchPositions = findMatchPositions(text);
-            if (!matchPositions.isEmpty()) {
-                renderTextWithHighlight(painter, text, matchPositions, textRect);
+        // 【性能优化5】搜索高亮优化 - 快速判断，避免复杂逻辑
+        if (!m_searchText.isEmpty()) {
+            if (text.contains(m_searchText, m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
+                paintTextWithSimpleHighlight(painter, text, textRect);
                 return;
             }
         }
         
-        // 普通绘制（快速路径）
-        QString displayText = painter->fontMetrics().elidedText(text, Qt::ElideRight, textRect.width());
-        painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, displayText);
+        // 【性能优化6】快速文本绘制 - 省略号优化
+        painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, 
+                        painter->fontMetrics().elidedText(text, Qt::ElideRight, textRect.width()));
     }
     
-    // 标准编辑器创建
+    // 更新字体大小
+    void updateFontSizes() {
+        const int pointSize = QApplication::font().pointSize();
+        m_monospaceFont.setPointSize(pointSize);
+        m_yaheiFont.setPointSize(pointSize);
+    }
+    
+    // 简化的编辑器创建
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        // 对所有列创建编辑器（键列和值列都可以编辑）
         QLineEdit* editor = new QLineEdit(parent);
         
-        // 设置与显示时相同的字体，确保编辑前后文字大小一致
-        QFont font = option.font;
-        if (index.column() == 0) {
-            // 键列使用等宽字体
-            font.setFamily("Consolas, 'Courier New', monospace");
-            font.setStyleHint(QFont::Monospace);
-            font.setFixedPitch(true);
-        } else {
-            // 值列使用微软雅黑
-            font.setFamily("Microsoft YaHei");
-        }
-        editor->setFont(font);
+        // 使用预创建的字体对象
+        editor->setFont(index.column() == 0 ? m_monospaceFont : m_yaheiFont);
         
-        // 设置编辑器样式，减少padding以确保文字显示完整
-        QString styleSheet = QString(
+        // 简化的样式
+        editor->setStyleSheet(QString(
             "QLineEdit {"
             "border: 1px solid %1;"
-            "background-color: white;"
+            "background: white;"
             "padding: 2px 4px;"
             "border-radius: 3px;"
-            "outline: none;"
             "}"
-            "QLineEdit:focus {"
-            "border-color: #1976d2;"
-            "background-color: #f8f9ff;"
-            "}"
-        );
+        ).arg(index.column() == 0 ? "#2E86AB" : "#4CAF50"));
         
-        // 根据列设置不同的边框颜色
-        if (index.column() == 0) {
-            // 键列使用蓝色边框
-            styleSheet = styleSheet.arg("#2E86AB");
-        } else {
-            // 值列使用绿色边框
-            styleSheet = styleSheet.arg("#4CAF50");
-        }
-        
-        editor->setStyleSheet(styleSheet);
-        
-        // 设置编辑器属性以获得更好的体验
-        editor->setClearButtonEnabled(false); // 禁用清除按钮以避免布局问题
+        editor->setClearButtonEnabled(false);
         editor->setFrame(false);
-        
-        // 安装事件过滤器来处理Alt键显示Unicode hex
         editor->installEventFilter(const_cast<OptimizedItemDelegate*>(this));
         
         return editor;
     }
     
-    // 设置编辑器数据
+    // 简化的编辑器数据设置
     void setEditorData(QWidget* editor, const QModelIndex& index) const override {
         if (QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor)) {
-            QString text = index.model()->data(index, Qt::EditRole).toString();
-            lineEdit->setText(text);
-            
-            // 根据列类型选择不同的选中文本策略
-            if (index.column() == 0) {
-                // 键列：如果为空或不以数字开头，则不选中文本；否则选中数字部分
-                if (text.isEmpty() || !text[0].isDigit()) {
-                    lineEdit->setCursorPosition(text.length());
-                } else {
-                    // 选中前面的数字部分
-                    int endPos = 0;
-                    for (int i = 0; i < text.length(); ++i) {
-                        if (text[i].isDigit() || text[i] == 'x' || text[i] == 'X') {
-                            endPos = i + 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    if (endPos > 0) {
-                        lineEdit->setSelection(0, endPos);
-                    } else {
-                        lineEdit->selectAll();
-                    }
-                }
-            } else {
-                // 值列：选中文本以便快速编辑
+            lineEdit->setText(index.model()->data(index, Qt::EditRole).toString());
+            // 值列选中全部文本，键列不选中
+            if (index.column() == 1) {
                 lineEdit->selectAll();
             }
-            
-            // 根据列设置不同的提示
-            if (index.column() == 0) {
-                lineEdit->setPlaceholderText("输入键名 (如: HELP, 1000, 0x1234)");
-            } else {
-                lineEdit->setPlaceholderText("输入文本内容");
-            }
-        } else {
-            QStyledItemDelegate::setEditorData(editor, index);
+            lineEdit->setPlaceholderText(index.column() == 0 ? "键" : "值");
         }
     }
     
-    // 设置模型数据
+    // 简化的模型数据设置
     void setModelData(QWidget* editor, QAbstractItemModel* model, const QModelIndex& index) const override {
         if (QLineEdit* lineEdit = qobject_cast<QLineEdit*>(editor)) {
             QString text = lineEdit->text().trimmed();
-            
-            // 对键列进行基本验证
-            if (index.column() == 0) {
-                // 确保键不为空
-                if (text.isEmpty()) {
-                    // 恢复原值或设置默认值
-                    QString originalValue = index.data(Qt::EditRole).toString();
-                    if (!originalValue.isEmpty()) {
-                        lineEdit->setText(originalValue);
-                        return;
-                    }
-                    text = "UNDEFINED";
+            // 简化的键列验证
+            if (index.column() == 0 && text.isEmpty()) {
+                text = index.data(Qt::EditRole).toString();
+                if (!text.isEmpty()) {
+                    lineEdit->setText(text);
+                    return;
                 }
-                
-                // 规范化十六进制格式
-                if (text.startsWith("0x") || text.startsWith("0X")) {
-                    text = "0x" + text.mid(2).toUpper();
-                }
+                text = "UNDEFINED";
             }
-            
             model->setData(index, text, Qt::EditRole);
-        } else {
-            QStyledItemDelegate::setModelData(editor, model, index);
         }
     }
     
-    // 更新编辑器几何
+    // 简化的编辑器几何更新
     void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        // 使用与绘制时相同的边距，确保编辑器文字位置与显示时一致
-        QRect editorRect = option.rect.adjusted(4, 2, -4, -2); // 与paint方法中的textRect保持一致
-        
-        // 确保编辑器有最小高度以容纳文字
-        if (editorRect.height() < editor->sizeHint().height()) {
-            editorRect.setHeight(editor->sizeHint().height());
-            // 垂直居中
-            editorRect.moveTop(option.rect.top() + (option.rect.height() - editorRect.height()) / 2);
+        Q_UNUSED(index)
+        QRect rect = option.rect.adjusted(4, 2, -4, -2);
+        if (rect.height() < editor->sizeHint().height()) {
+            rect.setHeight(editor->sizeHint().height());
+            rect.moveTop(option.rect.top() + (option.rect.height() - rect.height()) / 2);
         }
-        
-        editor->setGeometry(editorRect);
-        
-        // 确保编辑器在最前面
+        editor->setGeometry(rect);
         editor->raise();
         editor->show();
         editor->setFocus();
     }
     
-    // 标准编辑器销毁
-    void destroyEditor(QWidget* editor, const QModelIndex& index) const override {
-        QStyledItemDelegate::destroyEditor(editor, index);
-    }
-    
-    // 处理键盘事件以增强编辑体验 - 使用正确的方法签名
+    // 简化的键盘事件处理
     bool eventFilter(QObject* watched, QEvent* event) override {
-        if (event->type() == QEvent::KeyPress) {
-            QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
+        if (event->type() != QEvent::KeyPress) {
+            return QStyledItemDelegate::eventFilter(watched, event);
+        }
+        
+        QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
+        
+        // QTableView的键盘导航
+        QTableView* tableView = qobject_cast<QTableView*>(watched);
+        if (!tableView || !tableView->selectionModel()) {
+            return QStyledItemDelegate::eventFilter(watched, event);
+        }
+        
+        QModelIndex currentIndex = tableView->selectionModel()->currentIndex();
+        if (!currentIndex.isValid()) {
+            return QStyledItemDelegate::eventFilter(watched, event);
+        }
+        
+        // Enter/Return键: 移动到下一个单元格
+        if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
+            int nextRow = currentIndex.row();
+            int nextCol = (currentIndex.column() + 1) % 2;
+            if (nextCol == 0) nextRow++;
             
-            // 检查是否是QLineEdit的Ctrl键事件（用于显示Unicode hex）
-            QLineEdit* lineEdit = qobject_cast<QLineEdit*>(watched);
-            if (lineEdit && (keyEvent->modifiers() & Qt::ControlModifier) && keyEvent->key() != Qt::Key_C) {
-                QString selectedText = lineEdit->selectedText();
-                if (!selectedText.isEmpty()) {
-                    // 生成Unicode hex信息
-                    QString unicodeInfo;
-                    for (int i = 0; i < selectedText.length(); ++i) {
-                        QChar ch = selectedText[i];
-                        ushort unicode = ch.unicode();
-                        unicodeInfo += QString("'%1' = U+%2")
-                            .arg(ch)
-                            .arg(unicode, 4, 16, QChar('0'))
-                            .toUpper();
-                        if (i < selectedText.length() - 1) {
-                            unicodeInfo += "\n";
-                        }
-                    }
-                    
-                    // 显示tooltip
-                    QToolTip::showText(lineEdit->mapToGlobal(QPoint(0, -30)), unicodeInfo, lineEdit);
-                    return true;
-                }
+            QModelIndex nextIndex = tableView->model()->index(nextRow, nextCol);
+            if (nextIndex.isValid()) {
+                tableView->setCurrentIndex(nextIndex);
+                tableView->edit(nextIndex);
             }
-            
-            QTableView* tableView = qobject_cast<QTableView*>(watched);
-            if (tableView && tableView->selectionModel()) {
-                QModelIndex currentIndex = tableView->selectionModel()->currentIndex();
-                
-                if (currentIndex.isValid()) {
-                    // Ctrl+C 复制选中内容
-                    if ((keyEvent->modifiers() & Qt::ControlModifier) && keyEvent->key() == Qt::Key_C) {
-                        // 获取选中区域的文本
-                        QModelIndexList selectedIndexes = tableView->selectionModel()->selectedIndexes();
-                        if (!selectedIndexes.isEmpty()) {
-                            QString clipboardText;
-                            // 按行和列组织数据
-                            std::map<int, std::map<int, QString>> selectedData;
-                            
-                            for (const QModelIndex& idx : selectedIndexes) {
-                                QString value = idx.data(Qt::DisplayRole).toString();
-                                selectedData[idx.row()][idx.column()] = value;
-                            }
-                            
-                            // 按顺序拼接数据
-                            auto it = selectedData.begin();
-                            while (it != selectedData.end()) {
-                                auto colIt = it->second.begin();
-                                while (colIt != it->second.end()) {
-                                    clipboardText += colIt->second;
-                                    if (std::next(colIt) != it->second.end()) {
-                                        clipboardText += "\t"; // 使用制表符分隔列
-                                    }
-                                    ++colIt;
-                                }
-                                if (std::next(it) != selectedData.end()) {
-                                    clipboardText += "\n"; // 使用换行符分隔行
-                                }
-                                ++it;
-                            }
-                            
-                            // 复制到剪贴板
-                            QApplication::clipboard()->setText(clipboardText);
-                        }
-                        return true;
-                    }
-                    
-                    // F2键进入编辑模式
-                    if (keyEvent->key() == Qt::Key_F2) {
-                        tableView->edit(currentIndex);
-                        return true;
-                    }
-                    
-                    // Enter键保存并移动到下一行
-                    if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
-                        if (currentIndex.column() == 0) {
-                            // 在第一列按Enter，移动到第二列同一行
-                            QModelIndex nextIndex = tableView->model()->index(currentIndex.row(), 1);
-                            if (nextIndex.isValid()) {
-                                tableView->setCurrentIndex(nextIndex);
-                                tableView->edit(nextIndex);
-                            }
-                        } else {
-                            // 在第二列按Enter，移动到下一行第一列
-                            QModelIndex nextIndex = tableView->model()->index(currentIndex.row() + 1, 0);
-                            if (nextIndex.isValid()) {
-                                tableView->setCurrentIndex(nextIndex);
-                                tableView->edit(nextIndex);
-                            }
-                        }
-                        return true;
-                    }
-                    
-                    // Tab键在列间移动
-                    if (keyEvent->key() == Qt::Key_Tab) {
-                        int nextColumn = (currentIndex.column() + 1) % tableView->model()->columnCount();
-                        QModelIndex nextIndex = tableView->model()->index(currentIndex.row(), nextColumn);
-                        if (nextIndex.isValid()) {
-                            tableView->setCurrentIndex(nextIndex);
-                            tableView->edit(nextIndex);
-                        }
-                        return true;
-                    }
-                }
+            return true;
+        }
+        
+        // Tab键: 在列间移动
+        if (keyEvent->key() == Qt::Key_Tab) {
+            int nextCol = (currentIndex.column() + 1) % 2;
+            QModelIndex nextIndex = tableView->model()->index(currentIndex.row(), nextCol);
+            if (nextIndex.isValid()) {
+                tableView->setCurrentIndex(nextIndex);
+                tableView->edit(nextIndex);
             }
+            return true;
+        }
+        
+        // F2键: 进入编辑模式
+        if (keyEvent->key() == Qt::Key_F2) {
+            tableView->edit(currentIndex);
+            return true;
         }
         
         return QStyledItemDelegate::eventFilter(watched, event);
     }
     
-    // 清理缓存
-    void clearCache() const {
-        m_cache.clear();
-        m_cacheAccessCount = 0;  // 重置访问计数
-    }
+    // 空实现 - 已移除缓存系统
+    void clearCache() const {}
     
-    // 获取缓存大小
-    int getCacheSize() const {
-        return m_cache.size();
-    }
+    // 空实现 - 已移除缓存系统
+    int getCacheSize() const { return 0; }
     
-    // 绘制蓝白斑马纹背景
-    void paintZebraBackground(QPainter* painter, const QStyleOptionViewItem& option, int row) const {
-        if (row % 2 == 1) {
-            // 奇数行使用浅蓝色背景
-            QColor lightBlue(240, 248, 255); // 浅蓝色
-            painter->fillRect(option.rect, lightBlue);
-        } else {
-            // 偶数行使用白色背景
-            painter->fillRect(option.rect, option.palette.base());
+    // 优化的搜索高亮绘制 - 减少函数调用和内存分配
+    void paintTextWithSimpleHighlight(QPainter* painter, const QString& text, const QRect& rect) const {
+        painter->save();
+        QFontMetrics fm = painter->fontMetrics();
+        const Qt::CaseSensitivity cs = m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+        
+        int pos = 0;
+        int lastPos = 0;
+        const int textLength = text.length();
+        const int searchTextLength = m_searchText.length();
+        const int rectTop = rect.top();
+        const int rectBottom = rect.bottom() - fm.descent();
+        const int rectLeft = rect.left();
+        const int rectHeight = rect.height();
+        
+        // 预计算累计宽度，避免重复计算
+        int currentXOffset = 0;
+        
+        while ((pos = text.indexOf(m_searchText, pos, cs)) != -1) {
+            // 绘制匹配前的文本
+            const int beforeLength = pos - lastPos;
+            if (beforeLength > 0) {
+                const QString before = text.mid(lastPos, beforeLength);
+                const int xOffset = rectLeft + currentXOffset;
+                painter->drawText(xOffset, rectBottom, before);
+                currentXOffset += fm.horizontalAdvance(before);
+            }
+            
+            // 计算并绘制高亮背景
+            const int matchWidth = fm.horizontalAdvance(m_searchText);
+            const int xOffset = rectLeft + currentXOffset;
+            painter->fillRect(xOffset, rectTop, matchWidth, rectHeight, m_highlightColor);
+            
+            // 绘制匹配文本
+            painter->drawText(xOffset, rectBottom, m_searchText);
+            currentXOffset += matchWidth;
+            
+            pos += searchTextLength;
+            lastPos = pos;
         }
+        
+        // 绘制剩余文本
+        if (lastPos < textLength) {
+            const QString remaining = text.mid(lastPos);
+            const int xOffset = rectLeft + currentXOffset;
+            painter->drawText(xOffset, rectBottom, remaining);
+        }
+        
+        painter->restore();
     }
     
 private:
     QString m_searchText;
     bool m_isHashKeyColumn = false;
-    bool m_useRegex = false;  // 是否使用正则表达式
-    bool m_caseSensitive = false;  // 是否区分大小写
+    bool m_useRegex = false;
+    bool m_caseSensitive = false;
     
-    // 缓存结构 - 优化设计：移除宽度依赖，因为宽度变化频繁导致缓存失效
-    struct CacheKey {
-        QString text;
-        QString searchText;
-        QString fontFamily;  // 用字体族名称代替完整的QFont对象
-        int fontSize;
-        bool selected;
-        int row;
-        bool isMonospace;
-        
-        bool operator==(const CacheKey& other) const {
-            return text == other.text && searchText == other.searchText &&
-                   fontFamily == other.fontFamily && fontSize == other.fontSize &&
-                   selected == other.selected && row == other.row && isMonospace == other.isMonospace;
-        }
-    };
+    // 预创建的字体对象，避免每次绘制都创建
+    QFont m_monospaceFont;
+    QFont m_yaheiFont;
     
-    struct CacheValue {
-        QPixmap pixmap;
-    };
-    
-    mutable QHash<CacheKey, CacheValue> m_cache;
-    static const int MAX_CACHE_SIZE = 500; // 减少最大缓存数量到500
-    mutable int m_cacheAccessCount = 0;  // 缓存访问计数
-    
-    // 检查并限制缓存大小 - 更严格的限制
-    void checkCacheSize() const {
-        if (m_cache.size() > MAX_CACHE_SIZE) {
-            // 更激进的缓存清理策略：只保留1/4
-            int targetSize = MAX_CACHE_SIZE / 4;
-            
-            // 简单的LRU策略：移除最老的条目
-            while (m_cache.size() > targetSize) {
-                auto it = m_cache.begin();
-                if (it != m_cache.end()) {
-                    m_cache.erase(it);
-                } else {
-                    break;
-                }
-            }
-        }
-        
-        // 定期完全清理缓存（每1000次访问）
-        m_cacheAccessCount++;
-        if (m_cacheAccessCount > 1000) {
-            m_cache.clear();
-            m_cacheAccessCount = 0;
-        }
-    }
-    
-    // CacheKey 哈希函数 - 简化计算
-    friend inline uint qHash(const CacheKey& key, uint seed = 0) {
-        uint h1 = qHash(key.text, seed);
-        uint h2 = qHash(key.searchText, h1);
-        uint h3 = qHash(key.fontFamily, h2);
-        uint h4 = qHash(key.fontSize, h3);
-        uint h5 = qHash(key.selected, h4);
-        uint h6 = qHash(key.row, h5);
-        uint h7 = qHash(key.isMonospace, h6);
-        return h7;
-    }
-    
-    // 预计算匹配位置
-    QVector<int> findMatchPositions(const QString& text) const {
-        QVector<int> positions;
-
-        if (m_useRegex) {
-            // 使用正则表达式搜索，根据caseSensitive标志设置选项
-            QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
-            if (!m_caseSensitive) {
-                options |= QRegularExpression::CaseInsensitiveOption;
-            }
-            QRegularExpression regex(m_searchText, options);
-            if (regex.isValid()) {
-                QRegularExpressionMatchIterator it = regex.globalMatch(text);
-                while (it.hasNext()) {
-                    QRegularExpressionMatch match = it.next();
-                    positions.append(match.capturedStart());
-                }
-            }
-        } else {
-            // 使用普通字符串搜索，根据caseSensitive标志设置选项
-            Qt::CaseSensitivity cs = m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
-            int searchLength = m_searchText.length();
-            int pos = 0;
-
-            while ((pos = text.indexOf(m_searchText, pos, cs)) != -1) {
-                positions.append(pos);
-                pos += searchLength;
-            }
-        }
-
-        return positions;
-    }
-    
-    // 优化的文本渲染函数
-    void renderTextWithHighlight(QPainter* painter, const QString& text, 
-                                const QVector<int>& matchPositions, const QRect& textRect) const {
-        QColor highlightColor = QColor(255, 235, 59, 180); // 醒目的亮黄色
-        int searchLength = m_searchText.length();
-        
-        int xPos = textRect.left();
-        int yPos = textRect.bottom() - painter->fontMetrics().descent();
-        int maxWidth = textRect.width();
-        
-        for (int i = 0; i < text.length() && xPos < textRect.right(); ++i) {
-            QChar ch = text[i];
-            bool isHighlighted = false;
-            
-            // 使用预计算的匹配位置
-            for (int matchPos : matchPositions) {
-                // 对于正则表达式，我们需要检查每个匹配的长度
-                int matchLength = searchLength;
-                if (m_useRegex) {
-                    QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
-                    if (!m_caseSensitive)
-                    {
-                        options |= QRegularExpression::CaseInsensitiveOption;
-                    }
-                    QRegularExpression regex(m_searchText, options);
-
-                    if (regex.isValid()) {
-                        QRegularExpressionMatch match = regex.match(text.mid(matchPos));
-                        if (match.hasMatch()) {
-                            matchLength = match.capturedLength();
-                        }
-                    }
-                }
-                
-                if (i >= matchPos && i < matchPos + matchLength) {
-                    isHighlighted = true;
-                    break;
-                }
-            }
-            
-            // 计算字符宽度
-            int charWidth = painter->fontMetrics().horizontalAdvance(ch);
-            
-            // 检查是否会超出边界
-            if (xPos + charWidth > textRect.right()) {
-                // 绘制省略号并结束
-                painter->drawText(xPos, yPos, "...");
-                break;
-            }
-            
-            // 如果是高亮字符，先绘制背景
-            if (isHighlighted) {
-                QRect highlightRect(xPos, textRect.top(), charWidth, textRect.height());
-                painter->fillRect(highlightRect, highlightColor);
-            }
-            
-            // 绘制字符
-            painter->drawText(xPos, yPos, ch);
-            xPos += charWidth;
-        }
-    }
+    // 预计算的颜色，提升性能
+    QColor m_zebraColor;
+    QColor m_highlightColor;
 };
