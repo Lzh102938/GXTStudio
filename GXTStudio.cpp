@@ -46,11 +46,12 @@ QMap<uint32_t, QString> GXTTableModel::s_ivtKeyMap;
 // 简单的事件过滤器类，用于处理父容器resize事件
 class ResizeEventFilter : public QObject {
 public:
-    explicit ResizeEventFilter(QObject* parent = nullptr) : QObject(parent), m_button(nullptr), m_listWidget(nullptr) {}
-    
+    explicit ResizeEventFilter(QObject* parent = nullptr) : QObject(parent), m_button(nullptr), m_listWidget(nullptr), m_progressBar(nullptr) {}
+
     void setButton(QToolButton* button) { m_button = button; }
     void setListWidget(QListWidget* listWidget) { m_listWidget = listWidget; }
-    
+    void setProgressBar(QProgressBar* progressBar) { m_progressBar = progressBar; }
+
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override {
         if (event->type() == QEvent::Resize && m_button && m_listWidget) {
@@ -58,21 +59,31 @@ protected:
             if (panel) {
                 // 获取列表控件在父容器中的几何位置
                 QRect listRect = m_listWidget->geometry();
-                
+
                 // 按钮右对齐列表控件右侧，下移到底部留白区域
                 // 按钮大小为42x42，在底部50px的留白区域中，距离底部5px
                 int buttonX = listRect.right() - 42;  // 右对齐列表控件右侧
                 int buttonY = listRect.bottom() + 5;  // 下移到底部留白，距离底部5px
-                
+
                 m_button->move(buttonX, buttonY);
+
+                // 如果有进度条，也重新定位
+                if (m_progressBar) {
+                    // 进度条宽度150px，高度16px，与按钮底部对齐，距离按钮10px
+                    int progressBarX = buttonX - 150 - 10;  // 按钮左侧10px
+                    int progressBarY = buttonY + (42 - 16) / 2;  // 垂直居中于按钮
+                    m_progressBar->move(progressBarX, progressBarY);
+                    m_progressBar->raise();  // 确保进度条在按钮之上
+                }
             }
         }
         return false;
     }
-    
+
 private:
     QToolButton* m_button;
     QListWidget* m_listWidget;
+    QProgressBar* m_progressBar;
 };
 
 // 字符串转换函数
@@ -981,6 +992,10 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_saveThread(nullptr)
     , m_saveWorker(nullptr)
     , m_saveProgressDialog(nullptr)
+    , m_autoSaveButton(nullptr)
+    , m_autoSaveProgressBar(nullptr)
+    , m_autoSaveTimer(nullptr)
+    , m_autoSaveEnabled(false)
     , m_cleanupTimer(nullptr)
     , m_resizeDebouncer(nullptr)
 {
@@ -1081,7 +1096,53 @@ GXTStudio::GXTStudio(QWidget *parent)
     QSettings settings;
     m_fontSize = settings.value("fontSize", 11).toInt();  // 表格默认字体大小
     m_isReadOnly = settings.value("readOnly", true).toBool();
-    
+    m_autoSaveEnabled = settings.value("autoSaveEnabled", false).toBool();  // 加载自动保存设置
+
+    // 更新自动保存按钮状态
+    if (m_autoSaveButton) {
+        if (m_autoSaveEnabled) {
+            m_autoSaveButton->setText(QString(QChar(0xf205)));  // 开启状态图标
+            m_autoSaveButton->setToolTip("自动保存（开启）");
+            // 启用状态使用蓝色
+            m_autoSaveButton->setStyleSheet(QString(R"(
+                QToolButton {
+                    border: none;
+                    background: transparent;
+                    color: #1a73e8;
+                    padding: 4px 6px;
+                    border-radius: 4px;
+                }
+                QToolButton:hover {
+                    background: #e8f0fe;
+                    color: #1a73e8;
+                }
+                QToolButton:pressed {
+                    background: #d2e3fc;
+                }
+            )"));
+        } else {
+            m_autoSaveButton->setText(QString(QChar(0xf204)));  // 关闭状态图标
+            m_autoSaveButton->setToolTip("自动保存（关闭）");
+            // 关闭状态使用灰色
+            m_autoSaveButton->setStyleSheet(QString(R"(
+                QToolButton {
+                    border: none;
+                    background: transparent;
+                    color: #666;
+                    padding: 4px 6px;
+                    border-radius: 4px;
+                }
+                QToolButton:hover {
+                    background: #e8f0fe;
+                    color: #1a73e8;
+                }
+                QToolButton:pressed {
+                    background: #d2e3fc;
+                }
+            )"));
+        }
+    }
+
     // 更新状态
     updateActions();
     updateStatusBar();
@@ -1626,7 +1687,7 @@ void GXTStudio::setupToolBars()
 void GXTStudio::setupStatusBar()
 {
     m_statusBar = ui.statusBar;
-    
+
     // 创建状态标签，确保支持中文显示
     m_statusLabel = new QLabel("就绪", this);
     m_statusLabel->setTextFormat(Qt::PlainText);
@@ -1634,7 +1695,61 @@ void GXTStudio::setupStatusBar()
     font.setFamily("Microsoft YaHei, SimSun, Arial"); // 优先使用中文字体
     m_statusLabel->setFont(font);
     m_statusBar->addWidget(m_statusLabel);
-    
+
+    // ========== 自动保存区域 ==========
+    // 创建自动保存容器
+    QWidget* autoSaveContainer = new QWidget();
+    QHBoxLayout* autoSaveLayout = new QHBoxLayout(autoSaveContainer);
+    autoSaveLayout->setContentsMargins(0, 0, 0, 0);
+    autoSaveLayout->setSpacing(2);  // 减小间距
+
+    // 创建自动保存开关按钮（使用FA图标）
+    m_autoSaveButton = new QToolButton(this);
+    m_autoSaveButton->setText(QString(QChar(0xf204)));  // 关闭状态图标 U+f204
+    m_autoSaveButton->setFont(FA::solidFont(14));
+    m_autoSaveButton->setToolTip("自动保存（关闭）");
+    m_autoSaveButton->setStyleSheet(QString(R"(
+        QToolButton {
+            border: none;
+            background: transparent;
+            color: #666;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+        QToolButton:hover {
+            background: #e8f0fe;
+            color: #1a73e8;
+        }
+        QToolButton:pressed {
+            background: #d2e3fc;
+        }
+    )"));
+    connect(m_autoSaveButton, &QToolButton::clicked, this, &GXTStudio::onAutoSaveToggle);
+
+    // 添加文字标签
+    QLabel* autoSaveLabel = new QLabel("自动保存", this);
+    autoSaveLabel->setStyleSheet("color: #666; font-size: 11px; font-family: 'Microsoft YaHei';");
+
+    autoSaveLayout->addWidget(m_autoSaveButton);
+    autoSaveLayout->addWidget(autoSaveLabel);
+    m_statusBar->addPermanentWidget(autoSaveContainer);
+
+    // 创建自动保存进度条（标准默认样式，不添加到状态栏）
+    m_autoSaveProgressBar = new QProgressBar(this);
+    m_autoSaveProgressBar->setRange(0, 100);
+    m_autoSaveProgressBar->setValue(0);
+    m_autoSaveProgressBar->setTextVisible(false);
+    m_autoSaveProgressBar->setMaximumWidth(150);
+    m_autoSaveProgressBar->setMinimumHeight(16);
+    // 使用默认样式，不设置自定义样式
+    m_autoSaveProgressBar->hide();  // 默认隐藏
+
+    // 创建自动保存定时器
+    m_autoSaveTimer = new QTimer(this);
+    m_autoSaveTimer->setSingleShot(true);
+    m_autoSaveTimer->setInterval(AUTOSAVE_DELAY);  // 5秒延迟
+    connect(m_autoSaveTimer, &QTimer::timeout, this, &GXTStudio::onAutoSaveTimer);
+
     // 添加永久信息
     QLabel* versionLabel = new QLabel("GXTStudio v1.0", this);
     versionLabel->setFont(font);
@@ -1751,16 +1866,22 @@ void GXTStudio::setupSaveThread()
     // 创建保存线程和工作对象
     m_saveThread = new QThread(this);
     m_saveWorker = new SaveWorker(this);  // 传入所有者指针
-    
+
     // 移动工作对象到子线程
     m_saveWorker->moveToThread(m_saveThread);
-    
+
     // 连接信号槽
     connect(m_saveWorker, &SaveWorker::saveProgress,
             this, &GXTStudio::onSaveProgress, Qt::QueuedConnection);
     connect(m_saveWorker, &SaveWorker::saveCompleted,
             this, &GXTStudio::onSaveCompleted, Qt::QueuedConnection);
-    
+
+    // 自动保存信号连接
+    connect(m_saveWorker, &SaveWorker::saveProgress,
+            this, &GXTStudio::onAutoSaveProgress, Qt::QueuedConnection);
+    connect(m_saveWorker, &SaveWorker::saveCompleted,
+            this, &GXTStudio::onAutoSaveCompleted, Qt::QueuedConnection);
+
     // 启动线程
     m_saveThread->start();
 }
@@ -1934,6 +2055,7 @@ void GXTStudio::saveFile()
     task.tabPtr = currentTab;
     task.filePath = currentTab->filePath;
     task.isNewPath = false;
+    task.isAutoSave = false;  // 手动保存
     
     // 发送保存请求到后台工作线程
     QTimer::singleShot(0, [this, task]() {
@@ -3393,11 +3515,17 @@ void GXTStudio::addNewEntry()
         newEntry.key = key.toStdString();
         newEntry.value = value.toStdString();
         table.entries.push_back(newEntry);
-        
+
         currentTab->isModified = true;
         updateEntryTable();
         updateWindowTitle();
         showLogMessage("已添加新条目: " + key);
+
+        // 触发自动保存
+        if (m_autoSaveEnabled && m_autoSaveTimer) {
+            m_autoSaveTimer->stop();
+            m_autoSaveTimer->start();
+        }
     }
 }
 
@@ -3423,6 +3551,12 @@ void GXTStudio::deleteEntry()
                     updateEntryTable();
                     updateWindowTitle();
                     showLogMessage("已删除条目");
+
+                    // 触发自动保存
+                    if (m_autoSaveEnabled && m_autoSaveTimer) {
+                        m_autoSaveTimer->stop();
+                        m_autoSaveTimer->start();
+                    }
                 }
             }
         }
@@ -3470,6 +3604,12 @@ void GXTStudio::deleteSelectedRows()
             updateEntryTable();
             updateWindowTitle();
             showLogMessage(QString("已删除 %1 个条目").arg(count));
+
+            // 触发自动保存
+            if (m_autoSaveEnabled && m_autoSaveTimer) {
+                m_autoSaveTimer->stop();
+                m_autoSaveTimer->start();
+            }
         }
     }
 }
@@ -3659,11 +3799,17 @@ void GXTStudio::addNewTable()
     
     // 切换到新添加的表
     switchToTable(currentTab->tables.size() - 1);
-    
+
     showLogMessage("已添加新表: " + tableName);
 
     // 显示成功提示
     QMessageBox::information(this, "成功", QString("表 '%1' 已成功创建！").arg(tableName));
+
+    // 触发自动保存
+    if (m_autoSaveEnabled && m_autoSaveTimer) {
+        m_autoSaveTimer->stop();
+        m_autoSaveTimer->start();
+    }
 }
 
 void GXTStudio::onTableDoubleClicked(QListWidgetItem* item)
@@ -3863,6 +4009,12 @@ void GXTStudio::renameTable(int tableIndex)
 
     // 显示成功提示
     QMessageBox::information(this, "成功", QString("表 '%1' 已成功重命名为 '%2'！").arg(currentTableName, newTableName));
+
+    // 触发自动保存
+    if (m_autoSaveEnabled && m_autoSaveTimer) {
+        m_autoSaveTimer->stop();
+        m_autoSaveTimer->start();
+    }
 }
 
 void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
@@ -3917,19 +4069,31 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
     // 如果输入的不是hash格式，需要计算hash进行比较
     std::string compareKey = normalizedInputKey;
     if (!isHashFormat) {
-        uint32_t inputHash;
-        // 尝试在IVTKEY映射中反向查找（GTA IV）
-        if (currentTab->version == GXTVersion::GTA_IV && GXTTableModel::findIVTHash(keyText, inputHash)) {
-            compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
-        }
-        // 尝试在SATKEY映射中反向查找（GTA SA）
-        else if (currentTab->version == GXTVersion::GTA_SA && GXTTableModel::findSATHash(keyText, inputHash)) {
-            compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
-        }
-        // 否则计算GTA4哈希（默认）
-        else {
-            inputHash = GXTEditor::calculateGTA4Hash(keyText.toStdString());
-            compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
+        // 只有GTA_SA和GTA_IV版本才进行hash转换，其他版本使用明文
+        if (currentTab->version == GXTVersion::GTA_IV || currentTab->version == GXTVersion::GTA_SA) {
+            uint32_t inputHash;
+            // 尝试在IVTKEY映射中反向查找（GTA IV）
+            if (currentTab->version == GXTVersion::GTA_IV && GXTTableModel::findIVTHash(keyText, inputHash)) {
+                compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
+            }
+            // 尝试在SATKEY映射中反向查找（GTA SA）
+            else if (currentTab->version == GXTVersion::GTA_SA && GXTTableModel::findSATHash(keyText, inputHash)) {
+                compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
+            }
+            // 否则计算对应的哈希值
+            else {
+                if (currentTab->version == GXTVersion::GTA_IV) {
+                    inputHash = GXTEditor::calculateGTA4Hash(keyText.toStdString());
+                } else if (currentTab->version == GXTVersion::GTA_SA) {
+                    // GTA SA使用CKeyGen计算hash
+                    std::string upperKey = keyText.toUpper().toStdString();
+                    inputHash = CKeyGen::GetUppercaseKey(upperKey.c_str());
+                }
+                compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
+            }
+        } else {
+            // GTA_III、GTA_VC、GXT2等版本使用明文
+            compareKey = normalizedInputKey;
         }
     }
     
@@ -3960,6 +4124,12 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
     keyEdit->setFocus();
 
     showLogMessage("已添加条目: " + keyText + " = " + valueText);
+
+    // 触发自动保存
+    if (m_autoSaveEnabled && m_autoSaveTimer) {
+        m_autoSaveTimer->stop();
+        m_autoSaveTimer->start();
+    }
 
     // 滚动到新添加的条目
     if (currentTab->entryTableView) {
@@ -4000,6 +4170,12 @@ void GXTStudio::deleteTable()
             updateEntryTable();
             updateWindowTitle();
             showLogMessage("已删除表: " + tableName);
+
+            // 触发自动保存
+            if (m_autoSaveEnabled && m_autoSaveTimer) {
+                m_autoSaveTimer->stop();
+                m_autoSaveTimer->start();
+            }
         }
     }
 }
@@ -4524,6 +4700,24 @@ void GXTStudio::onTabChanged(int index)
 
             // 不再单独调用 updateEntryTable()，因为 updateTableList 已经更新了模型
             updateWindowTitle();
+
+            // 更新自动保存进度条位置到当前标签的左侧面板
+            if (m_autoSaveProgressBar && currentTab->tableList && currentTab->addTableButton) {
+                // 将进度条移动到当前标签的父容器
+                QWidget* tableListPanel = currentTab->tableList->parentWidget();
+                if (tableListPanel) {
+                    m_autoSaveProgressBar->setParent(tableListPanel);
+
+                    // 计算进度条位置：按钮左侧10px
+                    QRect listRect = currentTab->tableList->geometry();
+                    int buttonX = listRect.right() - 42;
+                    int buttonY = listRect.bottom() + 5;
+                    int progressBarX = buttonX - 150 - 10;
+                    int progressBarY = buttonY + (42 - 16) / 2;
+                    m_autoSaveProgressBar->move(progressBarX, progressBarY);
+                    m_autoSaveProgressBar->raise();
+                }
+            }
 
             // 【关键修复】强制更新表格视图，确保数据立即显示
             if (currentTab->entryTableView) {
@@ -5776,11 +5970,22 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     int buttonX = listRect.right() - 42;  // 右对齐列表控件右侧
     int buttonY = listRect.bottom() + 5;  // 下移到底部留白，距离底部5px
     addTableButton->move(buttonX, buttonY);
-    
-    // 当父容器大小改变时，重新定位按钮
+
+    // 添加自动保存进度条到按钮左侧
+    // 进度条宽度150px，高度16px，与按钮底部对齐，距离按钮10px
+    if (m_autoSaveProgressBar && m_autoSaveProgressBar->parent() != tableListPanel) {
+        m_autoSaveProgressBar->setParent(tableListPanel);
+    }
+    int progressBarX = buttonX - 150 - 10;  // 按钮左侧10px
+    int progressBarY = buttonY + (42 - 16) / 2;  // 垂直居中于按钮
+    m_autoSaveProgressBar->move(progressBarX, progressBarY);
+    m_autoSaveProgressBar->raise();  // 确保进度条在按钮之上
+
+    // 当父容器大小改变时，重新定位按钮和进度条
     ResizeEventFilter* resizeFilter = new ResizeEventFilter(tableListPanel);
     resizeFilter->setButton(addTableButton);
     resizeFilter->setListWidget(tableList);
+    resizeFilter->setProgressBar(m_autoSaveProgressBar);
     tableListPanel->installEventFilter(resizeFilter);
     
     // 连接信号
@@ -6048,7 +6253,16 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     entryTableModel->setTab(&tab);
     entryTableModel->setEditable(!m_isReadOnly);
     entryTableView->setModel(entryTableModel);
-    
+
+    // 连接自动保存信号 - 数据修改时重置定时器
+    connect(entryTableModel, &GXTTableModel::dataModified, this, [this]() {
+        if (m_autoSaveEnabled && m_autoSaveTimer) {
+            // 重置定时器，延长5秒后再保存
+            m_autoSaveTimer->stop();
+            m_autoSaveTimer->start();
+        }
+    });
+
     // 修复表格闪烁和性能问题 - 禁用不透明绘制以使用系统背景
     entryTableView->setAttribute(Qt::WA_OpaquePaintEvent, false);
     entryTableView->setAttribute(Qt::WA_NoSystemBackground, false);
@@ -7642,13 +7856,13 @@ void GXTStudio::onSaveCompleted(const SaveResult& result)
             tab->filePath = result.filePath;
             tab->fileName = result.fileName;
             tab->isModified = false;
-            
+
             // 更新标签页标题
             int tabIndex = m_tabWidget->currentIndex();
             if (tabIndex >= 0) {
                 m_tabWidget->setTabText(tabIndex, result.fileName);
             }
-            
+
             // 更新窗口标题
             updateWindowTitle();
         } else if (!result.isNewPath) {
@@ -7656,12 +7870,148 @@ void GXTStudio::onSaveCompleted(const SaveResult& result)
             tab->isModified = false;
         }
     }
-    
-    // 创建保存成功详情对话框
-    showSaveSuccessDialog(result);
-    showLogMessage(QString("✓ 保存完成: %1").arg(result.fileName));
-    
+
+    // 只在手动保存时显示保存成功对话框
+    if (!result.isAutoSave) {
+        // 创建保存成功详情对话框
+        showSaveSuccessDialog(result);
+        showLogMessage(QString("✓ 保存完成: %1").arg(result.fileName));
+    } else {
+        // 自动保存完全静默，不显示任何消息
+        qDebug() << "自动保存完成:" << result.fileName;
+    }
+
     updateActions();
+}
+
+// ========== 自动保存相关槽函数 ==========
+
+void GXTStudio::onAutoSaveToggle()
+{
+    m_autoSaveEnabled = !m_autoSaveEnabled;
+
+    // 更新按钮图标和提示
+    if (m_autoSaveEnabled) {
+        m_autoSaveButton->setText(QString(QChar(0xf205)));  // 开启状态图标 U+f205
+        m_autoSaveButton->setToolTip("自动保存（开启）");
+        // 启用状态使用蓝色
+        m_autoSaveButton->setStyleSheet(QString(R"(
+            QToolButton {
+                border: none;
+                background: transparent;
+                color: #1a73e8;
+                padding: 4px 6px;
+                border-radius: 4px;
+            }
+            QToolButton:hover {
+                background: #e8f0fe;
+                color: #1a73e8;
+            }
+            QToolButton:pressed {
+                background: #d2e3fc;
+            }
+        )"));
+        showLogMessage("自动保存已启用");
+    } else {
+        m_autoSaveButton->setText(QString(QChar(0xf204)));  // 关闭状态图标 U+f204
+        m_autoSaveButton->setToolTip("自动保存（关闭）");
+        // 关闭状态使用灰色
+        m_autoSaveButton->setStyleSheet(QString(R"(
+            QToolButton {
+                border: none;
+                background: transparent;
+                color: #666;
+                padding: 4px 6px;
+                border-radius: 4px;
+            }
+            QToolButton:hover {
+                background: #e8f0fe;
+                color: #1a73e8;
+            }
+            QToolButton:pressed {
+                background: #d2e3fc;
+            }
+        )"));
+        showLogMessage("自动保存已禁用");
+
+        // 停止定时器
+        m_autoSaveTimer->stop();
+    }
+
+    // 保存设置
+    QSettings settings;
+    settings.setValue("autoSaveEnabled", m_autoSaveEnabled);
+}
+
+void GXTStudio::onAutoSaveTimer()
+{
+    // 检查自动保存是否启用
+    if (!m_autoSaveEnabled) {
+        return;
+    }
+
+    // 检查是否有已修改的文件
+    FileTab* currentTab = getCurrentTab();
+    if (!currentTab || !currentTab->isModified) {
+        return;
+    }
+
+    // 检查是否有文件路径
+    if (currentTab->filePath.isEmpty()) {
+        // 文件尚未保存，跳过自动保存 - 完全静默
+        qDebug() << "跳过自动保存：文件尚未保存";
+        return;
+    }
+
+    // 静默执行保存 - 不显示任何日志消息
+    qDebug() << "正在自动保存:" << currentTab->fileName;
+
+    // 显示进度条
+    m_autoSaveProgressBar->show();
+    m_autoSaveProgressBar->setValue(0);
+
+    // 构建保存任务
+    SaveTask task;
+    task.tabPtr = currentTab;
+    task.filePath = currentTab->filePath;
+    task.isNewPath = false;
+    task.isAutoSave = true;  // 自动保存
+
+    // 发送保存请求到保存线程
+    QMetaObject::invokeMethod(m_saveWorker, "saveFile",
+        Qt::QueuedConnection,
+        Q_ARG(SaveTask, task));
+}
+
+void GXTStudio::onAutoSaveProgress(int percentage, const QString& message)
+{
+    // 静默更新自动保存进度条
+    if (m_autoSaveProgressBar) {
+        m_autoSaveProgressBar->setValue(percentage);
+    }
+}
+
+void GXTStudio::onAutoSaveCompleted(const SaveResult& result)
+{
+    // 隐藏进度条
+    if (m_autoSaveProgressBar) {
+        m_autoSaveProgressBar->hide();
+        m_autoSaveProgressBar->setValue(0);
+    }
+
+    if (result.success) {
+        // 保存成功 - 完全静默，不显示任何弹窗
+        FileTab* tab = getCurrentTab();
+        if (tab && tab->filePath == result.filePath) {
+            tab->isModified = false;
+        }
+        // 只在日志中记录，不显示弹窗
+        qDebug() << "自动保存成功:" << result.fileName;
+        updateActions();
+    } else {
+        // 保存失败 - 只在日志中记录，不显示弹窗
+        qDebug() << "自动保存失败:" << result.fileName << "-" << result.errorMessage;
+    }
 }
 
 SaveResult GXTStudio::performSaveTask(const SaveTask& task)
@@ -7728,10 +8078,11 @@ void SaveWorker::saveFile(const SaveTask& task)
 {
     QElapsedTimer timer;
     timer.start();
-    
+
     SaveResult result;
     result.filePath = task.filePath;
     result.isNewPath = task.isNewPath;
+    result.isAutoSave = task.isAutoSave;  // 传递自动保存标志
     
     try {
         if (!task.tabPtr) {

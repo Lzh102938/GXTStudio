@@ -630,6 +630,7 @@ struct SaveTask {
     FileTab* tabPtr;
     QString filePath;
     bool isNewPath;
+    bool isAutoSave;  // 是否为自动保存
 };
 
 // 保存结果数据结构
@@ -641,6 +642,7 @@ struct SaveResult {
     qint64 elapsedMs;
     size_t bytesWritten;
     bool isNewPath;
+    bool isAutoSave;  // 是否为自动保存
 };
 
 // 子线程保存器
@@ -867,6 +869,12 @@ private slots:
     void onSaveProgress(int percentage, const QString& message);
     void onSaveCompleted(const SaveResult& result);
 
+    // 自动保存相关
+    void onAutoSaveToggle();  // 切换自动保存开关
+    void onAutoSaveTimer();  // 自动保存定时器触发
+    void onAutoSaveProgress(int percentage, const QString& message);  // 自动保存进度
+    void onAutoSaveCompleted(const SaveResult& result);  // 自动保存完成
+
     // 智能翻译相关
     void setupTranslationProgress();
     void onTranslationProgress(int completed, int total, const QString& message);
@@ -956,6 +964,13 @@ private:
     QThread* m_saveThread;
     SaveWorker* m_saveWorker;
     QProgressDialog* m_saveProgressDialog;
+
+    // 自动保存相关
+    QToolButton* m_autoSaveButton;  // 自动保存开关按钮
+    QProgressBar* m_autoSaveProgressBar;  // 自动保存进度条
+    QTimer* m_autoSaveTimer;  // 自动保存定时器
+    bool m_autoSaveEnabled;  // 自动保存是否启用
+    static const int AUTOSAVE_DELAY = 3000;  // 自动保存延迟（3秒）
     
     // 智能翻译相关
     SmartTranslator* m_smartTranslator;
@@ -1563,6 +1578,8 @@ public:
             m_tab->isModified = true;
             // 精确的数据更新信号 - 只更新修改的单元格
             emit dataChanged(index, index, {Qt::DisplayRole, Qt::EditRole});
+            // 发出数据修改信号，用于触发自动保存
+            emit dataModified();
         }
         return success;
     }
