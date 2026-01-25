@@ -20,6 +20,8 @@ namespace FA {
     constexpr QChar Regex = QChar(0xf069);                    // asterisk 图标 (Solid)
     constexpr QChar QChevronLeft = QChar(0xf053);          // 左箭头 (Solid) - 上一个
     constexpr QChar QChevronRight = QChar(0xf054);           // 右箭头 (Solid) - 下一个
+    constexpr QChar QChevronDown = QChar(0xf078);        // 下箭头 (Solid) - 展开
+    constexpr QChar QChevronUp = QChar(0xf077);          // 上箭头 (Solid) - 收起
     constexpr QChar QCheck = QChar(0xf00c);                   // 勾选图标 (Solid) - 成功
     constexpr QChar QTimes = QChar(0xf00d);                   // 叉号图标 (Solid) - 失败
     constexpr QChar QTrash = QChar(0xf1f8);                   // 垃圾桶图标 (Solid) - 删除
@@ -57,6 +59,10 @@ namespace FA {
     constexpr QChar QUpload = QChar(0xf093);                    // 上传图标 (Solid) - 拖拽上传
     constexpr QChar QInfoCircle = QChar(0xf05a);              // 信息圆圈 (Solid) - 关于信息
     constexpr QChar QFileCode = QChar(0xf1c9);                  // 代码文件图标 (Solid) - 格式
+    constexpr QChar QCalendar = QChar(0xf133);               // 日历图标 (Solid) - 日期
+    constexpr QChar QUser = QChar(0xf007);                     // 用户图标 (Solid) - 作者/开发者
+    constexpr QChar QLink = QChar(0xf0c1);                       // 链接图标 (Solid) - 外部链接
+    constexpr QChar QUserGroup = QChar(0xf0c0);              // 用户组图标 (Solid) - 团队组织
 
     // 获取 Font Awesome 7 Free Solid 字体族名称
     inline QString solidFontFamily() {

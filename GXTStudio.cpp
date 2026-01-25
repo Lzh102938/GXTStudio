@@ -1,5 +1,6 @@
 #include "GXTStudio.h"
 #include "TextRenderWidget.h"
+#include "AboutDialog.h"
 #include <QApplication>
 #include <QGuiApplication>
 #include <QScreen>
@@ -2681,12 +2682,8 @@ void GXTStudio::decreaseFont()
 // 帮助槽函数
 void GXTStudio::showAbout()
 {
-    QMessageBox::about(this, "关于 GXTStudio",
-        "<h3>GXTStudio v1.0</h3>"
-        "<p>GTA游戏文本文件编辑器</p>"
-        "<p>支持文件格式: GXT (GTA III, VC, SA, IV), GXT2 (GTA V), WHM</p>"
-        "<p>开发: GTAmod中文组</p>"
-        "<p>基于Qt框架开发</p>");
+    AboutDialog dialog(this);
+    dialog.exec();
 }
 
 void GXTStudio::showSaveSuccessDialog(const SaveResult& result)

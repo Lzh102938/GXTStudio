@@ -38,6 +38,8 @@ set(PROJECT_SOURCES
     CharTableParser.cpp
     CharTableWidget.h
     CharTableWidget.cpp
+    AboutDialog.h
+    AboutDialog.cpp
 )
 
 qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
