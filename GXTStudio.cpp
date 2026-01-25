@@ -183,25 +183,30 @@ void GXTTableModel::loadSATKeyMap() {
 void GXTTableModel::loadIVTKeyMap() {
     // 如果已经加载过，直接返回
     if (!s_ivtKeyMap.isEmpty()) {
+        qInfo() << "IVTKEY映射表已加载，大小: " << s_ivtKeyMap.size();
         return;
     }
-    
+
+    qInfo() << "开始加载IVTKEY映射表...";
+
     // 构建文件路径
     QString keylistPath = QDir::current().filePath("keylist/IVTKEY.lst");
-    
+
     // 检查文件是否存在
     if (!QFile::exists(keylistPath)) {
         qWarning() << "IVTKEY.lst文件不存在:" << keylistPath;
         return;
     }
-    
+
     // 打开文件
     QFile file(keylistPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         qWarning() << "无法打开IVTKEY.lst文件:" << keylistPath;
         return;
     }
-    
+
+    qInfo() << "已打开IVTKEY.lst文件:" << keylistPath;
+
     QTextStream stream(&file);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     stream.setEncoding(QStringConverter::Utf8);
@@ -212,21 +217,21 @@ void GXTTableModel::loadIVTKeyMap() {
     int loadedCount = 0;
     while (!stream.atEnd()) {
         QString line = stream.readLine().trimmed();
-        
+
         // 跳过空行和注释
         if (line.isEmpty() || line.startsWith("#")) {
             continue;
         }
-        
+
         // 按制表符分割
         QStringList parts = line.split('\t');
         if (parts.size() != 2) {
             continue; // 格式不正确
         }
-        
+
         QString keyStr = parts[0].trimmed();
         QString hashStr = parts[1].trimmed();
-        
+
         // 解析hash（移除0x前缀并转换为uint32）
         bool ok;
         uint32_t hash = hashStr.toUInt(&ok, 16); // 16进制转换
@@ -234,15 +239,20 @@ void GXTTableModel::loadIVTKeyMap() {
             qWarning() << "解析hash失败:" << hashStr;
             continue;
         }
-        
+
         // 添加到映射
         s_ivtKeyMap[hash] = keyStr;
         loadedCount++;
+
+        // 记录前5条加载的数据
+        if (loadedCount <= 5) {
+            qInfo() << "加载: " << keyStr << " -> 0x" << QString::number(hash, 16);
+        }
     }
-    
+
     file.close();
-    
-    qDebug() << "成功加载" << loadedCount << "条IVTKEY映射";
+
+    qInfo() << "IVTKEY映射表加载完成，共加载 " << loadedCount << " 条记录";
 }
 
 // 查找SATKEY映射（静态方法）
@@ -279,13 +289,24 @@ bool GXTTableModel::findSATHash(const QString& key, uint32_t& outHash) {
 
 // 反向查找：根据字符串查找IVT hash（静态方法）
 bool GXTTableModel::findIVTHash(const QString& key, uint32_t& outHash) {
-    // 遍历映射表，查找匹配的key
+    qInfo() << "查找IVTKEY映射，输入键: " << key << ", 映射表大小: " << s_ivtKeyMap.size();
+
+    // 如果映射表为空，先尝试加载
+    if (s_ivtKeyMap.isEmpty()) {
+        qWarning() << "IVTKEY映射表为空，尝试加载";
+        loadIVTKeyMap();
+        qWarning() << "加载后IVTKEY映射表大小: " << s_ivtKeyMap.size();
+    }
+
+    // 遍历映射表，查找匹配的key（不区分大小写）
     for (auto it = s_ivtKeyMap.begin(); it != s_ivtKeyMap.end(); ++it) {
-        if (it.value() == key) {
+        if (it.value().compare(key, Qt::CaseInsensitive) == 0) {
             outHash = it.key();
+            qInfo() << "找到匹配: " << key << " -> 0x" << QString::number(outHash, 16);
             return true;
         }
     }
+    qWarning() << "未找到匹配: " << key;
     return false;
 }
 
@@ -1223,6 +1244,26 @@ GXTStudio::~GXTStudio()
 
     // 清理资源
     m_fileTabs.clear();
+}
+
+// 格式化键值显示 - 用于导出txt时显示明文或添加0x前缀
+QString GXTStudio::formatKeyForDisplay(const QString& key)
+{
+    // 如果key是8位hex字符，添加0x前缀
+    if (key.length() == 8) {
+        bool allHex = true;
+        for (const QChar& c : key) {
+            if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
+                allHex = false;
+                break;
+            }
+        }
+        if (allHex) {
+            return "0x" + key;
+        }
+    }
+    // 否则直接返回key（明文）
+    return key;
 }
 
 // UI辅助方法 - 优化样式代码复用
@@ -2287,8 +2328,42 @@ void GXTStudio::exportCurrentFile()
                     }
                     
                     for (const auto& entry : table.entries) {
-                        QString formattedKey = GXTStudio::formatKeyForDisplay(QString::fromStdString(entry.key));
-                        QString line = QString("%1=%2").arg(formattedKey, QString::fromStdString(entry.value));
+                        QString keyStr;
+                        // 优先使用原始键值
+                        if (!entry.originalKey.empty()) {
+                            keyStr = QString::fromStdString(entry.originalKey);
+                        } else {
+                            // 尝试使用SATKEY/IVTKEY映射
+                            QString entryKey = QString::fromStdString(entry.key);
+                            bool foundInLst = false;
+                            
+                            if (currentTab->version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
+                                bool ok;
+                                uint32_t hash = entryKey.toUInt(&ok, 16);
+                                if (ok) {
+                                    QString lstKey;
+                                    if (GXTTableModel::findSATKey(hash, lstKey)) {
+                                        keyStr = lstKey;
+                                        foundInLst = true;
+                                    }
+                                }
+                            } else if (currentTab->version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                                bool ok;
+                                uint32_t hash = entryKey.toUInt(&ok, 16);
+                                if (ok) {
+                                    QString lstKey;
+                                    if (GXTTableModel::findIVTKey(hash, lstKey)) {
+                                        keyStr = lstKey;
+                                        foundInLst = true;
+                                    }
+                                }
+                            }
+                            
+                            if (!foundInLst) {
+                                keyStr = GXTStudio::formatKeyForDisplay(entryKey);
+                            }
+                        }
+                        QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
                         allStream << line << Qt::endl;
                     }
                     
@@ -2311,8 +2386,42 @@ void GXTStudio::exportCurrentFile()
                         }
                         
                         for (const auto& entry : table.entries) {
-                            QString formattedKey = GXTStudio::formatKeyForDisplay(QString::fromStdString(entry.key));
-                            QString line = QString("%1=%2").arg(formattedKey, QString::fromStdString(entry.value));
+                            QString keyStr;
+                            // 优先使用原始键值
+                            if (!entry.originalKey.empty()) {
+                                keyStr = QString::fromStdString(entry.originalKey);
+                            } else {
+                                // 尝试使用SATKEY/IVTKEY映射
+                                QString entryKey = QString::fromStdString(entry.key);
+                                bool foundInLst = false;
+                                
+                                if (currentTab->version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
+                                    bool ok;
+                                    uint32_t hash = entryKey.toUInt(&ok, 16);
+                                    if (ok) {
+                                        QString lstKey;
+                                        if (GXTTableModel::findSATKey(hash, lstKey)) {
+                                            keyStr = lstKey;
+                                            foundInLst = true;
+                                        }
+                                    }
+                                } else if (currentTab->version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                                    bool ok;
+                                    uint32_t hash = entryKey.toUInt(&ok, 16);
+                                    if (ok) {
+                                        QString lstKey;
+                                        if (GXTTableModel::findIVTKey(hash, lstKey)) {
+                                            keyStr = lstKey;
+                                            foundInLst = true;
+                                        }
+                                    }
+                                }
+                                
+                                if (!foundInLst) {
+                                    keyStr = GXTStudio::formatKeyForDisplay(entryKey);
+                                }
+                            }
+                            QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
                             stream << line << Qt::endl;
                         }
                         file.close();
@@ -2372,8 +2481,42 @@ void GXTStudio::exportTableToFolder(int tableIndex, const QString& filePath)
         }
         
         for (const auto& entry : table.entries) {
-            QString formattedKey = GXTStudio::formatKeyForDisplay(QString::fromStdString(entry.key));
-            QString line = QString("%1=%2").arg(formattedKey, QString::fromStdString(entry.value));
+            QString keyStr;
+            // 优先使用原始键值
+            if (!entry.originalKey.empty()) {
+                keyStr = QString::fromStdString(entry.originalKey);
+            } else {
+                // 尝试使用SATKEY/IVTKEY映射
+                QString entryKey = QString::fromStdString(entry.key);
+                bool foundInLst = false;
+                
+                if (currentTab->version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
+                    bool ok;
+                    uint32_t hash = entryKey.toUInt(&ok, 16);
+                    if (ok) {
+                        QString lstKey;
+                        if (GXTTableModel::findSATKey(hash, lstKey)) {
+                            keyStr = lstKey;
+                            foundInLst = true;
+                        }
+                    }
+                } else if (currentTab->version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                    bool ok;
+                    uint32_t hash = entryKey.toUInt(&ok, 16);
+                    if (ok) {
+                        QString lstKey;
+                        if (GXTTableModel::findIVTKey(hash, lstKey)) {
+                            keyStr = lstKey;
+                            foundInLst = true;
+                        }
+                    }
+                }
+                
+                if (!foundInLst) {
+                    keyStr = GXTStudio::formatKeyForDisplay(entryKey);
+                }
+            }
+            QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
             stream << line << Qt::endl;
         }
         file.close();
@@ -4044,27 +4187,17 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
         return;
     }
 
+    qInfo() << "开始添加条目，输入键: " << keyText << ", 值: " << valueText;
+
     // 检查键是否已存在
     GXTTabl& currentTable = currentTab->tables[currentTab->currentTableIndex];
-    
+
     // 标准化输入的键用于比较
     std::string normalizedInputKey = normalizeKeyStdString(keyText.toStdString());
+    qInfo() << "标准化后的键: " << QString::fromStdString(normalizedInputKey);
     
-    // 判断输入的是hash还是原始字符串
-    bool isHashFormat = false;
-    if (keyText.startsWith("0x", Qt::CaseInsensitive)) {
-        isHashFormat = true;
-    } else if (normalizedInputKey.length() == 8) {
-        // 检查是否全部是hex字符
-        bool allHex = true;
-        for (const QChar& c : QString::fromStdString(normalizedInputKey)) {
-            if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
-                allHex = false;
-                break;
-            }
-        }
-        isHashFormat = allHex;
-    }
+    // 判断输入的是hash还是原始字符串（只检查是否有0x前缀）
+    bool isHashFormat = keyText.startsWith("0x", Qt::CaseInsensitive);
     
     // 如果输入的不是hash格式，需要计算hash进行比较
     std::string compareKey = normalizedInputKey;
@@ -4075,21 +4208,31 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
             // 尝试在IVTKEY映射中反向查找（GTA IV）
             if (currentTab->version == GXTVersion::GTA_IV && GXTTableModel::findIVTHash(keyText, inputHash)) {
                 compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
+                qInfo() << "从IVTKEY映射中找到: " << keyText << " -> 0x" << QString::number(inputHash, 16);
             }
             // 尝试在SATKEY映射中反向查找（GTA SA）
             else if (currentTab->version == GXTVersion::GTA_SA && GXTTableModel::findSATHash(keyText, inputHash)) {
                 compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
+                qInfo() << "从SATKEY映射中找到: " << keyText << " -> 0x" << QString::number(inputHash, 16);
             }
             // 否则计算对应的哈希值
             else {
+                qWarning() << "lst映射中未找到: " << keyText << "，准备计算hash";
                 if (currentTab->version == GXTVersion::GTA_IV) {
-                    inputHash = GXTEditor::calculateGTA4Hash(keyText.toStdString());
+                    // 确保先转换为小写再计算
+                    std::string lowerKey = keyText.toLower().toStdString();
+                    qInfo() << "转换为小写: " << QString::fromStdString(lowerKey);
+                    inputHash = GXTEditor::calculateGTA4Hash(lowerKey);
+                    qWarning() << "计算GTA4 hash: " << keyText << " (小写: " << QString::fromStdString(lowerKey) << ") -> 0x" << QString::number(inputHash, 16);
                 } else if (currentTab->version == GXTVersion::GTA_SA) {
-                    // GTA SA使用CKeyGen计算hash
+                    // GTA SA使用CKeyGen计算hash（内部会转为大写）
                     std::string upperKey = keyText.toUpper().toStdString();
+                    qInfo() << "转换为大写: " << QString::fromStdString(upperKey);
                     inputHash = CKeyGen::GetUppercaseKey(upperKey.c_str());
+                    qWarning() << "计算SA hash: " << keyText << " (大写: " << QString::fromStdString(upperKey) << ") -> 0x" << QString::number(inputHash, 16);
                 }
                 compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
+                qWarning() << "最终使用compareKey: " << QString::fromStdString(compareKey);
             }
         } else {
             // GTA_III、GTA_VC、GXT2等版本使用明文
@@ -6719,8 +6862,42 @@ QString DraggableTableList::createTempTableFile(int tableIndex, const QString& t
                 
                 // 写入所有条目
                 for (const auto& entry : table.entries) {
-                    QString formattedKey = GXTStudio::formatKeyForDisplay(QString::fromStdString(entry.key));
-                    QString line = QString("%1=%2").arg(formattedKey, QString::fromStdString(entry.value));
+                    QString keyStr;
+                    // 优先使用原始键值
+                    if (!entry.originalKey.empty()) {
+                        keyStr = QString::fromStdString(entry.originalKey);
+                    } else {
+                        // 尝试使用SATKEY/IVTKEY映射
+                        QString entryKey = QString::fromStdString(entry.key);
+                        bool foundInLst = false;
+                        
+                        if (currentTab->version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
+                            bool ok;
+                            uint32_t hash = entryKey.toUInt(&ok, 16);
+                            if (ok) {
+                                QString lstKey;
+                                if (GXTTableModel::findSATKey(hash, lstKey)) {
+                                    keyStr = lstKey;
+                                    foundInLst = true;
+                                }
+                            }
+                        } else if (currentTab->version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                            bool ok;
+                            uint32_t hash = entryKey.toUInt(&ok, 16);
+                            if (ok) {
+                                QString lstKey;
+                                if (GXTTableModel::findIVTKey(hash, lstKey)) {
+                                    keyStr = lstKey;
+                                    foundInLst = true;
+                                }
+                            }
+                        }
+                        
+                        if (!foundInLst) {
+                            keyStr = GXTStudio::formatKeyForDisplay(entryKey);
+                        }
+                    }
+                    QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
                     stream << line << Qt::endl;
                 }
                 
@@ -7280,33 +7457,41 @@ void GXTStudio::prepareEditorForSave(FileTab* tab, GXTEditor& editor)
         int failedCount = 0;
         for (size_t j = 0; j < table.entries.size(); ++j) {
             const auto& entry = table.entries[j];
-            
+
+            // 调试日志：记录原始键值
+            QString debugKey = QString::fromStdString(entry.key);
+            QString debugOriginalKey = QString::fromStdString(entry.originalKey);
+            if (debugKey.contains("FF_WARN", Qt::CaseInsensitive) || debugOriginalKey.contains("FF_WARN", Qt::CaseInsensitive)) {
+                showLogMessage(QString("[DEBUG] FF_WARN条目: entry.key=%1, entry.originalKey=%2, version=%3")
+                              .arg(debugKey)
+                              .arg(debugOriginalKey)
+                              .arg(static_cast<int>(tab->version)));
+            }
+
             // 使用已存储的hash值（entry.key），它已经是在添加条目时计算好的
             // 如果是通过addEntryFromInputs添加的，originalKey保存了原始字符串
             std::string saveKey = entry.key;
-            
-            // 如果entry.key不是hash格式（8位hex），则需要重新计算
-            // 这种情况通常发生在直接在表格中编辑键列时
-            QString keyToCheck = QString::fromStdString(!entry.originalKey.empty() ? entry.originalKey : entry.key);
-            
-            // 检查是否是hex格式（以0x开头或全部是hex字符）
-            bool isHexFormat = false;
-            if (keyToCheck.startsWith("0x", Qt::CaseInsensitive)) {
-                isHexFormat = true;
-            } else if (keyToCheck.length() == 8) {
-                // 检查是否全部是hex字符
-                bool allHex = true;
-                for (const QChar& c : keyToCheck) {
-                    if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
-                        allHex = false;
-                        break;
-                    }
+
+            // 只有当用户直接在表格中编辑了键列（没有originalKey或originalKey改变）时才需要重新计算hash
+            // 如果originalKey存在，说明entry.key已经是正确的hash值，无需重新计算
+            bool needsRecalculate = entry.originalKey.empty();
+
+            if (needsRecalculate) {
+                // 用户直接在表格中编辑了键列，需要重新计算hash
+                QString keyToCheck = QString::fromStdString(entry.key);
+
+                // 调试日志：记录需要重新计算的键
+                if (keyToCheck.contains("FF_WARN", Qt::CaseInsensitive)) {
+                    showLogMessage(QString("[DEBUG] 需要重新计算hash: keyToCheck=%1, 长度=%2")
+                                  .arg(keyToCheck)
+                                  .arg(keyToCheck.length()));
                 }
-                isHexFormat = allHex;
-            }
-            
-            // 如果不是hex格式，则需要反向转换（重新计算hash）
-            if (!isHexFormat) {
+
+                // 检查是否是hex格式（只检查是否有0x前缀）
+                bool isHexFormat = keyToCheck.startsWith("0x", Qt::CaseInsensitive);
+
+                // 如果不是hex格式，则需要反向转换（重新计算hash）
+                if (!isHexFormat) {
                 uint32_t hash;
                 if (tab->version == GXTVersion::GTA_SA) {
                     // 尝试在SATKEY映射中反向查找
@@ -7322,14 +7507,21 @@ void GXTStudio::prepareEditorForSave(FileTab* tab, GXTEditor& editor)
                     // 尝试在IVTKEY映射中反向查找
                     if (GXTTableModel::findIVTHash(keyToCheck, hash)) {
                         saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
+                        if (keyToCheck.contains("FF_WARN", Qt::CaseInsensitive)) {
+                            showLogMessage(QString("[DEBUG] IVTKEY查找成功: %1 -> 0x%2").arg(keyToCheck).arg(QString::number(hash, 16)));
+                        }
                     } else {
                         // 计算GTA4哈希
                         hash = GXTEditor::calculateGTA4Hash(keyToCheck.toStdString());
                         saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
+                        if (keyToCheck.contains("FF_WARN", Qt::CaseInsensitive)) {
+                            showLogMessage(QString("[DEBUG] GTA4 hash计算: %1 -> 0x%2").arg(keyToCheck).arg(QString::number(hash, 16)));
+                        }
                     }
                 }
+                }
             }
-            
+
             if (j < 5) { // 只记录前5个条目，避免日志过多
                 showLogMessage(QString("  添加条目: %1 = %2")
                               .arg(QString::fromStdString(saveKey))

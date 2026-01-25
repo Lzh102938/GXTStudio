@@ -435,7 +435,8 @@ bool GXTParser::parse(const std::string& filePath) {
                                                 (int)(end - off), &val[0], len, nullptr, nullptr);
                         }
                     }
-                    tabl.entries.push_back({key, val});
+                    // 对于GTA_III格式，key和originalKey都使用原始字符串键
+                    tabl.entries.push_back({key, val, key});
                 }
                 tables.push_back(std::move(tabl));
                 addParseLog("MAIN表解析完成，共 " + std::to_string(tabl.entries.size()) + " 个条目");
@@ -730,7 +731,8 @@ bool GXTParser::parse(const std::string& filePath) {
                                                 (int)(end - off), &val[0], len, nullptr, nullptr);
                         }
                     }
-                    tabl.entries.push_back({key, val});
+                    // 对于GTA_VC格式，key和originalKey都使用原始字符串键
+                    tabl.entries.push_back({key, val, key});
                 }
             } else {
                 // SA/IV版本: offset(uint32) + crc(uint32)
@@ -1231,4 +1233,3 @@ void GXTParser::exportDATToTxt(const std::string& datPath, const std::string& tx
     out.write(buf.data(), (std::streamsize)buf.size());
     addParseLog("DAT导出完成: " + txtPath);
 }
-

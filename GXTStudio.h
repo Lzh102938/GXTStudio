@@ -765,23 +765,7 @@ public:
     void updateEntryTable();
     
     // 格式化键值显示（添加0x前缀）
-    static QString formatKeyForDisplay(const QString& key) {
-        QString formattedKey = key;
-        // 如果是8位hex字符，添加0x前缀
-        if (formattedKey.length() == 8) {
-            bool allHex = true;
-            for (const QChar& c : formattedKey) {
-                if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
-                    allHex = false;
-                    break;
-                }
-            }
-            if (allHex) {
-                formattedKey = "0x" + formattedKey;
-            }
-        }
-        return formattedKey;
-    }
+    static QString formatKeyForDisplay(const QString& key);
 
 private slots:
     // 文件操作
@@ -1557,7 +1541,93 @@ public:
                     if (row < static_cast<int>(table.entries.size())) {
                         auto& entry = table.entries[row];
                         if (col == KeyColumn && entry.key != newValue) {
-                            entry.key = newValue;
+                            // 调试日志：记录键修改
+                            QString debugOldKey = QString::fromStdString(entry.key);
+                            QString debugNewKey = QString::fromStdString(newValue);
+                            if (debugNewKey.contains("FF_WARN", Qt::CaseInsensitive) || debugOldKey.contains("FF_WARN", Qt::CaseInsensitive)) {
+                                qInfo() << "[setData] 修改键: row=" << row << ", 旧键=" << debugOldKey << ", 新键=" << debugNewKey;
+                            }
+                            
+                            // 【关键修改】输入字符串后，立即进行hash计算或映射转换
+                            // 表面显示明文，但实际存储hash值
+                            QString inputKey = QString::fromStdString(newValue);
+                            QString processedKey = inputKey;
+                            
+                            // 根据版本进行不同的处理
+                            if (m_tab->version == GXTVersion::GTA_SA) {
+                                // GTA SA: 使用CKeyGen计算hash
+                                std::string upperKey = inputKey.toUpper().toStdString();
+                                uint32_t hash = CKeyGen::GetUppercaseKey(upperKey.c_str());
+                                processedKey = QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
+                                qDebug() << "[Hash转换] SA版本: 输入=" << inputKey << " -> Hash=0x" << processedKey;
+                            } else if (m_tab->version == GXTVersion::GTA_IV) {
+                                // GTA IV: 使用GTA4 hash算法 - 需要包含GXTEditor头文件
+                                // 由于这是在header文件中，我们使用简单的hash计算
+                                uint32_t hash = 0;
+                                std::string str = inputKey.toLower().toStdString();
+                                for (char c : str) {
+                                    if (c >= 'A' && c <= 'Z') c += 32; // 转小写
+                                    else if (c == '\\') c = '/'; // 反斜杠替换
+                                    uint32_t cVal = static_cast<uint32_t>(static_cast<unsigned char>(c)) & 0xFF;
+                                    uint32_t tmp = (hash + cVal) & 0xFFFFFFFF;
+                                    uint32_t mult = (1025 * tmp) & 0xFFFFFFFF;
+                                    hash = ((mult >> 6) ^ mult) & 0xFFFFFFFF;
+                                }
+                                uint32_t a = (9 * hash) & 0xFFFFFFFF;
+                                uint32_t aXor = (a ^ (a >> 11)) & 0xFFFFFFFF;
+                                hash = (32769 * aXor) & 0xFFFFFFFF;
+                                processedKey = QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
+                                qDebug() << "[Hash转换] IV版本: 输入=" << inputKey << " -> Hash=0x" << processedKey;
+                            } else if (m_tab->version == GXTVersion::GXT2) {
+                                // GXT2: 使用JOAAT hash - 简化实现
+                                uint32_t hash = 0;
+                                std::string str = inputKey.toStdString();
+                                for (char c : str) {
+                                    hash += static_cast<uint8_t>(c);
+                                    hash &= 0xFFFFFFFF;
+                                    hash += (hash << 10);
+                                    hash &= 0xFFFFFFFF;
+                                    hash ^= (hash >> 6);
+                                }
+                                hash += (hash << 3);
+                                hash &= 0xFFFFFFFF;
+                                hash ^= (hash >> 11);
+                                hash += (hash << 15);
+                                hash &= 0xFFFFFFFF;
+                                processedKey = QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
+                                qDebug() << "[Hash转换] GXT2版本: 输入=" << inputKey << " -> Hash=0x" << processedKey;
+                            } else {
+                                // 其他版本: 尝试解析为hex，如果失败则计算hash
+                                bool isHex = false;
+                                uint32_t hexValue = inputKey.toUInt(&isHex, 16);
+                                if (isHex && inputKey.length() == 8) {
+                                    // 已经是合法的8位hex，保持原样
+                                    processedKey = inputKey.toUpper();
+                                    qDebug() << "[Hash转换] Hex格式: 输入=" << inputKey << " -> 保持=" << processedKey;
+                                } else {
+                                    // 不是hex，计算JOAAT hash
+                                    uint32_t hash = 0;
+                                    std::string str = inputKey.toStdString();
+                                    for (char c : str) {
+                                        hash += static_cast<uint8_t>(c);
+                                        hash &= 0xFFFFFFFF;
+                                        hash += (hash << 10);
+                                        hash &= 0xFFFFFFFF;
+                                        hash ^= (hash >> 6);
+                                    }
+                                    hash += (hash << 3);
+                                    hash &= 0xFFFFFFFF;
+                                    hash ^= (hash >> 11);
+                                    hash += (hash << 15);
+                                    hash &= 0xFFFFFFFF;
+                                    processedKey = QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
+                                    qDebug() << "[Hash转换] 默认JOAAT: 输入=" << inputKey << " -> Hash=0x" << processedKey;
+                                }
+                            }
+                            
+                            // 保存原始键值用于显示，但实际存储转换后的hash
+                            entry.originalKey = newValue;  // 保存原始输入用于显示
+                            entry.key = processedKey.toStdString();  // 实际存储hash值
                             success = true;
                         } else if (col == ValueColumn && entry.value != newValue) {
                             entry.value = newValue;

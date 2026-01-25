@@ -53,6 +53,7 @@ bool GXTEditor::loadFromFile(const std::string& path)
                     GXTTableEntry tableEntry;
                     tableEntry.key = entry.key;
                     tableEntry.value = entry.value;
+                    tableEntry.originalKey = entry.originalKey;  // 复制originalKey字段
                     table.entries.push_back(tableEntry);
                 }
                 
@@ -312,15 +313,15 @@ bool GXTEditor::saveAsGTA_VC(const std::string& path) {
             file.write(reinterpret_cast<const char*>(&data_block_size), sizeof(data_block_size));
             uint32_t tdat_start = static_cast<uint32_t>(file.tellp());
 
-            // 写入字符串数据并记录偏移
-            std::vector<std::pair<std::string, uint32_t>> key_offsets;
+            // 写入字符串数据并记录偏移（使用索引来保持对应关系）
+            std::vector<uint32_t> offsets;
             for (size_t i = 0; i < table.entries.size(); ++i) {
                 const auto& entry = table.entries[i];
                 const auto& utf16Data = converted_values[i];
 
                 // 计算偏移量（相对于TDAT数据开始）
                 uint32_t offset = static_cast<uint32_t>(file.tellp()) - tdat_start;
-                key_offsets.push_back({entry.key, offset});
+                offsets.push_back(offset);
 
                 // 写入UTF-16LE数据
                 for (uint16_t code : utf16Data) {
@@ -330,11 +331,14 @@ bool GXTEditor::saveAsGTA_VC(const std::string& path) {
 
             // 回填TKEY条目
             file.seekp(key_entries_pos, std::ios::beg);
-            for (const auto& [key, offset] : key_offsets) {
+            for (size_t i = 0; i < table.entries.size(); ++i) {
+                const auto& entry = table.entries[i];
+                uint32_t offset = offsets[i];
+
                 // 写入offset（4字节）
                 file.write(reinterpret_cast<const char*>(&offset), sizeof(offset));
-                // 写入key（8字节，填充）
-                std::string key_padded = key;
+                // 写入键（8字节，填充）- 优先使用originalKey，如果为空则使用key
+                std::string key_padded = entry.originalKey.empty() ? entry.key : entry.originalKey;
                 if (key_padded.size() > 8) key_padded.resize(8);
                 key_padded.resize(8, '\0');
                 file.write(key_padded.c_str(), 8);
@@ -472,22 +476,19 @@ bool GXTEditor::saveAsGTA_SA(const std::string& path) {
             std::cerr << "  Processing table '" << info.table_name << "' with " << info.entries.size() << " entries" << std::endl;
 
             for (const auto& entry : info.entries) {
-                // 使用normalizeKey来移除所有可能的前缀（x、0x、0X）
-                std::string key_str = normalizeKey(entry.key);
-
+                // 使用已经转换好的hash值（originalKey中存储原始键，key中存储hash值）
                 uint32_t hash_key;
                 try {
-                    // 解析十六进制键
-                    hash_key = std::stoul(key_str, nullptr, 16);
+                    // 尝试解析key作为十六进制hash值
+                    hash_key = std::stoul(entry.key, nullptr, 16);
+                    std::cerr << "  Using pre-calculated hash: 0x" << std::hex << hash_key << std::dec 
+                              << " for key '" << entry.originalKey << "'" << std::endl;
                 } catch (const std::exception& e) {
-                    // 【修改】如果解析失败（不是hex格式），使用CKeyGen计算hash
-                    std::cerr << "Info: Key '" << entry.key << "' is not hex format, calculating hash using CKeyGen" << std::endl;
-                    
-                    // 使用CKeyGen计算hash（转换为大写）
+                    // 如果key不是hex格式，回退到原始逻辑
+                    std::string key_str = normalizeKey(entry.key);
                     std::string upperKey = key_str;
                     std::transform(upperKey.begin(), upperKey.end(), upperKey.begin(), ::toupper);
                     hash_key = CKeyGen::GetUppercaseKey(upperKey.c_str());
-                    
                     std::cerr << "  Calculated hash for '" << key_str << "': 0x" << std::hex << hash_key << std::dec << std::endl;
                 }
                 sorted_entries.push_back({hash_key, &entry});
@@ -674,8 +675,19 @@ bool GXTEditor::saveAsGXT2Format(const std::string& path) {
             const auto& ent = entries[i];
             uint32_t absOffset = stringStart + relativeOffsets[i];
 
-            // 直接使用键字符串计算哈希值（GXT2格式要求）
-            uint32_t hash = calculateJOAAT(ent.key);
+            // 使用已经转换好的hash值（originalKey中存储原始键，key中存储hash值）
+            uint32_t hash;
+            try {
+                // 尝试解析key作为十六进制hash值
+                hash = std::stoul(ent.key, nullptr, 16);
+                std::cerr << "  Using pre-calculated hash: 0x" << std::hex << hash << std::dec 
+                          << " for key '" << tables[ent.tableIndex].entries[ent.entryIndex].originalKey << "'" << std::endl;
+            } catch (const std::exception& e) {
+                // 如果key不是hex格式，回退到JOAAT计算
+                hash = calculateJOAAT(ent.key);
+                std::cerr << "  Calculated JOAAT hash: 0x" << std::hex << hash << std::dec 
+                          << " for key '" << ent.key << "'" << std::endl;
+            }
 
             // 写入哈希值（4字节）
             file.write(reinterpret_cast<const char*>(&hash), sizeof(hash));
@@ -759,10 +771,10 @@ bool GXTEditor::saveAsText(const std::string& path) {
 
             // 写入每个条目
             for (const auto& entry : tbl.entries) {
-                std::string outputKey = entry.key;
+                std::string outputKey = entry.originalKey;  // 使用originalKey进行显示
                 
                 // 检查是否需要添加0x前缀
-                // 如果key是8位hex字符（GTA IV的hash），添加0x前缀
+                // 如果originalKey是8位hex字符（GTA IV的hash），添加0x前缀
                 if (outputKey.length() == 8) {
                     bool allHex = true;
                     for (char c : outputKey) {
@@ -836,16 +848,11 @@ uint32_t GXTEditor::calculateJAMCRC(const std::string& str) {
     return 0xFFFFFFFF ^ crc;
 }
 
-// GTA4哈希计算（用于GTA IV）- 修正算法
+// GTA4哈希计算（用于GTA IV）- 完全匹配Python实现
 uint32_t GXTEditor::calculateGTA4Hash(const std::string& str) {
     uint32_t retHash = 0;
-    
-    for (char c : str) {
-        // 遇到引号结束
-        if (c == '"') {
-            break;
-        }
 
+    for (char c : str) {
         // A-Z 转小写
         if (c >= 'A' && c <= 'Z') {
             c = static_cast<char>(c + 32);
@@ -860,7 +867,7 @@ uint32_t GXTEditor::calculateGTA4Hash(const std::string& str) {
         uint32_t mult = (1025 * tmp) & 0xFFFFFFFF;
         retHash = ((mult >> 6) ^ mult) & 0xFFFFFFFF;
     }
-    
+
     uint32_t a = (9 * retHash) & 0xFFFFFFFF;
     uint32_t aXor = (a ^ (a >> 11)) & 0xFFFFFFFF;
     retHash = (32769 * aXor) & 0xFFFFFFFF;
@@ -1086,6 +1093,7 @@ bool GXTEditor::saveAsGTA_III(const std::string& path) {
         std::vector<std::pair<std::string, std::string>> all_entries;
         for (const auto& table : tables) {
             for (const auto& entry : table.entries) {
+                // 对于GTA III格式，使用key（它与originalKey相同）
                 all_entries.push_back({entry.key, entry.value});
             }
         }
@@ -1297,20 +1305,24 @@ bool GXTEditor::saveAsGTA_IV(const std::string& path) {
                 // 写入偏移
                 file.write(reinterpret_cast<const char*>(&str_offsets[i]), sizeof(str_offsets[i]));
 
-                // 标准化键
-                std::string normalizedKey = normalizeKey(entry.key);
+                // 使用已经转换好的hash值（originalKey中存储原始键，key中存储hash值）
                 uint32_t hash_val;
-                
-                // 先尝试解析为十六进制（如果已经是hash值）
                 try {
-                    hash_val = std::stoul(normalizedKey, nullptr, 16);
-                } catch (const std::exception&) {
-                    // 不是hex格式，需要查找或计算hash
-                    // 先在IVTKEY映射中查找（类似于SA版本的SATKEY逻辑）
+                    // 尝试解析key作为十六进制hash值
+                    hash_val = std::stoul(entry.key, nullptr, 16);
+                    std::cerr << "  Using pre-calculated hash: 0x" << std::hex << hash_val << std::dec 
+                              << " for key '" << entry.originalKey << "'" << std::endl;
+                } catch (const std::exception& e) {
+                    // 如果key不是hex格式，回退到原始逻辑
+                    std::string normalizedKey = normalizeKey(entry.key);
+                    
+                    // 先在IVTKEY映射中查找
                     if (!FindIVTKey(normalizedKey, hash_val)) {
                         // 没有找到，计算GTA4哈希
                         hash_val = calculateGTA4Hash(normalizedKey);
                     }
+                    std::cerr << "  Calculated GTA4 hash: 0x" << std::hex << hash_val << std::dec 
+                              << " for key '" << entry.key << "'" << std::endl;
                 }
                 
                 file.write(reinterpret_cast<const char*>(&hash_val), sizeof(hash_val));
@@ -1480,5 +1492,3 @@ bool GXTEditor::FindIVTKey(const std::string& key, uint32_t& outHash) {
     }
     return false;
 }
-
-
