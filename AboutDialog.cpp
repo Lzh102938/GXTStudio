@@ -13,8 +13,12 @@
 
 // VersionCard 实现
 VersionCard::VersionCard(const QString& version, const QString& date, const QString& changes, QWidget* parent)
-    : QFrame(parent), m_version(version), m_date(date), m_changes(changes), m_expanded(false)
+    : QFrame(parent), m_version(version), m_date(date), m_changes(changes), m_expanded(false), m_animating(false)
 {
+    // 优化绘制属性，减少闪烁
+    setAttribute(Qt::WA_OpaquePaintEvent);
+    setAttribute(Qt::WA_NoSystemBackground, false);
+    setAttribute(Qt::WA_StyledBackground, true); // 使用样式表背景
     setupUI();
 }
 
@@ -35,9 +39,12 @@ QString VersionCard::getVersionCardStyle() const
 
 void VersionCard::setupUI()
 {
-    setMinimumHeight(50);
+    setFixedHeight(50);
     setStyleSheet(getVersionCardStyle());
     setCursor(Qt::PointingHandCursor);
+    
+    // 固定宽度避免动画抖动
+    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
     m_contentLayout = new QVBoxLayout(this);
     m_contentLayout->setContentsMargins(16, 12, 16, 12);
@@ -99,26 +106,80 @@ void VersionCard::setupUI()
 
     // 鼠标悬停事件
     installEventFilter(this);
+    
+    // 创建动画对象
+    m_expandAnimation = new QPropertyAnimation(this, "cardHeight", this);
+    m_expandAnimation->setDuration(300); // 300ms动画时长
+    m_expandAnimation->setEasingCurve(QEasingCurve::InOutCubic); // 平滑的缓动曲线
 }
 
 void VersionCard::toggleExpand()
 {
-    m_expanded = !m_expanded;
-
-    if (m_expanded) {
-        m_changesLabel->show();
-        setMaximumHeight(16777215);
-        updateArrowIcon();
-    } else {
-        m_changesLabel->hide();
-        setMaximumHeight(50);
-        updateArrowIcon();
+    if (m_animating) {
+        return; // 动画进行中，忽略重复点击
     }
+    
+    m_expanded = !m_expanded;
+    m_animating = true;
+    
+    // 获取展开和收起的目标高度
+    int collapsedHeight = 50;
+    int expandedHeight;
+    
+    if (m_expanded) {
+        // 展开：先显示内容，计算完整高度
+        m_changesLabel->show();
+        // 强制布局更新以获取准确高度
+        m_changesLabel->updateGeometry();
+        expandedHeight = sizeHint().height();
+        // 确保宽度也固定
+        setFixedWidth(width());
+        startExpandAnimation(collapsedHeight, expandedHeight);
+    } else {
+        // 收起：先获取当前高度，然后隐藏内容
+        expandedHeight = height();
+        startExpandAnimation(expandedHeight, collapsedHeight);
+    }
+}
+
+void VersionCard::startExpandAnimation(int startHeight, int endHeight)
+{
+    // 停止之前的动画
+    if (m_expandAnimation->state() == QPropertyAnimation::Running) {
+        m_expandAnimation->stop();
+    }
+    
+    // 断开之前的连接
+    disconnect(m_expandAnimation, &QPropertyAnimation::finished, this, nullptr);
+    
+    // 配置动画
+    m_expandAnimation->setStartValue(startHeight);
+    m_expandAnimation->setEndValue(endHeight);
+    m_expandAnimation->setDuration(250); // 稍微加快动画速度
+    m_expandAnimation->setEasingCurve(QEasingCurve::OutCubic); // 使用更适合的缓动曲线
+    
+    // 连接动画结束信号
+    connect(m_expandAnimation, &QPropertyAnimation::finished, this, [this]() {
+        m_animating = false;
+        if (!m_expanded) {
+            // 动画结束且是收起状态，隐藏内容
+            m_changesLabel->hide();
+            // 恢复默认尺寸策略
+            setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        }
+    });
+    
+    // 开始动画
+    m_expandAnimation->start();
+    
+    // 立即更新箭头图标
+    updateArrowIcon();
 }
 
 void VersionCard::updateArrowIcon()
 {
     m_arrowLabel->setText(m_expanded ? QString(FA::QChevronUp) : QString(FA::QChevronDown));
+    // 箭头图标变化已经足够明显，不需要额外旋转动画
 }
 
 bool VersionCard::eventFilter(QObject* obj, QEvent* event)
@@ -132,6 +193,7 @@ bool VersionCard::eventFilter(QObject* obj, QEvent* event)
 
 void VersionCard::paintEvent(QPaintEvent* event)
 {
+    // 使用样式表绘制背景，不需要自定义绘制
     QFrame::paintEvent(event);
     Q_UNUSED(event)
 }
@@ -153,6 +215,10 @@ void AboutDialog::setupUI()
     setMinimumSize(680, 500);
     setMaximumSize(680, 620);
     setModal(true);
+    
+    // 优化窗口属性，减少闪烁
+    setAttribute(Qt::WA_OpaquePaintEvent);
+    setAttribute(Qt::WA_NoSystemBackground, false);
 
     // 简洁的纯色背景
     setStyleSheet(
@@ -467,6 +533,8 @@ void AboutDialog::createChangelogSection()
     QVBoxLayout* cardsLayout = new QVBoxLayout(cardsContainer);
     cardsLayout->setContentsMargins(0, 0, 0, 0);
     cardsLayout->setSpacing(10);
+    // 添加伸缩，防止底部留白
+    cardsLayout->addStretch();
 
     // 添加版本卡片
     VersionCard* v1_0_0 = new VersionCard(
@@ -577,6 +645,7 @@ void AboutDialog::createFooterSection()
 
     // 检查更新按钮 - 使用FA图标
     m_checkUpdateButton = new QPushButton(QString(FA::QSync) + " 检查更新", footerContainer);
+    // 确保按钮文本使用FA字体
     m_checkUpdateButton->setFont(FA::solidFont(14));
     m_checkUpdateButton->setStyleSheet(getButtonStyle());
     m_checkUpdateButton->setMinimumWidth(140);
@@ -642,7 +711,7 @@ QString AboutDialog::getButtonStyle() const
         QPushButton {
             background-color: #4a90e2;
             color: white;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            font-family: "Font Awesome 7 Free Solid", -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
             font-size: 14px;
             font-weight: 500;
             padding: 10px 24px;
