@@ -1737,7 +1737,39 @@ void GXTStudio::setupStatusBar()
     QFont font = m_statusLabel->font();
     font.setFamily("Microsoft YaHei, SimSun, Arial"); // 优先使用中文字体
     m_statusLabel->setFont(font);
-    m_statusBar->addWidget(m_statusLabel);
+    m_statusBar->addWidget(m_statusLabel, 1);  // stretch=1，占据左侧空间
+
+    // 创建自动保存进度条（美化样式，与主界面风格一致）- 放在状态栏中间
+    m_autoSaveProgressBar = new QProgressBar(this);
+    m_autoSaveProgressBar->setRange(0, 100);
+    m_autoSaveProgressBar->setValue(0);
+    m_autoSaveProgressBar->setTextVisible(true);  // 显示百分比文字
+    m_autoSaveProgressBar->setMaximumWidth(200);  // 增加长度
+    m_autoSaveProgressBar->setMinimumWidth(180);
+    m_autoSaveProgressBar->setMinimumHeight(22);
+    m_autoSaveProgressBar->setMaximumHeight(22);
+    
+    // 美化样式 - 与主界面风格一致
+    m_autoSaveProgressBar->setStyleSheet(
+        "QProgressBar {"
+        "  border: 1px solid #c0c0c0;"
+        "  border-radius: 4px;"
+        "  background-color: #f5f5f5;"
+        "  text-align: center;"
+        "  font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;"
+        "  font-size: 11px;"
+        "  color: #333333;"
+        "}"
+        "QProgressBar::chunk {"
+        "  background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4CAF50, stop:1 #8BC34A);"
+        "  border-radius: 3px;"
+        "  border: 1px solid #45a049;"
+        "}"
+    );
+    
+    // 添加到状态栏中间（不设置stretch，自然居中）
+    m_statusBar->addWidget(m_autoSaveProgressBar);
+    m_autoSaveProgressBar->hide();  // 默认隐藏
 
     // ========== 自动保存区域 ==========
     // 创建自动保存容器
@@ -1776,16 +1808,6 @@ void GXTStudio::setupStatusBar()
     autoSaveLayout->addWidget(m_autoSaveButton);
     autoSaveLayout->addWidget(autoSaveLabel);
     m_statusBar->addPermanentWidget(autoSaveContainer);
-
-    // 创建自动保存进度条（标准默认样式，不添加到状态栏）
-    m_autoSaveProgressBar = new QProgressBar(this);
-    m_autoSaveProgressBar->setRange(0, 100);
-    m_autoSaveProgressBar->setValue(0);
-    m_autoSaveProgressBar->setTextVisible(false);
-    m_autoSaveProgressBar->setMaximumWidth(150);
-    m_autoSaveProgressBar->setMinimumHeight(16);
-    // 使用默认样式，不设置自定义样式
-    m_autoSaveProgressBar->hide();  // 默认隐藏
 
     // 创建自动保存定时器
     m_autoSaveTimer = new QTimer(this);
@@ -2083,31 +2105,95 @@ void GXTStudio::saveFile()
         return;
     }
     
-    // 创建保存任务并提交到后台线程
-    SaveTask task;
-    task.tabPtr = currentTab;
-    task.filePath = currentTab->filePath;
-    task.isNewPath = false;
-    task.isAutoSave = false;  // 手动保存
+    // 使用 QtConcurrent 完全异步保存（包括数据复制）
+    // 捕获所有需要的数据，不传递指针
+    QString filePath = currentTab->filePath;
+    QString fileName = currentTab->fileName;
+    GXTVersion version = currentTab->version;
+    bool isWHM = currentTab->isWHM;
+    bool isDAT = currentTab->isDAT;
     
-    // 临时连接手动保存的信号（保存完成后自动断开）
-    QMetaObject::Connection progressConn = connect(m_saveWorker, &SaveWorker::saveProgress,
-            this, &GXTStudio::onSaveProgress, Qt::QueuedConnection);
-    QMetaObject::Connection completedConn = connect(m_saveWorker, &SaveWorker::saveCompleted,
-            this, &GXTStudio::onSaveCompleted, Qt::QueuedConnection);
+    // 使用状态栏进度条（与自动保存共用）
+    m_autoSaveProgressBar->setFormat("正在保存 %p%");
+    m_autoSaveProgressBar->show();
+    m_autoSaveProgressBar->setValue(10);
     
-    // 保存完成后断开信号连接
-    connect(m_saveWorker, &SaveWorker::saveCompleted, this, [this, progressConn, completedConn](const SaveResult&) {
-        disconnect(progressConn);
-        disconnect(completedConn);
-    }, Qt::QueuedConnection);
+    showLogMessage("正在后台保存: " + fileName);
     
-    // 发送保存请求到后台工作线程
-    QMetaObject::invokeMethod(m_saveWorker, "saveFile",
-        Qt::QueuedConnection,
-        Q_ARG(SaveTask, task));
+    // 在后台线程中执行数据复制和保存
+    QFuture<SaveResult> future = QtConcurrent::run([this, filePath, fileName, version, isWHM, isDAT]() -> SaveResult {
+        SaveResult result;
+        result.filePath = filePath;
+        result.fileName = fileName;
+        result.isNewPath = false;
+        result.isAutoSave = false;
+        result.success = false;
+        
+        QElapsedTimer timer;
+        timer.start();
+        
+        // 在主线程中获取数据副本（线程安全）
+        AutoSaveData saveData;
+        saveData.filePath = filePath;
+        saveData.version = version;
+        saveData.isWHM = isWHM;
+        saveData.isDAT = isDAT;
+        
+        QMetaObject::invokeMethod(this, [this, &saveData]() {
+            FileTab* tab = getCurrentTab();
+            if (tab && tab->filePath == saveData.filePath) {
+                if (saveData.isWHM) {
+                    saveData.whmEntries = tab->whmEntries;
+                } else if (saveData.isDAT) {
+                    saveData.datEntries = tab->datEntries;
+                } else {
+                    saveData.tables = tab->tables;
+                }
+            }
+        }, Qt::BlockingQueuedConnection);
+        
+        // 执行保存
+        bool success = false;
+        try {
+            if (isWHM) {
+                success = saveWHMFromData(saveData);
+            } else if (isDAT) {
+                success = saveDATFromData(saveData);
+            } else {
+                success = saveGXTFromData(saveData);
+            }
+        } catch (...) {
+            success = false;
+        }
+        
+        result.success = success;
+        result.elapsedMs = timer.elapsed();
+        
+        if (success) {
+            QFileInfo fi(filePath);
+            result.bytesWritten = fi.size();
+        }
+        
+        return result;
+    });
     
-    showLogMessage("正在后台保存: " + currentTab->fileName);
+    // 使用 watcher 监听完成
+    auto* watcher = new QFutureWatcher<SaveResult>(this);
+    connect(watcher, &QFutureWatcher<SaveResult>::finished, this, [this, watcher]() {
+        SaveResult result = watcher->result();
+        
+        // 隐藏状态栏进度条
+        if (m_autoSaveProgressBar) {
+            m_autoSaveProgressBar->hide();
+            m_autoSaveProgressBar->setValue(0);
+        }
+        
+        // 处理结果
+        onSaveCompleted(result);
+        watcher->deleteLater();
+    });
+    
+    watcher->setFuture(future);
 }
 
 void GXTStudio::saveAsFile()
@@ -2185,31 +2271,94 @@ void GXTStudio::saveAsFile()
         currentTab->filePath = fileName;
         currentTab->fileName = QFileInfo(fileName).fileName();
         
-        // 使用异步保存任务
-        SaveTask task;
-        task.tabPtr = currentTab;
-        task.filePath = fileName;
-        task.isNewPath = true;  // 标记为新路径
-        task.isAutoSave = false;
+        // 使用 QtConcurrent 完全异步保存
+        QString newFilePath = fileName;
+        QString newFileName = QFileInfo(fileName).fileName();
+        GXTVersion version = currentTab->version;
+        bool isWHM = currentTab->isWHM;
+        bool isDAT = currentTab->isDAT;
         
-        // 临时连接手动保存的信号（保存完成后自动断开）
-        QMetaObject::Connection progressConn = connect(m_saveWorker, &SaveWorker::saveProgress,
-                this, &GXTStudio::onSaveProgress, Qt::QueuedConnection);
-        QMetaObject::Connection completedConn = connect(m_saveWorker, &SaveWorker::saveCompleted,
-                this, &GXTStudio::onSaveCompleted, Qt::QueuedConnection);
+        // 使用状态栏进度条（与自动保存共用）
+        m_autoSaveProgressBar->setFormat("正在另存为 %p%");
+        m_autoSaveProgressBar->show();
+        m_autoSaveProgressBar->setValue(10);
         
-        // 保存完成后断开信号连接
-        connect(m_saveWorker, &SaveWorker::saveCompleted, this, [this, progressConn, completedConn](const SaveResult&) {
-            disconnect(progressConn);
-            disconnect(completedConn);
-        }, Qt::QueuedConnection);
+        showLogMessage("正在后台另存为: " + newFileName);
         
-        // 发送保存请求到后台工作线程
-        QMetaObject::invokeMethod(m_saveWorker, "saveFile",
-            Qt::QueuedConnection,
-            Q_ARG(SaveTask, task));
+        // 在后台线程中执行
+        QFuture<SaveResult> future = QtConcurrent::run([this, newFilePath, newFileName, version, isWHM, isDAT]() -> SaveResult {
+            SaveResult result;
+            result.filePath = newFilePath;
+            result.fileName = newFileName;
+            result.isNewPath = true;
+            result.isAutoSave = false;
+            result.success = false;
+            
+            QElapsedTimer timer;
+            timer.start();
+            
+            // 在主线程中获取数据副本
+            AutoSaveData saveData;
+            saveData.filePath = newFilePath;
+            saveData.version = version;
+            saveData.isWHM = isWHM;
+            saveData.isDAT = isDAT;
+            
+            QMetaObject::invokeMethod(this, [this, &saveData]() {
+                FileTab* tab = getCurrentTab();
+                if (tab) {
+                    if (saveData.isWHM) {
+                        saveData.whmEntries = tab->whmEntries;
+                    } else if (saveData.isDAT) {
+                        saveData.datEntries = tab->datEntries;
+                    } else {
+                        saveData.tables = tab->tables;
+                    }
+                }
+            }, Qt::BlockingQueuedConnection);
+            
+            // 执行保存
+            bool success = false;
+            try {
+                if (isWHM) {
+                    success = saveWHMFromData(saveData);
+                } else if (isDAT) {
+                    success = saveDATFromData(saveData);
+                } else {
+                    success = saveGXTFromData(saveData);
+                }
+            } catch (...) {
+                success = false;
+            }
+            
+            result.success = success;
+            result.elapsedMs = timer.elapsed();
+            
+            if (success) {
+                QFileInfo fi(newFilePath);
+                result.bytesWritten = fi.size();
+            }
+            
+            return result;
+        });
         
-        showLogMessage("正在后台另存为: " + currentTab->fileName);
+        // 使用 watcher 监听完成
+        auto* watcher = new QFutureWatcher<SaveResult>(this);
+        connect(watcher, &QFutureWatcher<SaveResult>::finished, this, [this, watcher]() {
+            SaveResult result = watcher->result();
+            
+            // 隐藏状态栏进度条
+            if (m_autoSaveProgressBar) {
+                m_autoSaveProgressBar->hide();
+                m_autoSaveProgressBar->setValue(0);
+            }
+            
+            // 处理结果
+            onSaveCompleted(result);
+            watcher->deleteLater();
+        });
+        
+        watcher->setFuture(future);
     }
 }
 
@@ -8153,6 +8302,7 @@ void GXTStudio::onAutoSaveTimer()
     qDebug() << "正在自动保存:" << currentTab->fileName;
 
     // 显示进度条
+    m_autoSaveProgressBar->setFormat("正在自动保存 %p%");
     m_autoSaveProgressBar->show();
     m_autoSaveProgressBar->setValue(10);
 
