@@ -651,6 +651,20 @@ struct SaveResult {
     bool isAutoSave;  // 是否为自动保存
 };
 
+// 自动保存数据副本 - 完全独立于主线程数据
+struct AutoSaveData {
+    QString filePath;
+    GXTVersion version;
+    bool isWHM;
+    bool isDAT;
+    // GXT/GXT2 数据 (使用GXTTabl与FileTab一致)
+    std::vector<GXTTabl> tables;
+    // WHM 数据
+    std::vector<WHMEntry> whmEntries;
+    // DAT 数据  
+    std::vector<DATEntry> datEntries;
+};
+
 // 子线程保存器
 class SaveWorker : public QObject {
     Q_OBJECT
@@ -960,7 +974,13 @@ private:
     QProgressBar* m_autoSaveProgressBar;  // 自动保存进度条
     QTimer* m_autoSaveTimer;  // 自动保存定时器
     bool m_autoSaveEnabled;  // 自动保存是否启用
+    QFutureWatcher<SaveResult>* m_autoSaveFutureWatcher;  // 自动保存任务监视器
     static const int AUTOSAVE_DELAY = 3000;  // 自动保存延迟（3秒）
+    
+    // 静态保存函数（供 QtConcurrent 使用）
+    static bool saveWHMFromData(const AutoSaveData& data);
+    static bool saveDATFromData(const AutoSaveData& data);
+    static bool saveGXTFromData(const AutoSaveData& data);
     
     // 智能翻译相关
     SmartTranslator* m_smartTranslator;

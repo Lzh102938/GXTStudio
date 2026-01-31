@@ -1018,6 +1018,7 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_autoSaveProgressBar(nullptr)
     , m_autoSaveTimer(nullptr)
     , m_autoSaveEnabled(false)
+    , m_autoSaveFutureWatcher(nullptr)
     , m_cleanupTimer(nullptr)
     , m_resizeDebouncer(nullptr)
 {
@@ -1912,17 +1913,7 @@ void GXTStudio::setupSaveThread()
     // 移动工作对象到子线程
     m_saveWorker->moveToThread(m_saveThread);
 
-    // 连接信号槽
-    connect(m_saveWorker, &SaveWorker::saveProgress,
-            this, &GXTStudio::onSaveProgress, Qt::QueuedConnection);
-    connect(m_saveWorker, &SaveWorker::saveCompleted,
-            this, &GXTStudio::onSaveCompleted, Qt::QueuedConnection);
-
-    // 自动保存信号连接
-    connect(m_saveWorker, &SaveWorker::saveProgress,
-            this, &GXTStudio::onAutoSaveProgress, Qt::QueuedConnection);
-    connect(m_saveWorker, &SaveWorker::saveCompleted,
-            this, &GXTStudio::onAutoSaveCompleted, Qt::QueuedConnection);
+    // 注意：信号槽连接在每次保存时动态设置，避免自动保存和手动保存互相干扰
 
     // 启动线程
     m_saveThread->start();
@@ -2099,10 +2090,22 @@ void GXTStudio::saveFile()
     task.isNewPath = false;
     task.isAutoSave = false;  // 手动保存
     
+    // 临时连接手动保存的信号（保存完成后自动断开）
+    QMetaObject::Connection progressConn = connect(m_saveWorker, &SaveWorker::saveProgress,
+            this, &GXTStudio::onSaveProgress, Qt::QueuedConnection);
+    QMetaObject::Connection completedConn = connect(m_saveWorker, &SaveWorker::saveCompleted,
+            this, &GXTStudio::onSaveCompleted, Qt::QueuedConnection);
+    
+    // 保存完成后断开信号连接
+    connect(m_saveWorker, &SaveWorker::saveCompleted, this, [this, progressConn, completedConn](const SaveResult&) {
+        disconnect(progressConn);
+        disconnect(completedConn);
+    }, Qt::QueuedConnection);
+    
     // 发送保存请求到后台工作线程
-    QTimer::singleShot(0, [this, task]() {
-        m_saveWorker->saveFile(task);
-    });
+    QMetaObject::invokeMethod(m_saveWorker, "saveFile",
+        Qt::QueuedConnection,
+        Q_ARG(SaveTask, task));
     
     showLogMessage("正在后台保存: " + currentTab->fileName);
 }
@@ -2178,45 +2181,35 @@ void GXTStudio::saveAsFile()
             fileName = saveFileInfo.absolutePath() + "/" + saveFileInfo.completeBaseName() + defaultExt;
         }
         
-        // 使用现有的保存逻辑而不是SaveTask
-        bool success = false;
-        if (currentTab->isWHM) {
-            // 保存WHM文件
-            success = saveWHMDirectly(currentTab, fileName);
-        } else if (currentTab->isDAT) {
-            // 保存DAT文件（与WHM类似，但完全独立）
-            success = saveDATDirectly(currentTab, fileName);
-        } else {
-            // 保存GXT文件
-            GXTEditor editor;
-            // 将当前标签页的tables数据复制到编辑器
-            editor.setVersion(currentTab->version);
-            for (const auto& table : currentTab->tables) {
-                GXTTable gxtTable;
-                gxtTable.name = table.name;
-                for (const auto& entry : table.entries) {
-                    GXTTableEntry gxtEntry;
-                    gxtEntry.key = entry.key;
-                    gxtEntry.value = entry.value;
-                    gxtTable.entries.push_back(gxtEntry);
-                }
-                editor.addTable(gxtTable.name);
-                size_t tableIndex = editor.findTable(gxtTable.name);
-                if (tableIndex != -1) {
-                    for (size_t i = 0; i < gxtTable.entries.size(); i++) {
-                        editor.updateEntry(tableIndex, i, gxtTable.entries[i].key, gxtTable.entries[i].value);
-                    }
-                }
-            }
-
-            success = editor.saveToFile(fileName.toLocal8Bit().toStdString());
-        }
+        // 更新标签页的文件路径信息（另存为新路径）
+        currentTab->filePath = fileName;
+        currentTab->fileName = QFileInfo(fileName).fileName();
         
-        if (success) {
-            showLogMessage("文件已另存为: " + QFileInfo(fileName).fileName());
-        } else {
-            showLogMessage("另存为失败: " + QFileInfo(fileName).fileName());
-        }
+        // 使用异步保存任务
+        SaveTask task;
+        task.tabPtr = currentTab;
+        task.filePath = fileName;
+        task.isNewPath = true;  // 标记为新路径
+        task.isAutoSave = false;
+        
+        // 临时连接手动保存的信号（保存完成后自动断开）
+        QMetaObject::Connection progressConn = connect(m_saveWorker, &SaveWorker::saveProgress,
+                this, &GXTStudio::onSaveProgress, Qt::QueuedConnection);
+        QMetaObject::Connection completedConn = connect(m_saveWorker, &SaveWorker::saveCompleted,
+                this, &GXTStudio::onSaveCompleted, Qt::QueuedConnection);
+        
+        // 保存完成后断开信号连接
+        connect(m_saveWorker, &SaveWorker::saveCompleted, this, [this, progressConn, completedConn](const SaveResult&) {
+            disconnect(progressConn);
+            disconnect(completedConn);
+        }, Qt::QueuedConnection);
+        
+        // 发送保存请求到后台工作线程
+        QMetaObject::invokeMethod(m_saveWorker, "saveFile",
+            Qt::QueuedConnection,
+            Q_ARG(SaveTask, task));
+        
+        showLogMessage("正在后台另存为: " + currentTab->fileName);
     }
 }
 
@@ -7839,11 +7832,11 @@ bool GXTStudio::saveDATDirectly(FileTab* tab, const QString& filePath)
 
 void GXTStudio::onSaveProgress(int percentage, const QString& message)
 {
-    // 更新或创建进度对话框
+    // 更新或创建进度对话框 - 使用非模态，避免阻塞主界面
     if (!m_saveProgressDialog) {
         m_saveProgressDialog = new QProgressDialog(this);
         m_saveProgressDialog->setWindowTitle("保存文件");
-        m_saveProgressDialog->setWindowModality(Qt::WindowModal);
+        m_saveProgressDialog->setWindowModality(Qt::NonModal);  // 非模态，不阻塞主界面
         m_saveProgressDialog->setRange(0, 100);
         m_saveProgressDialog->setCancelButton(nullptr); // 禁用取消按钮
         m_saveProgressDialog->setAttribute(Qt::WA_DeleteOnClose);
@@ -8147,29 +8140,107 @@ void GXTStudio::onAutoSaveTimer()
 
     // 检查是否有文件路径
     if (currentTab->filePath.isEmpty()) {
-        // 文件尚未保存，跳过自动保存 - 完全静默
         qDebug() << "跳过自动保存：文件尚未保存";
         return;
     }
 
-    // 静默执行保存 - 不显示任何日志消息
+    // 检查是否已有正在进行的自动保存任务
+    if (m_autoSaveFutureWatcher && m_autoSaveFutureWatcher->isRunning()) {
+        qDebug() << "自动保存已在进行中，跳过本次";
+        return;
+    }
+
     qDebug() << "正在自动保存:" << currentTab->fileName;
 
     // 显示进度条
     m_autoSaveProgressBar->show();
-    m_autoSaveProgressBar->setValue(0);
+    m_autoSaveProgressBar->setValue(10);
 
-    // 构建保存任务
-    SaveTask task;
-    task.tabPtr = currentTab;
-    task.filePath = currentTab->filePath;
-    task.isNewPath = false;
-    task.isAutoSave = true;  // 自动保存
-
-    // 发送保存请求到保存线程
-    QMetaObject::invokeMethod(m_saveWorker, "saveFile",
-        Qt::QueuedConnection,
-        Q_ARG(SaveTask, task));
+    // 捕获必要的信息（只复制简单的元数据，数据本身在后台线程复制）
+    QString filePath = currentTab->filePath;
+    GXTVersion version = currentTab->version;
+    bool isWHM = currentTab->isWHM;
+    bool isDAT = currentTab->isDAT;
+    
+    // 【关键】使用 QtConcurrent 在后台线程中执行数据复制和保存
+    // 这样主线程完全不参与数据操作，零阻塞
+    QFuture<SaveResult> future = QtConcurrent::run([this, filePath, version, isWHM, isDAT]() -> SaveResult {
+        SaveResult result;
+        result.filePath = filePath;
+        result.fileName = QFileInfo(filePath).fileName();
+        result.isAutoSave = true;
+        result.success = false;
+        result.bytesWritten = 0;
+        
+        QElapsedTimer timer;
+        timer.start();
+        
+        // 在后台线程中安全地复制数据（此时主线程可以继续响应用户操作）
+        FileTab* tab = nullptr;
+        
+        // 在主线程中获取数据副本（使用 invokeMethod 确保线程安全）
+        QMetaObject::invokeMethod(this, [this, &tab]() {
+            tab = getCurrentTab();
+        }, Qt::BlockingQueuedConnection);
+        
+        if (!tab || tab->filePath != filePath) {
+            result.errorMessage = "标签页已切换或关闭";
+            return result;
+        }
+        
+        // 现在复制数据（在后台线程中进行，不影响主线程响应）
+        AutoSaveData saveData;
+        saveData.filePath = filePath;
+        saveData.version = version;
+        saveData.isWHM = isWHM;
+        saveData.isDAT = isDAT;
+        
+        if (isWHM) {
+            saveData.whmEntries = tab->whmEntries;
+        } else if (isDAT) {
+            saveData.datEntries = tab->datEntries;
+        } else {
+            saveData.tables = tab->tables;
+        }
+        
+        // 执行保存
+        bool success = false;
+        try {
+            if (isWHM) {
+                success = saveWHMFromData(saveData);
+            } else if (isDAT) {
+                success = saveDATFromData(saveData);
+            } else {
+                success = saveGXTFromData(saveData);
+            }
+        } catch (...) {
+            success = false;
+        }
+        
+        result.success = success;
+        result.elapsedMs = timer.elapsed();
+        
+        if (success) {
+            QFileInfo fi(filePath);
+            result.bytesWritten = fi.size();
+        }
+        
+        return result;
+    });
+    
+    // 设置 FutureWatcher 监听完成信号
+    if (!m_autoSaveFutureWatcher) {
+        m_autoSaveFutureWatcher = new QFutureWatcher<SaveResult>(this);
+        connect(m_autoSaveFutureWatcher, &QFutureWatcher<SaveResult>::finished, this, [this]() {
+            SaveResult result = m_autoSaveFutureWatcher->result();
+            onAutoSaveCompleted(result);
+        });
+    }
+    
+    m_autoSaveFutureWatcher->setFuture(future);
+    
+    // 更新进度条显示
+    m_autoSaveProgressBar->setValue(30);
 }
 
 void GXTStudio::onAutoSaveProgress(int percentage, const QString& message)
@@ -8361,6 +8432,109 @@ void SaveWorker::saveFile(const SaveTask& task)
     
     result.elapsedMs = timer.elapsed();
     emit saveCompleted(result);
+}
+
+// 静态保存函数实现（供 QtConcurrent 使用）
+bool GXTStudio::saveWHMFromData(const AutoSaveData& data)
+{
+    try {
+        QFile file(data.filePath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            qDebug() << "saveWHMFromData - 无法打开文件:" << data.filePath;
+            return false;
+        }
+        
+        QByteArray blob;
+        std::vector<uint32_t> offsets;
+        
+        for (const auto& entry : data.whmEntries) {
+            offsets.push_back(static_cast<uint32_t>(blob.size()));
+            blob.append(entry.text.c_str(), static_cast<int>(entry.text.length()));
+            blob.append('\0');
+        }
+        
+        uint32_t count = static_cast<uint32_t>(data.whmEntries.size());
+        file.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+        
+        for (size_t i = 0; i < data.whmEntries.size(); ++i) {
+            uint32_t hash = data.whmEntries[i].hash;
+            uint32_t offset = offsets[i];
+            file.write(reinterpret_cast<const char*>(&hash), sizeof(uint32_t));
+            file.write(reinterpret_cast<const char*>(&offset), sizeof(uint32_t));
+        }
+        
+        uint32_t blobSize = static_cast<uint32_t>(blob.size());
+        file.write(reinterpret_cast<const char*>(&blobSize), sizeof(uint32_t));
+        file.write(blob);
+        file.close();
+        
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool GXTStudio::saveDATFromData(const AutoSaveData& data)
+{
+    try {
+        QFile file(data.filePath);
+        if (!file.open(QIODevice::WriteOnly)) {
+            qDebug() << "saveDATFromData - 无法打开文件:" << data.filePath;
+            return false;
+        }
+        
+        QByteArray blob;
+        std::vector<uint32_t> offsets;
+        
+        for (const auto& entry : data.datEntries) {
+            offsets.push_back(static_cast<uint32_t>(blob.size()));
+            blob.append(entry.text.c_str(), static_cast<int>(entry.text.length()));
+            blob.append('\0');
+        }
+        
+        uint32_t count = static_cast<uint32_t>(data.datEntries.size());
+        file.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
+        
+        for (size_t i = 0; i < data.datEntries.size(); ++i) {
+            uint32_t hash = data.datEntries[i].hash;
+            uint32_t offset = offsets[i];
+            file.write(reinterpret_cast<const char*>(&hash), sizeof(uint32_t));
+            file.write(reinterpret_cast<const char*>(&offset), sizeof(uint32_t));
+        }
+        
+        uint32_t blobSize = static_cast<uint32_t>(blob.size());
+        file.write(reinterpret_cast<const char*>(&blobSize), sizeof(uint32_t));
+        file.write(blob);
+        file.close();
+        
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool GXTStudio::saveGXTFromData(const AutoSaveData& data)
+{
+    try {
+        GXTEditor editor;
+        editor.setVersion(data.version);
+        
+        for (const auto& table : data.tables) {
+            if (!editor.addTable(table.name)) {
+                continue;
+            }
+            
+            size_t tableIndex = editor.getTableCount() - 1;
+            for (const auto& entry : table.entries) {
+                editor.addEntry(tableIndex, entry.key, entry.value);
+            }
+        }
+        
+        std::string stdPath = data.filePath.toStdString();
+        return editor.saveToFile(stdPath);
+    } catch (...) {
+        return false;
+    }
 }
 
 bool SaveWorker::saveWHMDirectly(FileTab* tab, const std::string& path)
