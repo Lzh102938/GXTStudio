@@ -40,6 +40,33 @@ struct DATEntry {
     std::string text;
 };
 
+// RSC压缩头部结构
+struct RSCHeader {
+    uint32_t flags;
+    uint32_t compressedSize;
+    uint32_t uncompressedSize;
+};
+
+// HTML节点类型
+enum HtmlNodeType {
+    Node_HtmlNode,
+    Node_HtmlTableNode,
+    Node_HtmlTableElementNode,
+    Node_HtmlDataNode
+};
+
+// HTML节点基类
+struct HtmlNode {
+    HtmlNodeType m_eNodeType;
+    uint32_t m_childrenOffset;
+    uint32_t m_childrenCount;
+};
+
+// HTML数据节点（包含文本）
+struct HtmlDataNode : public HtmlNode {
+    uint32_t m_pData;
+};
+
 class GXTParser {
 private:
     std::vector<GXTTabl> tables;
@@ -59,6 +86,14 @@ private:
     bool parseGXT2(FILE* f, std::vector<GXTTabl>& outTables);
 
 public:
+    // WHM/RSC格式相关方法
+    bool parseWHMRSC(const std::string& filePath, std::vector<WHMEntry>& outEntries) const;
+    bool saveWHMRSC(const std::string& filePath, const std::vector<WHMEntry>& entries) const;
+    
+    // 辅助方法
+    uint32_t fnv1a_hash(const char* str) const;
+    bool isValidTextString(const std::string& str) const;
+    
     bool parse(const std::string& filePath);
     void exportToTxt(const std::string& outDir) const;
     bool parseWHM(const std::string& filePath, std::vector<WHMEntry>& outEntries) const;

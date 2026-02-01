@@ -10,6 +10,8 @@
 #include <cstring>
 #include <cstdio>
 #include <functional>
+#include <set>
+#include <QByteArray>
 
 // 添加日志回调函数指针
 static std::function<void(const std::string&)> g_logCallback = nullptr;
@@ -1001,7 +1003,7 @@ void GXTParser::exportToTxt(const std::string& outDir) const {
 
 bool GXTParser::parseWHM(const std::string& filePath, std::vector<WHMEntry>& outEntries) const {
     addParseLog("开始解析WHM文件: " + filePath);
-    
+
     FILE* f = nullptr;
     fopen_s(&f, filePath.c_str(), "rb");
     if (!f) {
@@ -1009,9 +1011,39 @@ bool GXTParser::parseWHM(const std::string& filePath, std::vector<WHMEntry>& out
         return false;
     }
 
+    // 先读取前20字节用于调试
+    unsigned char header[20];
+    fread(header, 1, 20, f);
+    rewind(f);
+
+    addParseLog("文件头部（前20字节）:");
+    for (int i = 0; i < 20; i++) {
+        char hexStr[10];
+        snprintf(hexStr, sizeof(hexStr), "0x%02X", header[i]);
+        addParseLog("  [" + std::to_string(i) + "] = " + hexStr + " (" + std::to_string(header[i]) + ")");
+    }
+
     // 读取条目数量
     uint32_t count = read_u32(f);
     addParseLog("WHM文件包含 " + std::to_string(count) + " 个条目");
+
+    // 如果条目数异常，尝试其他读取方式
+    if (count > 100000 || count == 0) {
+        addParseLog("条目数异常，尝试其他格式...");
+
+        // 尝试从偏移12开始读取（RSC header是12字节）
+        fseek(f, 12, SEEK_SET);
+        count = read_u32(f);
+        addParseLog("从偏移12读取条目数: " + std::to_string(count));
+
+        if (count > 0 && count < 100000) {
+            fseek(f, 16, SEEK_SET);  // 移动到条目表开始位置（跳过12字节头部+4字节count）
+        } else {
+            addParseLog("条目数仍然异常，无法解析");
+            fclose(f);
+            return false;
+        }
+    }
     
     // 预分配entries向量
     std::vector<WHMEntry> entries;
@@ -1232,4 +1264,368 @@ void GXTParser::exportDATToTxt(const std::string& datPath, const std::string& tx
     }
     out.write(buf.data(), (std::streamsize)buf.size());
     addParseLog("DAT导出完成: " + txtPath);
+}
+
+// ===== WHM/RSC 格式实现 =====
+
+// FNV-1a 哈希算法
+uint32_t GXTParser::fnv1a_hash(const char* str) const {
+    uint32_t hash = 2166136261u;  // FNV offset basis
+    while (*str) {
+        hash ^= (uint8_t)(*str);
+        hash *= 16777619u;  // FNV prime
+        str++;
+    }
+    return hash;
+}
+
+// 验证字符串是否为有效的文本字符串
+bool GXTParser::isValidTextString(const std::string& str) const {
+    if (str.empty()) return false;
+
+    // 检查是否包含 EFIGS 字符
+    bool hasValidChar = false;
+    for (char c : str) {
+        unsigned char uc = static_cast<unsigned char>(c);
+        if ((uc >= 'a' && uc <= 'z') ||
+            (uc >= 'A' && uc <= 'Z') ||
+            (uc >= 0xC0)) {  // 扩展 ASCII
+            hasValidChar = true;
+            break;
+        }
+    }
+
+    if (!hasValidChar) return false;
+
+    // 检查是否为 URL（跳过 URL）
+    bool allUrlChars = true;
+    bool hasDot = false;
+    for (size_t i = 0; i < str.size(); i++) {
+        unsigned char c = static_cast<unsigned char>(str[i]);
+        bool isUrlChar = (c >= 'a' && c <= 'z') ||
+                        (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') ||
+                        c == '.' || c == '%' || c == '@' ||
+                        c == '-' || c == '_';
+        if (!isUrlChar) {
+            allUrlChars = false;
+            break;
+        }
+        if (c == '.') {
+            hasDot = true;
+            // URL 的第一个和最后一个字符不能是 '.'
+            if (i == 0 || i == str.size() - 1) {
+                return false;
+            }
+        }
+    }
+
+    // 如果全是 URL 字符且至少有一个点，则认为是 URL
+    if (allUrlChars && hasDot && str.size() > 3) {
+        return false;
+    }
+
+    return true;
+}
+
+// RSC 解压函数（使用 Qt 内置的 qUncompress）
+static std::vector<uint8_t> decompressRSC(FILE* f, const RSCHeader& header) {
+    addParseLog("RSC 解压: 压缩大小=" + std::to_string(header.compressedSize) +
+               ", 解压后大小=" + std::to_string(header.uncompressedSize));
+
+    std::vector<uint8_t> compressed(header.compressedSize);
+    fread(compressed.data(), 1, header.compressedSize, f);
+
+    // 使用 Qt 的 qUncompress 解压
+    QByteArray compressedData(reinterpret_cast<const char*>(compressed.data()), header.compressedSize);
+    QByteArray uncompressedData = qUncompress(compressedData);
+
+    if (uncompressedData.isEmpty()) {
+        addParseLog("RSC 解压失败");
+        return std::vector<uint8_t>();
+    }
+
+    addParseLog("RSC 解压成功，解压后大小: " + std::to_string(uncompressedData.size()));
+
+    // 转换为 std::vector<uint8_t>
+    std::vector<uint8_t> uncompressed(uncompressedData.size());
+    std::copy(uncompressedData.begin(), uncompressedData.end(), uncompressed.begin());
+
+    return uncompressed;
+}
+
+// 解析 HTML 文档并提取文本字符串
+static void extractHtmlTexts(const uint8_t* data, size_t size,
+                           std::vector<WHMEntry>& entries) {
+    addParseLog("开始解析 HTML 文档，大小: " + std::to_string(size) + " 字节");
+
+    std::set<uint32_t> seenHashes;
+
+    // 简化的 HTML 解析：查找文本内容
+    // 真实的 HTML 文档需要完整的 DOM 解析器，这里使用简化的方法
+    size_t pos = 0;
+    while (pos < size) {
+        // 查找文本开始标记（简化版本，实际需要完整解析）
+        // 跳过 HTML 标签
+        while (pos < size && data[pos] == '<') {
+            // 跳过整个标签
+            while (pos < size && data[pos] != '>') {
+                pos++;
+            }
+            pos++;  // 跳过 '>'
+        }
+
+        if (pos >= size) break;
+
+        // 查找文本结束（下一个 '<' 或结尾）
+        size_t textStart = pos;
+        while (pos < size && data[pos] != '<') {
+            pos++;
+        }
+
+        if (pos > textStart) {
+            std::string text(reinterpret_cast<const char*>(data + textStart), pos - textStart);
+
+            // 清理文本：去除空白字符
+            while (!text.empty() && (text.back() == ' ' || text.back() == '\t' ||
+                                   text.back() == '\n' || text.back() == '\r')) {
+                text.pop_back();
+            }
+            while (!text.empty() && (text.front() == ' ' || text.front() == '\t' ||
+                                   text.front() == '\n' || text.front() == '\r')) {
+                text.erase(0, 1);
+            }
+
+            if (text.empty()) continue;
+
+            // 验证是否为有效文本字符串
+            GXTParser parser;  // 临时实例以访问验证方法
+            if (!parser.isValidTextString(text)) {
+                continue;
+            }
+
+            // 计算 FNV 哈希
+            uint32_t hash = parser.fnv1a_hash(text.c_str());
+
+            // 检查是否已经见过这个哈希
+            if (seenHashes.find(hash) != seenHashes.end()) {
+                continue;
+            }
+            seenHashes.insert(hash);
+
+            // 添加条目
+            WHMEntry entry;
+            entry.hash = hash;
+            entry.offset = 0;  // 在保存时重新计算
+            entry.text = text;
+            entries.push_back(entry);
+        }
+    }
+
+    addParseLog("HTML 解析完成，提取文本数量: " + std::to_string(entries.size()));
+}
+
+// 解析 WHM/RSC 文件
+bool GXTParser::parseWHMRSC(const std::string& filePath, std::vector<WHMEntry>& outEntries) const {
+    addParseLog("开始解析 WHM/RSC 文件: " + filePath);
+
+    FILE* f = nullptr;
+    fopen_s(&f, filePath.c_str(), "rb");
+    if (!f) {
+        addParseLog("无法打开文件");
+        return false;
+    }
+
+    // 读取前16字节
+    uint8_t headerBytes[16];
+    fread(headerBytes, 1, 16, f);
+
+    addParseLog("RSC 头部检查:");
+    addParseLog("  Magic: " + std::string(reinterpret_cast<char*>(headerBytes), 4));
+
+    // 检查是否为RSC格式（前4字节应该是"RSC" + 某个版本）
+    if (headerBytes[0] != 'R' || headerBytes[1] != 'S' || headerBytes[2] != 'C') {
+        addParseLog("不是RSC格式");
+        fclose(f);
+        return false;
+    }
+
+    // 读取RSC头部结构
+    // offset 0-3: magic (4 bytes)
+    // offset 4-7: type (4 bytes)
+    // offset 8-11: flags (4 bytes)
+    // 注意：Python中rsc_header总共12字节，不是16字节
+    uint32_t typeValue = *reinterpret_cast<uint32_t*>(&headerBytes[4]);
+    uint32_t flagsValue = *reinterpret_cast<uint32_t*>(&headerBytes[8]);
+
+    char typeHex[20];
+    snprintf(typeHex, sizeof(typeHex), "0x%08X", typeValue);
+    char flagsHex[20];
+    snprintf(flagsHex, sizeof(flagsHex), "0x%08X", flagsValue);
+
+    addParseLog("  RSC Version: " + std::to_string(static_cast<int>(headerBytes[3])));
+    addParseLog("  Type: " + std::string(typeHex));
+    addParseLog("  Flags: " + std::string(flagsHex));
+
+    // 解析flags结构（完全按照Python的rsc_flag_bits）
+    // bits 0: virtual1xPageFlag
+    // bits 1: virtual2xPageFlag
+    // bits 2: virtual4xPageFlag
+    // bits 3: virtual8xPageFlag
+    // bits 4-10: virtual16xPageCount (7 bits)
+    // bits 11-14: virtual1xPageSize (4 bits)
+    // bits 15: physical1xPageFlag (1 bit)
+    // bits 16: physical2xPageFlag (1 bit)
+    // bits 17: physical4xPageFlag (1 bit)
+    // bits 18: physical8xPageFlag (1 bit)
+    // bits 19-25: physical16xPageCount (7 bits)
+    // bits 26-29: physical1xPageSize (4 bits)
+    // bits 30-31: useless (2 bits)
+
+    // 提取所有标志位
+    bool virtual1xPageFlag = (flagsValue & 0x00000001) != 0;
+    bool virtual2xPageFlag = (flagsValue & 0x00000002) != 0;
+    bool virtual4xPageFlag = (flagsValue & 0x00000004) != 0;
+    bool virtual8xPageFlag = (flagsValue & 0x00000008) != 0;
+    uint32_t virtual16xPageCount = (flagsValue >> 4) & 0x7F;
+    uint32_t virtual1xPageSize = (flagsValue >> 11) & 0x0F;
+
+    bool physical1xPageFlag = (flagsValue & 0x00008000) != 0;
+    bool physical2xPageFlag = (flagsValue & 0x00010000) != 0;
+    bool physical4xPageFlag = (flagsValue & 0x00020000) != 0;
+    bool physical8xPageFlag = (flagsValue & 0x00040000) != 0;
+    uint32_t physical16xPageCount = (flagsValue >> 19) & 0x7F;
+    uint32_t physical1xPageSize = (flagsValue >> 26) & 0x0F;
+
+    // 计算页面大小
+    uint32_t virtualPageSize = 1 << (virtual1xPageSize + 8);
+    uint32_t physicalPageSize = 1 << (physical1xPageSize + 8);
+
+    // 计算virtual size - 完全按照Python的GetVirtualSize()
+    uint32_t virtualSize = virtualPageSize * (
+        (virtual1xPageFlag ? 1 : 0) +
+        (virtual2xPageFlag ? 2 : 0) +
+        (virtual4xPageFlag ? 4 : 0) +
+        (virtual8xPageFlag ? 8 : 0) +
+        (virtual16xPageCount * 16)
+    );
+
+    // 计算physical size - 完全按照Python的GetPhysicalSize()
+    uint32_t physicalSize = physicalPageSize * (
+        (physical1xPageFlag ? 1 : 0) +
+        (physical2xPageFlag ? 2 : 0) +
+        (physical4xPageFlag ? 4 : 0) +
+        (physical8xPageFlag ? 8 : 0) +
+        (physical16xPageCount * 16)
+    );
+
+    uint32_t uncompressedSize = virtualSize + physicalSize;
+
+    addParseLog("  virtual1xPageSize: " + std::to_string(virtual1xPageSize) + " -> " + std::to_string(virtualPageSize));
+    addParseLog("  physical1xPageSize: " + std::to_string(physical1xPageSize) + " -> " + std::to_string(physicalPageSize));
+    addParseLog("  virtual1xPageFlag: " + std::to_string(virtual1xPageFlag));
+    addParseLog("  virtual2xPageFlag: " + std::to_string(virtual2xPageFlag));
+    addParseLog("  virtual4xPageFlag: " + std::to_string(virtual4xPageFlag));
+    addParseLog("  virtual8xPageFlag: " + std::to_string(virtual8xPageFlag));
+    addParseLog("  virtual16xPageCount: " + std::to_string(virtual16xPageCount));
+    addParseLog("  physical1xPageFlag: " + std::to_string(physical1xPageFlag));
+    addParseLog("  physical2xPageFlag: " + std::to_string(physical2xPageFlag));
+    addParseLog("  physical4xPageFlag: " + std::to_string(physical4xPageFlag));
+    addParseLog("  physical8xPageFlag: " + std::to_string(physical8xPageFlag));
+    addParseLog("  physical16xPageCount: " + std::to_string(physical16xPageCount));
+    addParseLog("  VirtualSize: " + std::to_string(virtualSize));
+    addParseLog("  PhysicalSize: " + std::to_string(physicalSize));
+    addParseLog("  Total UncompressedSize: " + std::to_string(uncompressedSize));
+
+    // 获取文件大小
+    fseek(f, 0, SEEK_END);
+    long fileSize = ftell(f);
+    fseek(f, 12, SEEK_SET);  // 跳过12字节RSC头部
+
+    uint32_t compressedSize = fileSize - 12;
+    addParseLog("  CompressedSize: " + std::to_string(compressedSize));
+
+    // 读取压缩数据
+    std::vector<uint8_t> compressed(compressedSize);
+    fread(compressed.data(), 1, compressedSize, f);
+
+    // 使用 Qt 的 qUncompress 解压
+    QByteArray compressedData(reinterpret_cast<const char*>(compressed.data()), compressedSize);
+    QByteArray uncompressedData = qUncompress(compressedData);
+
+    if (uncompressedData.isEmpty()) {
+        addParseLog("RSC 解压失败");
+        fclose(f);
+        return false;
+    }
+
+    addParseLog("RSC 解压成功，解压后大小: " + std::to_string(uncompressedData.size()));
+
+    fclose(f);
+
+    // 解析 HTML 文档并提取文本
+    outEntries.clear();
+    extractHtmlTexts(reinterpret_cast<const uint8_t*>(uncompressedData.constData()), uncompressedData.size(), outEntries);
+
+    addParseLog("WHM/RSC 解析完成，提取条目数: " + std::to_string(outEntries.size()));
+    return true;
+}
+
+// 保存 WHM/RSC 文件
+bool GXTParser::saveWHMRSC(const std::string& filePath, const std::vector<WHMEntry>& entries) const {
+    addParseLog("开始保存 WHM/RSC 文件: " + filePath);
+
+    if (entries.empty()) {
+        addParseLog("警告: 没有条目可保存");
+        return false;
+    }
+
+    // 计算文本数据大小
+    uint32_t textDataSize = 0;
+    for (const auto& entry : entries) {
+        textDataSize += static_cast<uint32_t>(entry.text.size() + 1);  // +1 for null terminator
+    }
+
+    // WHM 格式：条目数(uint32) | 条目表(hash+offset) | blob大小(uint32) | 文本数据块
+    uint32_t headerSize = 12;  // 条目数 + blob大小
+    uint32_t tableSize = static_cast<uint32_t>(entries.size() * 8);  // hash(4) + offset(4)
+    uint32_t totalSize = headerSize + tableSize + textDataSize;
+
+    addParseLog("文件大小估算: " + std::to_string(totalSize) + " 字节");
+
+    // 打开文件
+    FILE* f = nullptr;
+    fopen_s(&f, filePath.c_str(), "wb");
+    if (!f) {
+        addParseLog("无法创建输出文件");
+        return false;
+    }
+
+    // 写入条目数量
+    uint32_t count = static_cast<uint32_t>(entries.size());
+    fwrite(&count, sizeof(count), 1, f);
+
+    // 计算偏移量（文本数据开始位置）
+    uint32_t textDataOffset = headerSize + tableSize;
+
+    // 写入条目表
+    uint32_t currentOffset = textDataOffset;
+    for (const auto& entry : entries) {
+        fwrite(&entry.hash, sizeof(entry.hash), 1, f);
+        fwrite(&currentOffset, sizeof(currentOffset), 1, f);
+        currentOffset += static_cast<uint32_t>(entry.text.size() + 1);
+    }
+
+    // 写入文本数据大小
+    fwrite(&textDataSize, sizeof(textDataSize), 1, f);
+
+    // 写入文本数据
+    for (const auto& entry : entries) {
+        fwrite(entry.text.c_str(), 1, entry.text.size(), f);
+        fwrite("\0", 1, 1, f);  // null terminator
+    }
+
+    fclose(f);
+    addParseLog("WHM/RSC 保存完成");
+    return true;
 }

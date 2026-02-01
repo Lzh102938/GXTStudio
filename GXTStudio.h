@@ -288,6 +288,7 @@ struct FileTab {
     std::vector<DATEntry> datEntries;  // DAT文件条目（完全独立于WHM）
     bool isWHM = false;
     bool isDAT = false;  // 区分DAT和WHM文件
+    bool isWHMRSC = false;  // 压缩的 HTML 文档格式
     bool isCharTable = false;  // 字符表文件（VC/IV）
     bool isModified = false;
     int currentTableIndex = 0;
@@ -539,6 +540,7 @@ struct ParseTask {
     QString fileName;
     std::string narrowPath;
     bool isWHM;
+    bool isWHMRSC;  // 压缩的 HTML 文档格式
     bool isDAT;  // 完全区分DAT和WHM
     int tabIndex;
 };
@@ -549,6 +551,7 @@ struct ParseResult {
     QString filePath;
     QString fileName;
     bool isWHM;
+    bool isWHMRSC;  // 压缩的 HTML 文档格式
     bool isDAT;  // 完全区分DAT和WHM
     std::vector<GXTTabl> tables;
     std::vector<WHMEntry> whmEntries;
@@ -600,10 +603,22 @@ public slots:
             } else if (task.isWHM) {
                 // 解析WHM文件
                 result.whmEntries.clear();
+                result.isWHM = true;
+                result.isWHMRSC = false;
+
+                // 优先尝试简单 WHM 格式
                 result.success = parser.parseWHM(task.narrowPath, result.whmEntries);
-                result.version = GXTVersion::UNKNOWN; // WHM文件没有版本信息
+                result.version = GXTVersion::UNKNOWN;
+
+                // 如果简单 WHM 解析失败，且检测为 RSC 格式，则尝试 RSC 解析
+                if (!result.success && task.isWHMRSC) {
+                    qDebug() << "简单WHM解析失败，尝试RSC格式";
+                    result.isWHMRSC = true;
+                    result.success = parser.parseWHMRSC(task.narrowPath, result.whmEntries);
+                }
+
                 if (!result.success) {
-                    result.errorMessage = "WHM解析失败";
+                    result.errorMessage = result.isWHMRSC ? "WHM/RSC解析失败" : "WHM解析失败";
                 }
             } else {
                 // 解析GXT文件
@@ -656,12 +671,13 @@ struct AutoSaveData {
     QString filePath;
     GXTVersion version;
     bool isWHM;
+    bool isWHMRSC;
     bool isDAT;
     // GXT/GXT2 数据 (使用GXTTabl与FileTab一致)
     std::vector<GXTTabl> tables;
     // WHM 数据
     std::vector<WHMEntry> whmEntries;
-    // DAT 数据  
+    // DAT 数据
     std::vector<DATEntry> datEntries;
 };
 

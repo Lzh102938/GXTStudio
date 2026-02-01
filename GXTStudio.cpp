@@ -2134,6 +2134,7 @@ void GXTStudio::saveFile()
     GXTVersion version = currentTab->version;
     bool isWHM = currentTab->isWHM;
     bool isDAT = currentTab->isDAT;
+    bool isWHMRSC = currentTab->isWHMRSC;
     
     // 使用状态栏进度条
     m_saveProgressBar->setFormat("正在保存 %p%");
@@ -2143,7 +2144,7 @@ void GXTStudio::saveFile()
     showLogMessage("正在后台保存: " + fileName);
     
     // 在后台线程中执行数据复制和保存
-    QFuture<SaveResult> future = QtConcurrent::run([this, filePath, fileName, version, isWHM, isDAT]() -> SaveResult {
+        QFuture<SaveResult> future = QtConcurrent::run([this, filePath, fileName, version, isWHM, isDAT, isWHMRSC]() -> SaveResult {
         SaveResult result;
         result.filePath = filePath;
         result.fileName = fileName;
@@ -2159,8 +2160,9 @@ void GXTStudio::saveFile()
         saveData.filePath = filePath;
         saveData.version = version;
         saveData.isWHM = isWHM;
+        saveData.isWHMRSC = isWHMRSC;
         saveData.isDAT = isDAT;
-        
+
         QMetaObject::invokeMethod(this, [this, &saveData]() {
             FileTab* tab = getCurrentTab();
             if (tab && tab->filePath == saveData.filePath) {
@@ -2173,12 +2175,16 @@ void GXTStudio::saveFile()
                 }
             }
         }, Qt::BlockingQueuedConnection);
-        
+
         // 执行保存
         bool success = false;
         try {
             GXTEditor editor;
-            if (isWHM) {
+            if (isWHMRSC) {
+                // WHM/RSC 格式 - 使用 parser 的保存方法
+                GXTParser parser;
+                success = parser.saveWHMRSC(saveData.filePath.toStdString(), saveData.whmEntries);
+            } else if (isWHM) {
                 success = editor.saveAsWHM(saveData.filePath.toStdString(), saveData.whmEntries);
             } else if (isDAT) {
                 success = editor.saveAsDAT(saveData.filePath.toStdString(), saveData.datEntries);
@@ -2312,17 +2318,18 @@ void GXTStudio::saveAsFile()
         QString newFileName = QFileInfo(fileName).fileName();
         GXTVersion version = currentTab->version;
         bool isWHM = currentTab->isWHM;
+        bool isWHMRSC = currentTab->isWHMRSC;
         bool isDAT = currentTab->isDAT;
-        
+
         // 使用状态栏进度条
         m_saveProgressBar->setFormat("正在另存为 %p%");
         m_saveProgressBar->show();
         m_saveProgressBar->setValue(10);
-        
+
         showLogMessage("正在后台另存为: " + newFileName);
-        
+
         // 在后台线程中执行
-        QFuture<SaveResult> future = QtConcurrent::run([this, newFilePath, newFileName, version, isWHM, isDAT]() -> SaveResult {
+        QFuture<SaveResult> future = QtConcurrent::run([this, newFilePath, newFileName, version, isWHM, isDAT, isWHMRSC]() -> SaveResult {
             SaveResult result;
             result.filePath = newFilePath;
             result.fileName = newFileName;
@@ -2338,8 +2345,9 @@ void GXTStudio::saveAsFile()
             saveData.filePath = newFilePath;
             saveData.version = version;
             saveData.isWHM = isWHM;
+            saveData.isWHMRSC = isWHMRSC;
             saveData.isDAT = isDAT;
-            
+
             QMetaObject::invokeMethod(this, [this, &saveData]() {
                 FileTab* tab = getCurrentTab();
                 if (tab) {
@@ -2357,7 +2365,11 @@ void GXTStudio::saveAsFile()
             bool success = false;
             try {
                 GXTEditor editor;
-                if (isWHM) {
+                if (isWHMRSC) {
+                    // WHM/RSC 格式 - 使用 parser 的保存方法
+                    GXTParser parser;
+                    success = parser.saveWHMRSC(saveData.filePath.toStdString(), saveData.whmEntries);
+                } else if (isWHM) {
                     success = editor.saveAsWHM(saveData.filePath.toStdString(), saveData.whmEntries);
                 } else if (isDAT) {
                     success = editor.saveAsDAT(saveData.filePath.toStdString(), saveData.datEntries);
@@ -5635,7 +5647,49 @@ void GXTStudio::startAsyncParse(const QString& filePath)
 
     // 判断文件类型：完全区分DAT和WHM
     bool isWHM = (suffix == "whm");
+    bool isWHMRSC = false;  // 压缩的HTML文档格式
     bool isDAT = (suffix == "dat");
+
+    // 对于 .whm 文件，检测是否为 RSC 格式（压缩的 HTML 文档）
+    if (isWHM) {
+        // 默认使用简单 WHM 格式
+        isWHMRSC = false;
+
+        // 尝试读取文件头部来检测格式
+        FILE* f = nullptr;
+        fopen_s(&f, filePath.toLocal8Bit().constData(), "rb");
+        if (f) {
+            // 读取前4字节检查magic
+            char magic[4];
+            fread(magic, 1, 4, f);
+
+            // 检查是否为 RSC 格式（前3字节为 "RSC"）
+            if (magic[0] == 'R' && magic[1] == 'S' && magic[2] == 'C') {
+                qDebug() << "检测到 RSC 格式";
+                isWHMRSC = true;
+            } else {
+                // 读取第一个 uint32 作为条目数
+                rewind(f);
+                uint32_t count = 0;
+                fread(&count, 1, sizeof(count), f);
+
+                // 获取文件大小
+                fseek(f, 0, SEEK_END);
+                long fileSize = ftell(f);
+                fclose(f);
+
+                // 简单 WHM 格式检查：
+                // 条目数应该在合理范围内（1-100000）
+                // 如果条目数异常，可能是 RSC 格式
+                if (count == 0 || count > 100000) {
+                    qDebug() << "文件格式检测：条目数=" << count << ", 可能是 RSC 格式";
+                    isWHMRSC = true;
+                }
+            }
+
+            if (f) fclose(f);
+        }
+    }
 
     // 如果是 .dat 文件，尝试判断是否为字符表文件
     // 字符表特征：
@@ -5709,6 +5763,7 @@ void GXTStudio::startAsyncParse(const QString& filePath)
     task.fileName = fileInfo.fileName();
     task.narrowPath = filePath.toLocal8Bit().toStdString();
     task.isWHM = isWHM;
+    task.isWHMRSC = isWHMRSC;
     task.isDAT = isDAT;
     task.tabIndex = static_cast<int>(m_fileTabs.size());
 
@@ -8321,11 +8376,12 @@ void GXTStudio::onAutoSaveTimer()
     QString filePath = currentTab->filePath;
     GXTVersion version = currentTab->version;
     bool isWHM = currentTab->isWHM;
+    bool isWHMRSC = currentTab->isWHMRSC;
     bool isDAT = currentTab->isDAT;
-    
+
     // 【关键】使用 QtConcurrent 在后台线程中执行数据复制和保存
     // 这样主线程完全不参与数据操作，零阻塞
-    QFuture<SaveResult> future = QtConcurrent::run([this, filePath, version, isWHM, isDAT]() -> SaveResult {
+    QFuture<SaveResult> future = QtConcurrent::run([this, filePath, version, isWHM, isDAT, isWHMRSC]() -> SaveResult {
         SaveResult result;
         result.filePath = filePath;
         result.fileName = QFileInfo(filePath).fileName();
@@ -8354,8 +8410,9 @@ void GXTStudio::onAutoSaveTimer()
         saveData.filePath = filePath;
         saveData.version = version;
         saveData.isWHM = isWHM;
+        saveData.isWHMRSC = isWHMRSC;
         saveData.isDAT = isDAT;
-        
+
         if (isWHM) {
             saveData.whmEntries = tab->whmEntries;
         } else if (isDAT) {
@@ -8363,12 +8420,16 @@ void GXTStudio::onAutoSaveTimer()
         } else {
             saveData.tables = tab->tables;
         }
-        
+
         // 执行保存
         bool success = false;
         try {
             GXTEditor editor;
-            if (isWHM) {
+            if (isWHMRSC) {
+                // WHM/RSC 格式 - 使用 parser 的保存方法
+                GXTParser parser;
+                success = parser.saveWHMRSC(saveData.filePath.toStdString(), saveData.whmEntries);
+            } else if (isWHM) {
                 success = editor.saveAsWHM(saveData.filePath.toStdString(), saveData.whmEntries);
             } else if (isDAT) {
                 success = editor.saveAsDAT(saveData.filePath.toStdString(), saveData.datEntries);

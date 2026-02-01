@@ -249,10 +249,26 @@ bool GXTEditor::saveToFile(const std::string& path) {
     }
 }
 
-// 保存GTA VC格式 (GXT1) - 内存缓冲 + 一次性写入
+// 保存GTA VC格式 (GXT1) - FILE*操作 + 两遍扫描优化
 bool GXTEditor::saveAsGTA_VC(const std::string& path) {
     try {
-        // 步骤1: 排序表 (MAIN优先，其他按字典序)
+        // 转换路径以支持中文
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+        if (wideLen == 0) {
+            std::cerr << "Error: Invalid path encoding" << std::endl;
+            return false;
+        }
+
+        std::vector<wchar_t> widePath(wideLen);
+        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, widePath.data(), wideLen);
+
+        FILE* outputFile = _wfopen(widePath.data(), L"wb");
+        if (outputFile == nullptr) {
+            std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
+            return false;
+        }
+
+        // 排序表 (MAIN优先，其他按字典序)
         auto sorted_tables = tables;
         std::sort(sorted_tables.begin(), sorted_tables.end(),
             [](const GXTTable& a, const GXTTable& b) {
@@ -261,119 +277,91 @@ bool GXTEditor::saveAsGTA_VC(const std::string& path) {
                 return a.name < b.name;
             });
 
-        // 步骤2: 构建内存缓冲区
-        std::vector<uint8_t> buffer;
-        buffer.reserve(1024 * 1024); // 预分配1MB
+        const int SizeOfTABL = 12;  // 8字节表名 + 4字节偏移
+        const int SizeOfTKEY = 12;  // 4字节偏移 + 8字节键
 
-        std::map<std::string, uint32_t> table_offsets;
+        // 写TABL块头
+        long foTableBlock = 8;
+        int32_t tableBlockSize = static_cast<int32_t>(sorted_tables.size() * SizeOfTABL);
 
-        // 预留TABL头部位置
-        buffer.insert(buffer.end(), {'T', 'A', 'B', 'L'});
-        uint32_t table_block_size = static_cast<uint32_t>(sorted_tables.size() * 12);
-        buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&table_block_size), 
-                      reinterpret_cast<uint8_t*>(&table_block_size) + sizeof(table_block_size));
+        fwrite("TABL", 1, 4, outputFile);
+        fwrite(&tableBlockSize, 4, 1, outputFile);
 
-        // 预留TABL条目空间
-        size_t tabl_entries_start = buffer.size();
-        buffer.resize(buffer.size() + table_block_size);
+        // 跳过TABL条目空间，稍后回填
+        fseek(outputFile, tableBlockSize, SEEK_CUR);
 
         // 处理每个表
         for (const auto& table : sorted_tables) {
-            // 记录当前表位置
-            table_offsets[table.name] = static_cast<uint32_t>(buffer.size());
+            long foKeyBlock = ftell(outputFile);
 
-            // 如果不是MAIN表，先写8字节表名
-            if (table.name != "MAIN") {
-                std::string name_padded = table.name;
-                if (name_padded.size() > 8) name_padded.resize(8);
-                name_padded.resize(8, '\0');
-                buffer.insert(buffer.end(), name_padded.begin(), name_padded.end());
-            }
+            int32_t keyBlockSize = static_cast<int32_t>(table.entries.size() * SizeOfTKEY);
 
-            // 写TKEY头部
-            buffer.insert(buffer.end(), {'T', 'K', 'E', 'Y'});
-            uint32_t key_block_size = static_cast<uint32_t>(table.entries.size() * 12);
-            buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&key_block_size), 
-                          reinterpret_cast<uint8_t*>(&key_block_size) + sizeof(key_block_size));
-
-            // 记录TKEY条目起始位置
-            size_t key_entries_pos = buffer.size();
-            buffer.resize(buffer.size() + key_block_size);
-
-            // 写TDAT头部
-            buffer.insert(buffer.end(), {'T', 'D', 'A', 'T'});
-            
-            // 预计算和转换数据
-            std::vector<std::vector<uint16_t>> converted_values;
+            // 计算TDAT数据大小
+            int32_t dataBlockSize = 0;
             for (const auto& entry : table.entries) {
-                converted_values.push_back(utf8_to_utf16le_vector(entry.value));
-            }
-            
-            uint32_t data_block_size = 0;
-            for (const auto& utf16Data : converted_values) {
-                data_block_size += static_cast<uint32_t>(utf16Data.size() * 2);
-            }
-            
-            buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&data_block_size), 
-                          reinterpret_cast<uint8_t*>(&data_block_size) + sizeof(data_block_size));
-            
-            uint32_t tdat_start = static_cast<uint32_t>(buffer.size());
-
-            // 写入字符串数据并记录偏移
-            std::vector<uint32_t> offsets;
-            for (size_t i = 0; i < table.entries.size(); ++i) {
-                const auto& utf16Data = converted_values[i];
-                uint32_t offset = static_cast<uint32_t>(buffer.size()) - tdat_start;
-                offsets.push_back(offset);
-
-                for (uint16_t code : utf16Data) {
-                    buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&code), 
-                                  reinterpret_cast<uint8_t*>(&code) + sizeof(code));
-                }
+                dataBlockSize += static_cast<int32_t>(utf8_to_utf16le_vector(entry.value).size() * 2);
             }
 
-            // 回填TKEY条目
-            size_t key_entry_pos = key_entries_pos;
-            for (size_t i = 0; i < table.entries.size(); ++i) {
-                const auto& entry = table.entries[i];
-                uint32_t offset = offsets[i];
+            // 回填TABL条目
+            fseek(outputFile, foTableBlock, SEEK_SET);
+            char eightChars[8] = {0};
+            table.name.copy(eightChars, 7);
+            fwrite(eightChars, 1, 8, outputFile);
+            fwrite(&foKeyBlock, 4, 1, outputFile);
+            foTableBlock += SizeOfTABL;
 
-                // 写入offset（4字节）
-                memcpy(&buffer[key_entry_pos], &offset, sizeof(offset));
-                key_entry_pos += sizeof(offset);
+            // 定位到TKEY块位置
+            fseek(outputFile, foKeyBlock, SEEK_SET);
+
+            // 非MAIN表先写8字节表名
+            if (table.name != "MAIN") {
+                fwrite(eightChars, 1, 8, outputFile);
+            }
+
+            // 写TKEY块头
+            fwrite("TKEY", 1, 4, outputFile);
+            fwrite(&keyBlockSize, 4, 1, outputFile);
+            long foKeyData = ftell(outputFile);
+
+            // 跳过TKEY条目空间，稍后回填
+            fseek(outputFile, keyBlockSize, SEEK_CUR);
+
+            // 写TDAT块头
+            fwrite("TDAT", 1, 4, outputFile);
+            fwrite(&dataBlockSize, 4, 1, outputFile);
+
+            long firstTDATEntryOffset = ftell(outputFile);
+
+            // 写入TDAT数据并回填TKEY条目
+            for (const auto& entry : table.entries) {
+                long foDataBlock = ftell(outputFile);
+
+                // 转换为UTF-16LE
+                auto utf16Data = utf8_to_utf16le_vector(entry.value);
+
+                // 回填TKEY条目
+                int32_t TDATOffset = static_cast<int32_t>(foDataBlock - firstTDATEntryOffset);
+
+                fseek(outputFile, foKeyData, SEEK_SET);
+                fwrite(&TDATOffset, 4, 1, outputFile);
 
                 // 写入键（8字节，填充）
-                std::string key_padded = entry.originalKey.empty() ? entry.key : entry.originalKey;
-                if (key_padded.size() > 8) key_padded.resize(8);
-                key_padded.resize(8, '\0');
-                memcpy(&buffer[key_entry_pos], key_padded.c_str(), 8);
-                key_entry_pos += 8;
+                char keyChars[8] = {0};
+                std::string keyToWrite = entry.originalKey.empty() ? entry.key : entry.originalKey;
+                if (keyToWrite.size() > 8) keyToWrite.resize(8);
+                keyToWrite.resize(8, '\0');
+                fwrite(keyToWrite.c_str(), 1, 8, outputFile);
+                foKeyData += SizeOfTKEY;
+
+                // 写入TDAT数据
+                fseek(outputFile, foDataBlock, SEEK_SET);
+                for (uint16_t code : utf16Data) {
+                    fwrite(&code, 2, 1, outputFile);
+                }
             }
         }
 
-        // 回填TABL条目
-        size_t tabl_pos = tabl_entries_start;
-        for (const auto& table : sorted_tables) {
-            std::string name_padded = table.name;
-            if (name_padded.size() > 8) name_padded.resize(8);
-            name_padded.resize(8, '\0');
-            memcpy(&buffer[tabl_pos], name_padded.c_str(), 8);
-            tabl_pos += 8;
-
-            uint32_t offset = table_offsets[table.name];
-            memcpy(&buffer[tabl_pos], &offset, sizeof(offset));
-            tabl_pos += sizeof(offset);
-        }
-
-        // 一次性写入文件
-        std::ofstream file = openFileForWriting(path);
-        if (!file.is_open()) {
-            std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
-            return false;
-        }
-        file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-        file.close();
-        
+        fclose(outputFile);
         return true;
     }
     catch (const std::exception& e) {
@@ -386,17 +374,29 @@ bool GXTEditor::saveAsGTA_VC(const std::string& path) {
     }
 }
 
-// 保存GTA SA格式 - 内存缓冲 + 一次性写入
+// 保存GTA SA格式 - FILE*操作 + 两遍扫描优化
 bool GXTEditor::saveAsGTA_SA(const std::string& path) {
     try {
-        // 构建内存缓冲区
-        std::vector<uint8_t> buffer;
-        buffer.reserve(1024 * 1024); // 预分配1MB
+        // 转换路径以支持中文
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+        if (wideLen == 0) {
+            std::cerr << "Error: Invalid path encoding" << std::endl;
+            return false;
+        }
 
-        // Step 1: 写版本头 (4字节)
-        buffer.insert(buffer.end(), {0x04, 0x00, 0x08, 0x00});
+        std::vector<wchar_t> widePath(wideLen);
+        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, widePath.data(), wideLen);
 
-        // Step 2: 排序表（MAIN优先，其他按字典序）
+        FILE* outputFile = _wfopen(widePath.data(), L"wb");
+        if (outputFile == nullptr) {
+            std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
+            return false;
+        }
+
+        const int SizeOfTABL = 12;  // 8字节表名 + 4字节偏移
+        const int SizeOfTKEY = 8;   // 4字节偏移 + 4字节哈希
+
+        // 排序表（MAIN优先，其他按字典序）
         auto sorted_tables = tables;
         std::sort(sorted_tables.begin(), sorted_tables.end(),
             [](const GXTTable& a, const GXTTable& b) {
@@ -405,139 +405,95 @@ bool GXTEditor::saveAsGTA_SA(const std::string& path) {
                 return a.name < b.name;
             });
 
-        // Step 3: 预计算TABL块大小
-        uint32_t table_block_size = static_cast<uint32_t>(sorted_tables.size() * 12);
+        // 写版本头
+        fwrite("\x04\x00\x08\x00", 4, 1, outputFile);
 
-        // Step 4: 写TABL块头
-        buffer.insert(buffer.end(), {'T', 'A', 'B', 'L'});
-        buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&table_block_size), 
-                      reinterpret_cast<uint8_t*>(&table_block_size) + sizeof(table_block_size));
+        // 写TABL块头
+        long foTableBlock = 12;
+        int32_t tableBlockSize = static_cast<int32_t>(sorted_tables.size() * SizeOfTABL);
 
-        // 预留TABL条目空间
-        size_t tabl_entries_start = buffer.size();
-        buffer.resize(buffer.size() + table_block_size);
+        fwrite("TABL", 4, 1, outputFile);
+        fwrite(&tableBlockSize, 4, 1, outputFile);
 
-        // Step 5 & 6: 预先计算所有表的信息和位置
-        struct TableInfo {
-            std::string table_name;
-            std::vector<GXTTableEntry> entries;
-            uint32_t key_block_size;
-            uint32_t data_block_size;
-        };
-        std::vector<TableInfo> table_info;
+        long foKeyBlock = tableBlockSize + 12;
+        int32_t keyBlockOffset = foKeyBlock;
 
+        // 处理每个表
         for (const auto& table : sorted_tables) {
-            uint32_t key_size = static_cast<uint32_t>(table.entries.size() * 8);
-            uint32_t data_size = 0;
+            // 计算TKEY和TDAT块大小
+            int32_t keyBlockSize = static_cast<int32_t>(table.entries.size() * SizeOfTKEY);
+            int32_t dataBlockSize = 0;
             for (const auto& entry : table.entries) {
-                data_size += static_cast<uint32_t>(entry.value.size() + 1);
+                dataBlockSize += static_cast<int32_t>(entry.value.length() + 1);
             }
-            table_info.push_back({table.name, table.entries, key_size, data_size});
-        }
 
-        uint32_t key_block_offset = static_cast<uint32_t>(buffer.size());
-        size_t tabl_entry_pos = tabl_entries_start;
+            // 回填TABL条目
+            fseek(outputFile, foTableBlock, SEEK_SET);
+            char eightChars[8] = {0};
+            table.name.copy(eightChars, 7);
+            fwrite(eightChars, 8, 1, outputFile);
+            fwrite(&keyBlockOffset, 4, 1, outputFile);
+            foTableBlock += SizeOfTABL;
 
-        // Step 7: 处理每个表
-        for (const auto& info : table_info) {
-            // 7.1: 写TABL条目 (8字节表名 + 4字节偏移)
-            std::string table_name_padded = info.table_name;
-            if (table_name_padded.size() > 7) table_name_padded.resize(7);
-            table_name_padded.resize(8, '\0');
-            memcpy(&buffer[tabl_entry_pos], table_name_padded.c_str(), 8);
-            memcpy(&buffer[tabl_entry_pos + 8], &key_block_offset, sizeof(key_block_offset));
-            tabl_entry_pos += 12;
+            // 定位到TKEY块
+            fseek(outputFile, foKeyBlock, SEEK_SET);
 
-            // 7.2: 写TKEY块头
-            if (info.table_name != "MAIN") {
-                buffer.insert(buffer.end(), table_name_padded.begin(), table_name_padded.end());
+            // 非MAIN表先写8字节表名
+            if (table.name != "MAIN") {
+                fwrite(eightChars, 8, 1, outputFile);
             }
-            buffer.insert(buffer.end(), {'T', 'K', 'E', 'Y'});
-            uint32_t key_block_size = info.key_block_size;
-            buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&key_block_size), 
-                          reinterpret_cast<uint8_t*>(&key_block_size) + sizeof(key_block_size));
 
-            // 记录TKEY数据起始位置
-            size_t key_data_start = buffer.size();
-            buffer.resize(buffer.size() + key_block_size);
+            // 写TKEY块头
+            fwrite("TKEY", 4, 1, outputFile);
+            fwrite(&keyBlockSize, 4, 1, outputFile);
 
-            // 7.3: 写TDAT块头
-            buffer.insert(buffer.end(), {'T', 'D', 'A', 'T'});
-            uint32_t data_block_size = info.data_block_size;
-            buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&data_block_size), 
-                          reinterpret_cast<uint8_t*>(&data_block_size) + sizeof(data_block_size));
+            long foKeyData = ftell(outputFile);
 
-            // 记录TDAT数据起始位置
-            uint32_t tdat_offset = static_cast<uint32_t>(buffer.size());
+            // 跳过TKEY条目空间，稍后回填
+            fseek(outputFile, keyBlockSize, SEEK_CUR);
 
-            // 7.4: 创建排序后的条目
-            struct KeyEntry {
+            // 写TDAT块头
+            long TDATOffset = ftell(outputFile);
+            fwrite("TDAT", 4, 1, outputFile);
+            fwrite(&dataBlockSize, 4, 1, outputFile);
+
+            long foDataBlock = ftell(outputFile);
+
+            // 处理每个条目并写入TDAT数据
+            for (const auto& entry : table.entries) {
+                // 计算数据偏移
+                int32_t dataOffset = static_cast<int32_t>(foDataBlock - TDATOffset - 8);
+
+                // 回填TKEY条目
+                fseek(outputFile, foKeyData, SEEK_SET);
+                fwrite(&dataOffset, 4, 1, outputFile);
+
+                // 计算hash值
                 uint32_t hash;
-                const GXTTableEntry* entry;
-            };
-            std::vector<KeyEntry> sorted_entries;
-
-            for (const auto& entry : info.entries) {
-                uint32_t hash_key;
                 try {
-                    hash_key = std::stoul(entry.key, nullptr, 16);
+                    hash = std::stoul(entry.key, nullptr, 16);
                 } catch (const std::exception&) {
                     std::string key_str = normalizeKey(entry.key);
                     std::string upperKey = key_str;
                     std::transform(upperKey.begin(), upperKey.end(), upperKey.begin(), ::toupper);
-                    hash_key = CKeyGen::GetUppercaseKey(upperKey.c_str());
+                    hash = CKeyGen::GetUppercaseKey(upperKey.c_str());
                 }
-                sorted_entries.push_back({hash_key, &entry});
+                fwrite(&hash, 4, 1, outputFile);
+
+                foKeyData += SizeOfTKEY;
+
+                // 写入TDAT数据（UTF-8 + null终止符）
+                fseek(outputFile, foDataBlock, SEEK_SET);
+                fwrite(entry.value.c_str(), entry.value.length() + 1, 1, outputFile);
+
+                foDataBlock = ftell(outputFile);
             }
 
-            // 按哈希值排序
-            std::sort(sorted_entries.begin(), sorted_entries.end(),
-                [](const KeyEntry& a, const KeyEntry& b) {
-                    return a.hash < b.hash;
-                });
-
-            // 构建TKEY和TDAT数据
-            std::vector<uint8_t> key_data;
-            std::vector<uint8_t> data_data;
-            key_data.reserve(info.key_block_size);
-            data_data.reserve(info.data_block_size);
-
-            for (const auto& key_entry : sorted_entries) {
-                uint32_t data_offset = static_cast<uint32_t>(data_data.size());
-                
-                // TKEY条目：4字节偏移 + 4字节哈希
-                key_data.insert(key_data.end(), reinterpret_cast<uint8_t*>(&data_offset), 
-                                reinterpret_cast<uint8_t*>(&data_offset) + 4);
-                uint32_t hash = key_entry.hash;
-                key_data.insert(key_data.end(), reinterpret_cast<uint8_t*>(&hash), 
-                                reinterpret_cast<uint8_t*>(&hash) + 4);
-
-                // TDAT数据
-                for (char c : key_entry.entry->value) {
-                    data_data.push_back(static_cast<uint8_t>(c));
-                }
-                data_data.push_back('\0');
-            }
-
-            // 回填TKEY数据
-            memcpy(&buffer[key_data_start], key_data.data(), key_data.size());
-
-            // 写入TDAT数据
-            buffer.insert(buffer.end(), data_data.begin(), data_data.end());
-
-            // 更新下一个表的偏移
-            key_block_offset = static_cast<uint32_t>(buffer.size());
+            foKeyBlock = ftell(outputFile);
+            keyBlockOffset = foKeyBlock;
         }
 
-        // 一次性写入文件
-        std::ofstream f = openFileForWriting(path);
-        if (!f.is_open()) {
-            std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
-            return false;
-        }
-        f.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-        f.close();
-        
+        fclose(outputFile);
         return true;
     }
     catch (const std::exception& e) {
@@ -1059,9 +1015,27 @@ void GXTEditor::clear() {
     version = GXTVersion::UNKNOWN;
 }
 
-// 保存GTA III格式 - 内存缓冲 + 一次性写入
+// 保存GTA III格式 - FILE*操作 + 两遍扫描优化
 bool GXTEditor::saveAsGTA_III(const std::string& path) {
     try {
+        // 转换路径以支持中文
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+        if (wideLen == 0) {
+            std::cerr << "Error: Invalid path encoding" << std::endl;
+            return false;
+        }
+
+        std::vector<wchar_t> widePath(wideLen);
+        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, widePath.data(), wideLen);
+
+        FILE* outputFile = _wfopen(widePath.data(), L"wb");
+        if (outputFile == nullptr) {
+            std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
+            return false;
+        }
+
+        const int SizeOfTKEY = 12;  // 4字节偏移 + 8字节键
+
         // 收集所有条目并按键排序
         std::vector<std::pair<std::string, std::string>> all_entries;
         for (const auto& table : tables) {
@@ -1075,78 +1049,51 @@ bool GXTEditor::saveAsGTA_III(const std::string& path) {
                 return a.first < b.first;
             });
 
+        if (all_entries.empty()) {
+            fclose(outputFile);
+            return true;
+        }
+
         // 计算块大小
-        uint32_t entry_count = static_cast<uint32_t>(all_entries.size());
-        uint32_t key_block_size = entry_count * 12;
-
-        // 预计算数据
-        std::vector<std::vector<uint16_t>> convertedValues;
-        uint32_t data_block_size = 0;
+        uint32_t keyBlockSize = static_cast<uint32_t>(all_entries.size() * SizeOfTKEY);
+        uint32_t dataBlockSize = 0;
         for (const auto& [key, value] : all_entries) {
-            auto utf16Data = utf8_to_utf16le_vector(value);
-            convertedValues.push_back(utf16Data);
-            data_block_size += static_cast<uint32_t>(utf16Data.size() * 2);
+            dataBlockSize += static_cast<uint32_t>(utf8_to_utf16le_vector(value).size() * 2);
         }
 
-        // 构建内存缓冲区
-        std::vector<uint8_t> buffer;
-        buffer.reserve(8 + key_block_size + 8 + data_block_size);
+        // 写TKEY块头
+        long fpKeyBlock = 8;
+        long fpDataBlock = keyBlockSize + 8;
 
-        // TKEY块头
-        buffer.insert(buffer.end(), {'T', 'K', 'E', 'Y'});
-        buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&key_block_size), 
-                      reinterpret_cast<uint8_t*>(&key_block_size) + sizeof(key_block_size));
+        fwrite("TKEY", 4, 1, outputFile);
+        fwrite(&keyBlockSize, 4, 1, outputFile);
 
-        // 预留TKEY条目空间
-        size_t key_entries_start = buffer.size();
-        buffer.resize(buffer.size() + key_block_size);
+        // 定位到TDAT块头
+        fseek(outputFile, fpDataBlock, SEEK_SET);
+        fwrite("TDAT", 4, 1, outputFile);
+        fwrite(&dataBlockSize, 4, 1, outputFile);
+        fpDataBlock += 8;
 
-        // TDAT块头
-        buffer.insert(buffer.end(), {'T', 'D', 'A', 'T'});
-        buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&data_block_size), 
-                      reinterpret_cast<uint8_t*>(&data_block_size) + sizeof(data_block_size));
-
-        // 计算数据起始位置
-        uint32_t data_start_pos = static_cast<uint32_t>(buffer.size());
-        uint32_t key_block_end = static_cast<uint32_t>(8 + key_block_size + 8);
-
-        // 写入键值数据
-        for (size_t i = 0; i < all_entries.size(); ++i) {
-            const auto& [k, v] = all_entries[i];
-            const auto& utf16Data = convertedValues[i];
-
-            uint32_t offset = static_cast<uint32_t>(buffer.size()) - key_block_end;
-
+        // 处理每个条目
+        for (const auto& [key, value] : all_entries) {
             // 回填TKEY条目
-            size_t tkey_entry_pos = key_entries_start + (i * 12);
-            memcpy(&buffer[tkey_entry_pos], &offset, sizeof(offset));
-            
-            std::string key_padded = k;
-            if (key_padded.size() < 7) {
-                key_padded.append(7 - key_padded.size(), '\0');
-            }
-            if (key_padded.size() > 7) {
-                key_padded.resize(7);
-            }
-            memcpy(&buffer[tkey_entry_pos + 4], key_padded.c_str(), 7);
-            buffer[tkey_entry_pos + 11] = '\0';
+            fseek(outputFile, fpKeyBlock, SEEK_SET);
+            uint32_t offset = static_cast<uint32_t>(fpDataBlock - keyBlockSize - 16);
+            fwrite(&offset, 4, 1, outputFile);
 
-            // 写入字符串数据
-            for (uint16_t code : utf16Data) {
-                buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&code), 
-                              reinterpret_cast<uint8_t*>(&code) + sizeof(code));
-            }
+            char keyName[8] = {0};
+            strncpy(keyName, key.c_str(), 7);
+            fwrite(keyName, 8, 1, outputFile);
+            fpKeyBlock += SizeOfTKEY;
+
+            // 写入TDAT数据
+            fseek(outputFile, fpDataBlock, SEEK_SET);
+            auto utf16Data = utf8_to_utf16le_vector(value);
+            fwrite(utf16Data.data(), 2, utf16Data.size(), outputFile);
+            fpDataBlock += static_cast<long>(utf16Data.size() * 2);
         }
 
-        // 一次性写入文件
-        std::ofstream file = openFileForWriting(path);
-        if (!file.is_open()) {
-            std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
-            return false;
-        }
-        file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-        file.close();
-        
+        fclose(outputFile);
         return true;
     }
     catch (const std::exception& e) {
@@ -1159,20 +1106,15 @@ bool GXTEditor::saveAsGTA_III(const std::string& path) {
     }
 }
 
-// 保存GTA IV格式 - 内存缓冲 + 一次性写入
+// 保存GTA IV格式 - 文件seek + 两遍扫描优化
 bool GXTEditor::saveAsGTA_IV(const std::string& path) {
     try {
-        // 构建内存缓冲区
-        std::vector<uint8_t> buffer;
-        buffer.reserve(1024 * 1024);
-
-        // 写入版本信息
-        uint16_t version = 4;
-        uint16_t bits = 16;
-        buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&version), 
-                      reinterpret_cast<uint8_t*>(&version) + sizeof(version));
-        buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&bits), 
-                      reinterpret_cast<uint8_t*>(&bits) + sizeof(bits));
+        // 打开文件
+        std::ofstream file = openFileForWriting(path);
+        if (!file.is_open()) {
+            std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
+            return false;
+        }
 
         // MAIN表优先排序
         std::vector<size_t> tableOrder;
@@ -1188,101 +1130,130 @@ bool GXTEditor::saveAsGTA_IV(const std::string& path) {
             }
         }
 
-        uint32_t num_tables = static_cast<uint32_t>(tableOrder.size());
-        uint32_t tabl_size = num_tables * 12;
+        // 表信息结构
+        struct TableInfo {
+            std::string name;
+            uint32_t offset;
+            uint32_t tkeySize;
+            uint32_t tdatSize;
+            uint32_t numEntries;
+        };
+        std::vector<TableInfo> tableInfos;
 
-        // TABL块头
-        buffer.insert(buffer.end(), {'T', 'A', 'B', 'L'});
-        buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&tabl_size), 
-                      reinterpret_cast<uint8_t*>(&tabl_size) + sizeof(tabl_size));
-
-        // 预留TABL表项空间
-        size_t tabl_entries_start = buffer.size();
-        buffer.resize(buffer.size() + tabl_size);
-
-        // 计算并写入各表数据
-        std::unordered_map<std::string, uint32_t> table_offsets;
-        size_t tabl_entry_pos = tabl_entries_start;
+        // 第一遍：计算所有表的偏移量和大小
+        uint32_t currentOffset = 4; // 版本头4字节
+        currentOffset += 8; // TABL块头8字节
+        uint32_t tablEntriesSize = static_cast<uint32_t>(tableOrder.size()) * 12;
+        currentOffset += tablEntriesSize; // TABL条目
 
         for (size_t tableIdx : tableOrder) {
             const auto& table = tables[tableIdx];
-            table_offsets[table.name] = static_cast<uint32_t>(buffer.size());
-
-            // 回填TABL表项
-            std::string name_padded = table.name;
-            if (name_padded.size() > 7) name_padded.resize(7);
-            name_padded.resize(8, '\0');
-            memcpy(&buffer[tabl_entry_pos], name_padded.c_str(), 8);
-            memcpy(&buffer[tabl_entry_pos + 8], &table_offsets[table.name], sizeof(uint32_t));
-            tabl_entry_pos += 12;
+            TableInfo info;
+            info.name = table.name;
+            info.offset = currentOffset;
+            info.numEntries = static_cast<uint32_t>(table.entries.size());
+            info.tkeySize = info.numEntries * 8;
 
             // 非MAIN表先写表名
             if (table.name != "MAIN") {
-                buffer.insert(buffer.end(), name_padded.begin(), name_padded.end());
+                currentOffset += 8;
             }
 
-            // TKEY块头
-            buffer.insert(buffer.end(), {'T', 'K', 'E', 'Y'});
-            uint32_t tkey_data_size = static_cast<uint32_t>(table.entries.size() * 8);
-            buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&tkey_data_size), 
-                          reinterpret_cast<uint8_t*>(&tkey_data_size) + sizeof(tkey_data_size));
+            currentOffset += 8; // TKEY块头
+            currentOffset += info.tkeySize; // TKEY数据
 
-            // 计算字符串偏移量和数据
-            std::vector<uint32_t> str_offsets;
-            uint32_t cur_off = 0;
-            std::vector<uint8_t> data_data;
-
+            // 预计算TDAT数据大小
+            uint32_t totalDataSize = 0;
             for (const auto& entry : table.entries) {
-                str_offsets.push_back(cur_off);
-                auto utf16Data = utf8_to_utf16le(entry.value);
-                for (char c : utf16Data) {
-                    data_data.push_back(static_cast<uint8_t>(c));
-                }
-                data_data.push_back(0x00);
-                data_data.push_back(0x00);
-                cur_off += static_cast<uint32_t>(utf16Data.size() + 2);
+                totalDataSize += static_cast<uint32_t>(utf8_to_utf16le(entry.value).size() + 2);
             }
+            info.tdatSize = totalDataSize;
+
+            currentOffset += 8; // TDAT块头
+            currentOffset += info.tdatSize; // TDAT数据
+
+            tableInfos.push_back(info);
+        }
+
+        // 写入版本信息
+        uint16_t version = 4;
+        uint16_t bits = 16;
+        file.write(reinterpret_cast<const char*>(&version), sizeof(version));
+        file.write(reinterpret_cast<const char*>(&bits), sizeof(bits));
+
+        // 写入TABL块头
+        file.write("TABL", 4);
+        file.write(reinterpret_cast<const char*>(&tablEntriesSize), sizeof(tablEntriesSize));
+
+        // 预留TABL条目空间
+        uint32_t tablEntriesPos = static_cast<uint32_t>(file.tellp());
+        for (size_t i = 0; i < tableOrder.size(); ++i) {
+            uint8_t zero[12] = {0};
+            file.write(reinterpret_cast<const char*>(zero), 12);
+        }
+
+        // 第二遍：写入每个表的数据
+        for (size_t i = 0; i < tableInfos.size(); ++i) {
+            const TableInfo& info = tableInfos[i];
+            const GXTTable& table = tables[tableOrder[i]];
+
+            // 非MAIN表先写表名
+            if (info.name != "MAIN") {
+                std::string paddedName = info.name;
+                if (paddedName.size() > 7) paddedName.resize(7);
+                paddedName.resize(8, '\0');
+                file.write(paddedName.c_str(), 8);
+            }
+
+            // 写入TKEY块头
+            file.write("TKEY", 4);
+            file.write(reinterpret_cast<const char*>(&info.tkeySize), sizeof(info.tkeySize));
 
             // 写入TKEY条目
-            for (size_t i = 0; i < table.entries.size(); ++i) {
-                const auto& entry = table.entries[i];
-                
-                buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&str_offsets[i]), 
-                              reinterpret_cast<uint8_t*>(&str_offsets[i]) + sizeof(str_offsets[i]));
-
-                uint32_t hash_val;
+            uint32_t currentDataOffset = 0;
+            for (const auto& entry : table.entries) {
+                // 计算hash值
+                uint32_t hashVal;
                 try {
-                    hash_val = std::stoul(entry.key, nullptr, 16);
+                    hashVal = std::stoul(entry.key, nullptr, 16);
                 } catch (const std::exception&) {
                     std::string normalizedKey = normalizeKey(entry.key);
-                    if (!FindIVTKey(normalizedKey, hash_val)) {
-                        hash_val = calculateGTA4Hash(normalizedKey);
+                    if (!FindIVTKey(normalizedKey, hashVal)) {
+                        hashVal = calculateGTA4Hash(normalizedKey);
                     }
                 }
-                
-                buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&hash_val), 
-                              reinterpret_cast<uint8_t*>(&hash_val) + sizeof(hash_val));
+
+                file.write(reinterpret_cast<const char*>(&currentDataOffset), sizeof(currentDataOffset));
+                file.write(reinterpret_cast<const char*>(&hashVal), sizeof(hashVal));
+
+                // 更新偏移
+                currentDataOffset += static_cast<uint32_t>(utf8_to_utf16le(entry.value).size() + 2);
             }
 
-            // TDAT块头
-            buffer.insert(buffer.end(), {'T', 'D', 'A', 'T'});
-            uint32_t tdat_data_size = static_cast<uint32_t>(data_data.size());
-            buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&tdat_data_size), 
-                          reinterpret_cast<uint8_t*>(&tdat_data_size) + sizeof(tdat_data_size));
+            // 写入TDAT块头
+            file.write("TDAT", 4);
+            file.write(reinterpret_cast<const char*>(&info.tdatSize), sizeof(info.tdatSize));
 
-            // 写入TDAT数据
-            buffer.insert(buffer.end(), data_data.begin(), data_data.end());
+            // 写入TDAT数据（UTF-16字符串）
+            for (const auto& entry : table.entries) {
+                std::string utf16Data = utf8_to_utf16le(entry.value);
+                file.write(utf16Data.c_str(), utf16Data.size());
+                file.write("\0\0", 2); // UTF-16 null终止符
+            }
         }
 
-        // 一次性写入文件
-        std::ofstream file = openFileForWriting(path);
-        if (!file.is_open()) {
-            std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
-            return false;
+        // 回填TABL表项
+        file.seekp(tablEntriesPos);
+        for (size_t i = 0; i < tableInfos.size(); ++i) {
+            const TableInfo& info = tableInfos[i];
+            std::string paddedName = info.name;
+            if (paddedName.size() > 7) paddedName.resize(7);
+            paddedName.resize(8, '\0');
+            file.write(paddedName.c_str(), 8);
+            file.write(reinterpret_cast<const char*>(&info.offset), sizeof(info.offset));
         }
-        file.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+
         file.close();
-        
         return true;
     }
     catch (const std::exception& e) {
