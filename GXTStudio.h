@@ -976,11 +976,6 @@ private:
     QFutureWatcher<SaveResult>* m_autoSaveFutureWatcher;  // 自动保存任务监视器
     static const int AUTOSAVE_DELAY = 3000;  // 自动保存延迟（3秒）
     
-    // 静态保存函数（供 QtConcurrent 使用）
-    static bool saveWHMFromData(const AutoSaveData& data);
-    static bool saveDATFromData(const AutoSaveData& data);
-    static bool saveGXTFromData(const AutoSaveData& data);
-    
     // 智能翻译相关
     SmartTranslator* m_smartTranslator;
     QThread* m_smartTranslatorThread;

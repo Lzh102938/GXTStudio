@@ -2177,12 +2177,26 @@ void GXTStudio::saveFile()
         // 执行保存
         bool success = false;
         try {
+            GXTEditor editor;
             if (isWHM) {
-                success = saveWHMFromData(saveData);
+                success = editor.saveAsWHM(saveData.filePath.toStdString(), saveData.whmEntries);
             } else if (isDAT) {
-                success = saveDATFromData(saveData);
+                success = editor.saveAsDAT(saveData.filePath.toStdString(), saveData.datEntries);
             } else {
-                success = saveGXTFromData(saveData);
+                // GXT/GXT2 文件 - 使用批量添加提高性能
+                editor.setVersion(saveData.version);
+                for (const auto& table : saveData.tables) {
+                    if (!editor.addTable(table.name)) continue;
+                    size_t tableIndex = editor.getTableCount() - 1;
+                    // 批量添加条目（跳过重复检查，O(n) 复杂度）
+                    std::vector<std::pair<std::string, std::string>> entriesBatch;
+                    entriesBatch.reserve(table.entries.size());
+                    for (const auto& entry : table.entries) {
+                        entriesBatch.emplace_back(entry.key, entry.value);
+                    }
+                    editor.addEntriesBatch(tableIndex, entriesBatch);
+                }
+                success = editor.saveToFile(saveData.filePath.toStdString());
             }
         } catch (...) {
             success = false;
@@ -2342,12 +2356,26 @@ void GXTStudio::saveAsFile()
             // 执行保存
             bool success = false;
             try {
+                GXTEditor editor;
                 if (isWHM) {
-                    success = saveWHMFromData(saveData);
+                    success = editor.saveAsWHM(saveData.filePath.toStdString(), saveData.whmEntries);
                 } else if (isDAT) {
-                    success = saveDATFromData(saveData);
+                    success = editor.saveAsDAT(saveData.filePath.toStdString(), saveData.datEntries);
                 } else {
-                    success = saveGXTFromData(saveData);
+                    // GXT/GXT2 文件 - 使用批量添加提高性能
+                    editor.setVersion(saveData.version);
+                    for (const auto& table : saveData.tables) {
+                        if (!editor.addTable(table.name)) continue;
+                        size_t tableIndex = editor.getTableCount() - 1;
+                        // 批量添加条目（跳过重复检查，O(n) 复杂度）
+                        std::vector<std::pair<std::string, std::string>> entriesBatch;
+                        entriesBatch.reserve(table.entries.size());
+                        for (const auto& entry : table.entries) {
+                            entriesBatch.emplace_back(entry.key, entry.value);
+                        }
+                        editor.addEntriesBatch(tableIndex, entriesBatch);
+                    }
+                    success = editor.saveToFile(saveData.filePath.toStdString());
                 }
             } catch (...) {
                 success = false;
@@ -8339,12 +8367,26 @@ void GXTStudio::onAutoSaveTimer()
         // 执行保存
         bool success = false;
         try {
+            GXTEditor editor;
             if (isWHM) {
-                success = saveWHMFromData(saveData);
+                success = editor.saveAsWHM(saveData.filePath.toStdString(), saveData.whmEntries);
             } else if (isDAT) {
-                success = saveDATFromData(saveData);
+                success = editor.saveAsDAT(saveData.filePath.toStdString(), saveData.datEntries);
             } else {
-                success = saveGXTFromData(saveData);
+                // GXT/GXT2 文件 - 使用批量添加提高性能
+                editor.setVersion(saveData.version);
+                for (const auto& table : saveData.tables) {
+                    if (!editor.addTable(table.name)) continue;
+                    size_t tableIndex = editor.getTableCount() - 1;
+                    // 批量添加条目（跳过重复检查，O(n) 复杂度）
+                    std::vector<std::pair<std::string, std::string>> entriesBatch;
+                    entriesBatch.reserve(table.entries.size());
+                    for (const auto& entry : table.entries) {
+                        entriesBatch.emplace_back(entry.key, entry.value);
+                    }
+                    editor.addEntriesBatch(tableIndex, entriesBatch);
+                }
+                success = editor.saveToFile(saveData.filePath.toStdString());
             }
         } catch (...) {
             success = false;
@@ -8521,16 +8563,20 @@ void SaveWorker::saveFile(const SaveTask& task)
             // 设置版本信息
             editor.setVersion(task.tabPtr->version);
 
-            // 直接添加表格和条目数据
+            // 直接添加表格和条目数据 - 使用批量添加提高性能
             for (const auto& table : task.tabPtr->tables) {
                 if (!editor.addTable(table.name)) {
                     continue; // 跳过无效的表
                 }
 
                 size_t tableIndex = editor.getTableCount() - 1;
+                // 批量添加条目（跳过重复检查，O(n) 复杂度）
+                std::vector<std::pair<std::string, std::string>> entriesBatch;
+                entriesBatch.reserve(table.entries.size());
                 for (const auto& entry : table.entries) {
-                    editor.addEntry(tableIndex, entry.key, entry.value);
+                    entriesBatch.emplace_back(entry.key, entry.value);
                 }
+                editor.addEntriesBatch(tableIndex, entriesBatch);
             }
 
             // 执行保存 - 使用Qt的QFile处理路径
@@ -8569,109 +8615,6 @@ void SaveWorker::saveFile(const SaveTask& task)
     
     result.elapsedMs = timer.elapsed();
     emit saveCompleted(result);
-}
-
-// 静态保存函数实现（供 QtConcurrent 使用）
-bool GXTStudio::saveWHMFromData(const AutoSaveData& data)
-{
-    try {
-        QFile file(data.filePath);
-        if (!file.open(QIODevice::WriteOnly)) {
-            qDebug() << "saveWHMFromData - 无法打开文件:" << data.filePath;
-            return false;
-        }
-        
-        QByteArray blob;
-        std::vector<uint32_t> offsets;
-        
-        for (const auto& entry : data.whmEntries) {
-            offsets.push_back(static_cast<uint32_t>(blob.size()));
-            blob.append(entry.text.c_str(), static_cast<int>(entry.text.length()));
-            blob.append('\0');
-        }
-        
-        uint32_t count = static_cast<uint32_t>(data.whmEntries.size());
-        file.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
-        
-        for (size_t i = 0; i < data.whmEntries.size(); ++i) {
-            uint32_t hash = data.whmEntries[i].hash;
-            uint32_t offset = offsets[i];
-            file.write(reinterpret_cast<const char*>(&hash), sizeof(uint32_t));
-            file.write(reinterpret_cast<const char*>(&offset), sizeof(uint32_t));
-        }
-        
-        uint32_t blobSize = static_cast<uint32_t>(blob.size());
-        file.write(reinterpret_cast<const char*>(&blobSize), sizeof(uint32_t));
-        file.write(blob);
-        file.close();
-        
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool GXTStudio::saveDATFromData(const AutoSaveData& data)
-{
-    try {
-        QFile file(data.filePath);
-        if (!file.open(QIODevice::WriteOnly)) {
-            qDebug() << "saveDATFromData - 无法打开文件:" << data.filePath;
-            return false;
-        }
-        
-        QByteArray blob;
-        std::vector<uint32_t> offsets;
-        
-        for (const auto& entry : data.datEntries) {
-            offsets.push_back(static_cast<uint32_t>(blob.size()));
-            blob.append(entry.text.c_str(), static_cast<int>(entry.text.length()));
-            blob.append('\0');
-        }
-        
-        uint32_t count = static_cast<uint32_t>(data.datEntries.size());
-        file.write(reinterpret_cast<const char*>(&count), sizeof(uint32_t));
-        
-        for (size_t i = 0; i < data.datEntries.size(); ++i) {
-            uint32_t hash = data.datEntries[i].hash;
-            uint32_t offset = offsets[i];
-            file.write(reinterpret_cast<const char*>(&hash), sizeof(uint32_t));
-            file.write(reinterpret_cast<const char*>(&offset), sizeof(uint32_t));
-        }
-        
-        uint32_t blobSize = static_cast<uint32_t>(blob.size());
-        file.write(reinterpret_cast<const char*>(&blobSize), sizeof(uint32_t));
-        file.write(blob);
-        file.close();
-        
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool GXTStudio::saveGXTFromData(const AutoSaveData& data)
-{
-    try {
-        GXTEditor editor;
-        editor.setVersion(data.version);
-        
-        for (const auto& table : data.tables) {
-            if (!editor.addTable(table.name)) {
-                continue;
-            }
-            
-            size_t tableIndex = editor.getTableCount() - 1;
-            for (const auto& entry : table.entries) {
-                editor.addEntry(tableIndex, entry.key, entry.value);
-            }
-        }
-        
-        std::string stdPath = data.filePath.toStdString();
-        return editor.saveToFile(stdPath);
-    } catch (...) {
-        return false;
-    }
 }
 
 bool SaveWorker::saveWHMDirectly(FileTab* tab, const std::string& path)

@@ -68,6 +68,9 @@ public:
     bool updateEntry(size_t tableIndex, size_t entryIndex, const std::string& key, const std::string& value);
     bool updateEntryByKey(size_t tableIndex, const std::string& key, const std::string& value);
     
+    // 高性能批量添加条目（跳过重复检查，用于保存流程）
+    void addEntriesBatch(size_t tableIndex, const std::vector<std::pair<std::string, std::string>>& entries);
+    
     // 查找功能
     int findTable(const std::string& tableName) const;
     int findEntry(size_t tableIndex, const std::string& key) const;
@@ -81,6 +84,10 @@ public:
     
     // 保存为文本格式
     bool saveAsText(const std::string& path);                   // 文本格式
+    
+    // WHM/DAT 文件保存方法（内存缓冲 + 一次性写入）
+    bool saveAsWHM(const std::string& path, const std::vector<WHMEntry>& entries);
+    bool saveAsDAT(const std::string& path, const std::vector<DATEntry>& entries);
     
     // 工具函数
     bool isValidKey(const std::string& key) const;
