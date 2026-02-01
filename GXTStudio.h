@@ -967,11 +967,10 @@ private:
     // 异步保存相关
     QThread* m_saveThread;
     SaveWorker* m_saveWorker;
-    QProgressDialog* m_saveProgressDialog;
+    QProgressBar* m_saveProgressBar;  // 保存进度条（位于状态栏中间）
 
     // 自动保存相关
     QToolButton* m_autoSaveButton;  // 自动保存开关按钮
-    QProgressBar* m_autoSaveProgressBar;  // 自动保存进度条
     QTimer* m_autoSaveTimer;  // 自动保存定时器
     bool m_autoSaveEnabled;  // 自动保存是否启用
     QFutureWatcher<SaveResult>* m_autoSaveFutureWatcher;  // 自动保存任务监视器
