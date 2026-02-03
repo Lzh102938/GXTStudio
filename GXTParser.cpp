@@ -1629,3 +1629,498 @@ bool GXTParser::saveWHMRSC(const std::string& filePath, const std::vector<WHMEnt
     addParseLog("WHM/RSC 保存完成");
     return true;
 }
+
+// ===== zlib 压缩/解压实现 (x64) =====
+#ifdef HAVE_ZLIB
+
+std::vector<uint8_t> GXTParser::compressData(const uint8_t* data, size_t length, int level) {
+    if (!data || length == 0) {
+        return std::vector<uint8_t>();
+    }
+
+    // 计算压缩后数据的最大可能大小
+    uLongf compressedSize = compressBound(static_cast<uLong>(length));
+    std::vector<uint8_t> compressed(compressedSize);
+
+    int result = compress2(compressed.data(), &compressedSize, data, static_cast<uLong>(length), level);
+    
+    if (result != Z_OK) {
+        // 压缩失败
+        return std::vector<uint8_t>();
+    }
+
+    // 调整向量大小为实际压缩后的大小
+    compressed.resize(compressedSize);
+    return compressed;
+}
+
+std::vector<uint8_t> GXTParser::compressData(const std::vector<uint8_t>& data, int level) {
+    return compressData(data.data(), data.size(), level);
+}
+
+std::vector<uint8_t> GXTParser::decompressData(const uint8_t* data, size_t length) {
+    if (!data || length == 0) {
+        return std::vector<uint8_t>();
+    }
+
+    // 初始解压缓冲区大小（可以根据需要调整）
+    uLongf uncompressedSize = length * 4;  // 初始猜测：4倍压缩数据大小
+    std::vector<uint8_t> uncompressed;
+    
+    int result;
+    do {
+        uncompressed.resize(uncompressedSize);
+        result = uncompress(uncompressed.data(), &uncompressedSize, data, static_cast<uLong>(length));
+        
+        if (result == Z_BUF_ERROR) {
+            // 缓冲区太小，扩大2倍重试
+            uncompressedSize *= 2;
+            if (uncompressedSize > 100 * 1024 * 1024) {  // 最大100MB限制
+                return std::vector<uint8_t>();  // 解压数据过大
+            }
+        }
+    } while (result == Z_BUF_ERROR);
+
+    if (result != Z_OK) {
+        // 解压失败
+        return std::vector<uint8_t>();
+    }
+
+    // 调整向量大小为实际解压后的大小
+    uncompressed.resize(uncompressedSize);
+    return uncompressed;
+}
+
+std::vector<uint8_t> GXTParser::decompressData(const std::vector<uint8_t>& data) {
+    return decompressData(data.data(), data.size());
+}
+
+std::string GXTParser::getZlibVersion() {
+    return std::string(zlibVersion());
+}
+
+#endif  // HAVE_ZLIB
+
+// ===== GTA4 WHM 增强解析实现 =====
+
+// RSC 头部结构（12字节）- 完全按照Python代码
+struct RSCHeaderEx {
+    uint32_t magic;      // "RSC" + 版本号
+    uint32_t type;       // 资源类型
+    uint32_t flags;      // 页面大小和数量标志
+    
+    // 从 flags 计算虚拟页面大小 - 完全按照Python代码
+    uint32_t getVirtualPageSize() const {
+        uint32_t virtual1xPageSize = (flags >> 11) & 0x0F;
+        return 1 << (virtual1xPageSize + 8);
+    }
+    
+    // 从 flags 计算物理页面大小 - 完全按照Python代码
+    uint32_t getPhysicalPageSize() const {
+        uint32_t physical1xPageSize = (flags >> 26) & 0x0F;
+        return 1 << (physical1xPageSize + 8);
+    }
+    
+    // 计算虚拟内存总大小 - 完全按照Python代码
+    uint32_t getVirtualSize() const {
+        bool virtual1xPageFlag = (flags & 0x00000001) != 0;
+        bool virtual2xPageFlag = (flags & 0x00000002) != 0;
+        bool virtual4xPageFlag = (flags & 0x00000004) != 0;
+        bool virtual8xPageFlag = (flags & 0x00000008) != 0;
+        uint32_t virtual16xPageCount = (flags >> 4) & 0x7F;
+        
+        return getVirtualPageSize() * (
+            (virtual1xPageFlag ? 1 : 0) +
+            (virtual2xPageFlag ? 2 : 0) +
+            (virtual4xPageFlag ? 4 : 0) +
+            (virtual8xPageFlag ? 8 : 0) +
+            (virtual16xPageCount * 16)
+        );
+    }
+    
+    // 计算物理内存总大小 - 完全按照Python代码
+    uint32_t getPhysicalSize() const {
+        bool physical1xPageFlag = (flags & 0x00008000) != 0;
+        bool physical2xPageFlag = (flags & 0x00010000) != 0;
+        bool physical4xPageFlag = (flags & 0x00020000) != 0;
+        bool physical8xPageFlag = (flags & 0x00040000) != 0;
+        uint32_t physical16xPageCount = (flags >> 19) & 0x7F;
+        
+        return getPhysicalPageSize() * (
+            (physical1xPageFlag ? 1 : 0) +
+            (physical2xPageFlag ? 2 : 0) +
+            (physical4xPageFlag ? 4 : 0) +
+            (physical8xPageFlag ? 8 : 0) +
+            (physical16xPageCount * 16)
+        );
+    }
+    
+    // 获取解压后总大小
+    uint32_t getUncompressedSize() const {
+        return getVirtualSize() + getPhysicalSize();
+    }
+};
+
+// FNV-1a 32位哈希（与Python版本完全一致）
+static uint32_t fnv1a_32_hash(const uint8_t* data, size_t len) {
+    const uint32_t FNV_PRIME_32 = 0x01000193;
+    const uint32_t FNV_OFFSET_BASIS_32 = 0x811C9DC5;
+    
+    uint32_t hash = FNV_OFFSET_BASIS_32;
+    for (size_t i = 0; i < len; i++) {
+        hash ^= data[i];
+        hash *= FNV_PRIME_32;
+        hash &= 0xFFFFFFFF;
+    }
+    return hash;
+}
+
+// 验证字符是否为数字（完全按照Python代码）
+static bool validate_digit_char(uint8_t c) {
+    return c >= '0' && c <= '9';
+}
+
+// 验证字符是否为英文字母（完全按照Python代码）
+static bool validate_english_char(uint8_t c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+// 验证字符是否为EFIGS字符（完全按照Python代码）
+static bool validate_efigs_char(uint8_t c) {
+    return validate_english_char(c) || c >= 0xC0;
+}
+
+// 验证字符是否为URL字符（完全按照Python代码）
+static bool validate_url_char(uint8_t c) {
+    return validate_english_char(c) || validate_digit_char(c) ||
+           c == '.' || c == '%' || c == '@' || c == '-' || c == '_';
+}
+
+// 验证是否为URL（完全按照Python代码）
+static bool validate_url(const uint8_t* data, size_t len) {
+    if (len == 0) return false;
+    
+    // 检查所有字符是否都是URL合法字符
+    for (size_t i = 0; i < len; i++) {
+        if (!validate_url_char(data[i])) {
+            return false;
+        }
+    }
+    
+    // 查找第一个和最后一个点
+    int first_dot_pos = -1;
+    int last_dot_pos = -1;
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] == '.') {
+            if (first_dot_pos == -1) first_dot_pos = (int)i;
+            last_dot_pos = (int)i;
+        }
+    }
+    
+    // 验证URL格式：必须包含点号，且不在开头或结尾
+    return (first_dot_pos != -1 && first_dot_pos != 0 && 
+            last_dot_pos != (int)(len - 1));
+}
+
+// 验证字符串（完全按照Python代码）
+static bool validate_string(const uint8_t* data, size_t len) {
+    if (len == 0) return false;
+    
+    // 检查是否包含EFIGS字符
+    bool has_efigs = false;
+    for (size_t i = 0; i < len; i++) {
+        if (validate_efigs_char(data[i])) {
+            has_efigs = true;
+            break;
+        }
+    }
+    
+    // 包含EFIGS字符且不是URL
+    return has_efigs && !validate_url(data, len);
+}
+
+// 尝试添加字符串（完全按照Python代码）
+static void try_append_string(std::vector<WHMEntry>& container,
+                             const uint8_t* ptr, size_t len,
+                             std::set<uint32_t>& hashes) {
+    if (!ptr || len == 0) return;
+    
+    if (validate_string(ptr, len)) {
+        uint32_t hash_val = fnv1a_32_hash(ptr, len);
+        if (hashes.find(hash_val) == hashes.end()) {
+            hashes.insert(hash_val);
+            
+            WHMEntry entry;
+            entry.hash = hash_val;
+            entry.offset = 0;
+            entry.text = std::string(reinterpret_cast<const char*>(ptr), len);
+            container.push_back(entry);
+        }
+    }
+}
+
+// 解析pgPtr指针指向的CHtmlNode（完全按照Python代码的locate方法）
+static const CHtmlNode* locate_html_node(const uint8_t* block, size_t blockSize, pgPtr ptr) {
+    if (!block || ptr.t() != PtrElementType::Cpu_Type) {
+        return nullptr;
+    }
+    
+    uint32_t offset = ptr.o();
+    if (offset + sizeof(CHtmlNode) > blockSize) {
+        return nullptr;
+    }
+    
+    return reinterpret_cast<const CHtmlNode*>(block + offset);
+}
+
+// 解析pgString指针指向的字符串（完全按照Python代码的locate_str方法）
+static std::string locate_string(const uint8_t* block, size_t blockSize, pgString ptr) {
+    if (!block || ptr.t() != PtrElementType::Cpu_Type) {
+        return "";
+    }
+    
+    uint32_t offset = ptr.o();
+    if (offset >= blockSize) {
+        return "";
+    }
+    
+    // 查找null终止符
+    size_t end = offset;
+    while (end < blockSize && block[end] != 0) {
+        end++;
+    }
+    
+    if (end == blockSize) {
+        return "";  // 没找到终止符
+    }
+    
+    return std::string(reinterpret_cast<const char*>(block + offset), end - offset);
+}
+
+// 解析pgObjectPtrArray数组（完全按照Python代码的get_span方法）
+static std::vector<pgPtr> get_ptr_array(const uint8_t* block, size_t blockSize, pgObjectPtrArray arr) {
+    std::vector<pgPtr> result;
+    
+    if (!block || arr.t() != PtrElementType::Cpu_Type) {
+        return result;
+    }
+    
+    uint32_t offset = arr.o();
+    size_t num_elements = std::max((uint16_t)arr.count, (uint16_t)arr.size);
+    
+    if (offset + num_elements * sizeof(pgPtr) > blockSize) {
+        num_elements = arr.count;
+        if (offset + num_elements * sizeof(pgPtr) > blockSize) {
+            return result;  // 越界
+        }
+    }
+    
+    const pgPtr* elements = reinterpret_cast<const pgPtr*>(block + offset);
+    for (size_t i = 0; i < num_elements; i++) {
+        result.push_back(elements[i]);
+    }
+    
+    return result;
+}
+
+// 递归提取HTML节点中的字符串（完全按照Python代码的ExtractNodeStrings方法）
+static void extract_node_strings(const CHtmlNode* node,
+                                 const uint8_t* block, size_t blockSize,
+                                 std::vector<WHMEntry>& container,
+                                 std::set<uint32_t>& hashes,
+                                 std::function<void(const std::string&)> logCallback) {
+    if (!node) return;
+    
+    // 递归处理子节点
+    std::vector<pgPtr> children = get_ptr_array(block, blockSize, node->m_children);
+    for (const pgPtr& child_ptr : children) {
+        const CHtmlNode* child_node = locate_html_node(block, blockSize, child_ptr);
+        if (child_node) {
+            extract_node_strings(child_node, block, blockSize, container, hashes, logCallback);
+        }
+    }
+    
+    // 根据节点类型处理
+    HtmlNodeType nodeType = static_cast<HtmlNodeType>(node->m_eNodeType);
+    
+    if (nodeType == HtmlNodeType::Node_HtmlDataNode) {
+        // 处理数据节点
+        const CHtmlDataNode* data_node = reinterpret_cast<const CHtmlDataNode*>(node);
+        std::string data = locate_string(block, blockSize, data_node->m_pData);
+        if (!data.empty()) {
+            try_append_string(container, 
+                             reinterpret_cast<const uint8_t*>(data.c_str()), 
+                             data.length(), hashes);
+        }
+    } else if (nodeType == HtmlNodeType::Node_HtmlNode ||
+               nodeType == HtmlNodeType::Node_HtmlTableNode ||
+               nodeType == HtmlNodeType::Node_HtmlTableElementNode) {
+        // 这些节点类型不包含文本数据，跳过
+    } else {
+        if (logCallback) {
+            logCallback("警告: 未处理的节点类型 " + std::to_string(nodeType));
+        }
+    }
+}
+
+// 从HTML文档提取字符串（完全按照Python代码的ExtractWhmStrings方法）
+static void extract_whm_strings(const uint8_t* block, size_t blockSize,
+                                std::vector<WHMEntry>& container,
+                                std::set<uint32_t>& hashes,
+                                std::function<void(const std::string&)> logCallback) {
+    if (!block || blockSize < sizeof(CHtmlDocument)) {
+        if (logCallback) logCallback("警告: 数据块太小，无法解析HTML文档");
+        return;
+    }
+    
+    try {
+        const CHtmlDocument* doc = reinterpret_cast<const CHtmlDocument*>(block);
+        const CHtmlNode* body_node = locate_html_node(block, blockSize, doc->m_pBody);
+        
+        if (body_node) {
+            extract_node_strings(body_node, block, blockSize, container, hashes, logCallback);
+        } else {
+            if (logCallback) logCallback("警告: 无法找到body节点");
+        }
+    } catch (const std::exception& e) {
+        if (logCallback) logCallback(std::string("解析文档结构时出错: ") + e.what());
+    }
+}
+
+// 增强的WHM解析（GTA4格式）- 完全按照Python代码
+bool GXTParser::parseWHMEx(const std::string& filePath, std::vector<WHMEntry>& outEntries) const {
+    addParseLog("开始解析 WHM 文件 (增强版): " + filePath);
+    
+    FILE* f = nullptr;
+    fopen_s(&f, filePath.c_str(), "rb");
+    if (!f) {
+        addParseLog("无法打开文件");
+        return false;
+    }
+    
+    // 读取RSC头部
+    RSCHeaderEx header;
+    if (fread(&header, sizeof(header), 1, f) != 1) {
+        addParseLog("无法读取RSC头部");
+        fclose(f);
+        return false;
+    }
+    
+    // 检查magic - "RSC" + 版本号 (小端序: R=0x52, S=0x53, C=0x43)
+    // magic = "RSC\x05" -> [0x52, 0x53, 0x43, 0x05] -> 0x05435352 (小端uint32_t)
+    uint32_t rscMagic = header.magic & 0x00FFFFFF;
+    if (rscMagic != 0x00435352) {  // 'R'|'S'<<8|'C'<<16 = 0x52|0x53<<8|0x43<<16 = 0x00435352
+        char actualMagic[4];
+        memcpy(actualMagic, &header.magic, 4);
+        addParseLog(std::string("不是有效的RSC格式文件，Magic: ") + 
+                   std::to_string((int)actualMagic[0]) + " " +
+                   std::to_string((int)actualMagic[1]) + " " +
+                   std::to_string((int)actualMagic[2]) + " " +
+                   std::to_string((int)actualMagic[3]));
+        fclose(f);
+        return false;
+    }
+    
+    char magicStr[5] = {};
+    memcpy(magicStr, &header.magic, 4);
+    addParseLog("RSC Magic: " + std::string(magicStr));
+    addParseLog("RSC Version: " + std::to_string((header.magic >> 24) & 0xFF));
+    
+    char typeHex[16], flagsHex[16];
+    snprintf(typeHex, sizeof(typeHex), "%08X", header.type);
+    snprintf(flagsHex, sizeof(flagsHex), "%08X", header.flags);
+    addParseLog(std::string("RSC Type: 0x") + typeHex);
+    addParseLog(std::string("RSC Flags: 0x") + flagsHex);
+    
+    // 计算解压大小 - 完全按照Python代码
+    uint32_t virtualSize = header.getVirtualSize();
+    uint32_t physicalSize = header.getPhysicalSize();
+    uint32_t uncompressedSize = header.getUncompressedSize();
+    
+    addParseLog("Virtual Size: " + std::to_string(virtualSize));
+    addParseLog("Physical Size: " + std::to_string(physicalSize));
+    addParseLog("Total Uncompressed Size: " + std::to_string(uncompressedSize));
+    
+    // 获取文件大小和压缩数据大小
+    fseek(f, 0, SEEK_END);
+    long fileSize = ftell(f);
+    fseek(f, sizeof(RSCHeaderEx), SEEK_SET);
+    
+    uint32_t compressedSize = fileSize - sizeof(RSCHeaderEx);
+    addParseLog("Compressed Size: " + std::to_string(compressedSize));
+    
+    // 读取压缩数据
+    std::vector<uint8_t> compressed(compressedSize);
+    if (fread(compressed.data(), 1, compressedSize, f) != compressedSize) {
+        addParseLog("无法读取压缩数据");
+        fclose(f);
+        return false;
+    }
+    fclose(f);
+    
+    // 解压数据 - 完全按照Python代码的UnpackWhm方法
+    std::vector<uint8_t> uncompressed;
+    uncompressed.resize(uncompressedSize);
+    
+#ifdef HAVE_ZLIB
+    // 使用zlib解压 - 完全按照Python代码的zlib.decompress
+    uLongf destLen = uncompressedSize;
+    int zResult = uncompress(uncompressed.data(), &destLen, 
+                             compressed.data(), compressedSize);
+    
+    if (zResult != Z_OK) {
+        addParseLog("zlib解压失败，错误码: " + std::to_string(zResult));
+        return false;
+    }
+    
+    // 检查解压后大小 - 完全按照Python代码
+    if (destLen != uncompressedSize) {
+        addParseLog("警告: 解压大小不匹配，预期 " + std::to_string(uncompressedSize) + 
+                   "，实际 " + std::to_string(destLen));
+        // 调整缓冲区大小以匹配实际数据
+        if (destLen < uncompressedSize) {
+            // 如果解压数据小于预期，填充零
+            uncompressed.resize(uncompressedSize);
+            memset(uncompressed.data() + destLen, 0, uncompressedSize - destLen);
+        } else {
+            // 如果解压数据大于预期，截断
+            uncompressed.resize(destLen);
+        }
+    }
+    addParseLog("zlib解压成功");
+#else
+    // 使用Qt解压 - 需要添加4字节头部（大端大小）
+    QByteArray qtCompressed;
+    qtCompressed.reserve(4 + compressedSize);
+    // 添加大端格式的解压大小头部
+    qtCompressed.append(static_cast<char>((uncompressedSize >> 24) & 0xFF));
+    qtCompressed.append(static_cast<char>((uncompressedSize >> 16) & 0xFF));
+    qtCompressed.append(static_cast<char>((uncompressedSize >> 8) & 0xFF));
+    qtCompressed.append(static_cast<char>(uncompressedSize & 0xFF));
+    qtCompressed.append(reinterpret_cast<const char*>(compressed.data()), compressedSize);
+    
+    QByteArray uncompressedData = qUncompress(qtCompressed);
+    if (uncompressedData.isEmpty()) {
+        addParseLog("Qt解压失败");
+        return false;
+    }
+    uncompressed.resize(uncompressedData.size());
+    memcpy(uncompressed.data(), uncompressedData.constData(), uncompressedData.size());
+#endif
+    
+    addParseLog("解压成功，大小: " + std::to_string(uncompressed.size()) + " 字节");
+    
+    // 检查解压后大小 - 完全按照Python代码
+    if (uncompressed.size() != uncompressedSize) {
+        addParseLog("警告: 解压后大小不匹配，预期 " + std::to_string(uncompressedSize) + 
+                   "，实际 " + std::to_string(uncompressed.size()));
+    }
+    
+    // 提取HTML文本 - 完全按照Python代码的ExtractWhmStrings方法
+    outEntries.clear();
+    std::set<uint32_t> seenHashes;
+    extract_whm_strings(uncompressed.data(), uncompressed.size(), outEntries, seenHashes, g_logCallback);
+    
+    addParseLog("WHM解析完成，提取条目数: " + std::to_string(outEntries.size()));
+    return !outEntries.empty();
+}

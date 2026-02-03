@@ -604,17 +604,22 @@ public slots:
                 // 解析WHM文件
                 result.whmEntries.clear();
                 result.isWHM = true;
-                result.isWHMRSC = false;
-
-                // 优先尝试简单 WHM 格式
-                result.success = parser.parseWHM(task.narrowPath, result.whmEntries);
+                result.isWHMRSC = task.isWHMRSC;
                 result.version = GXTVersion::UNKNOWN;
 
-                // 如果简单 WHM 解析失败，且检测为 RSC 格式，则尝试 RSC 解析
-                if (!result.success && task.isWHMRSC) {
-                    qDebug() << "简单WHM解析失败，尝试RSC格式";
-                    result.isWHMRSC = true;
-                    result.success = parser.parseWHMRSC(task.narrowPath, result.whmEntries);
+                if (task.isWHMRSC) {
+                    // RSC格式（压缩的HTML文档）- 使用增强解析器
+                    qDebug() << "检测到RSC格式，使用增强WHM解析器";
+                    result.success = parser.parseWHMEx(task.narrowPath, result.whmEntries);
+                    
+                    // 如果增强解析器失败，回退到旧版RSC解析器
+                    if (!result.success) {
+                        qDebug() << "增强解析器失败，尝试旧版RSC解析器";
+                        result.success = parser.parseWHMRSC(task.narrowPath, result.whmEntries);
+                    }
+                } else {
+                    // 简单 WHM 格式
+                    result.success = parser.parseWHM(task.narrowPath, result.whmEntries);
                 }
 
                 if (!result.success) {
@@ -1255,7 +1260,7 @@ public:
                     if (col == KeyColumn) {
                         // 缓存格式化结果
                         static thread_local QString hashStr;
-                        hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0'));
+                        hashStr = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0');
                         return hashStr;
                     } else {
                         // 安全地转换字符串，防止内存异常
@@ -1294,7 +1299,7 @@ public:
                     if (col == KeyColumn) {
                         // 缓存格式化结果
                         static thread_local QString hashStr;
-                        hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0'));
+                        hashStr = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0');
                         return hashStr;
                     } else {
                         // 安全地转换字符串，防止内存异常
@@ -1446,14 +1451,14 @@ public:
                     if (row < static_cast<int>(m_tab->whmEntries.size())) {
                         const auto& entry = m_tab->whmEntries[row];
                         tooltip = col == KeyColumn ? 
-                                  QString("0x%1").arg(entry.hash, 8, 16, QChar('0')) :
+                                  "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') :
                                   QString::fromStdString(entry.text);
                     }
                 } else if (m_tab->isDAT) {
                     if (row < static_cast<int>(m_tab->datEntries.size())) {
                         const auto& entry = m_tab->datEntries[row];
                         tooltip = col == KeyColumn ? 
-                                  QString("0x%1").arg(entry.hash, 8, 16, QChar('0')) :
+                                  "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') :
                                   QString::fromStdString(entry.text);
                     }
                 } else if (m_tab->currentTableIndex >= 0 && 

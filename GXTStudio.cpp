@@ -2085,7 +2085,7 @@ void GXTStudio::openFile()
 {
     QStringList fileNames = QFileDialog::getOpenFileNames(this,
         "打开GXT文件", "", 
-        "GXT文件 (*.gxt *.gxt2 *.dat);;所有文件 (*.*)");
+        "GXT文件 (*.gxt *.gxt2 *.dat *.whm);;所有文件 (*.*)");
     
     if (!fileNames.isEmpty()) {
         for (const QString& fileName : fileNames) {
@@ -2502,7 +2502,7 @@ void GXTStudio::exportCurrentFile()
                     if (i >= currentTab->whmEntries.size() || currentTab->whmEntries.empty()) break;
                     
                     const auto& entry = currentTab->whmEntries[i];
-                    QString hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0'));
+                    QString hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0')).toUpper();
                     QString line = QString("%1=%2").arg(hashStr, QString::fromStdString(entry.text));
                     allStream << line << Qt::endl;
                     
@@ -3400,8 +3400,8 @@ void GXTStudio::performSearch(const QString& searchText)
             if (i >= tab->whmEntries.size() || tab->whmEntries.empty()) break;
             
             const auto& entry = tab->whmEntries[i];
-            QString text = QString("0x%1 %2").arg(entry.hash, 8, 16, QChar('0'))
-                           .arg(QString::fromStdString(entry.text));
+            QString hashStr = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0');
+            QString text = hashStr + " " + QString::fromStdString(entry.text);
             
             bool matched = false;
             if (useRegex) {
@@ -3620,7 +3620,7 @@ void GXTStudio::jumpToMatch(int matchIndex)
         }
         
         const auto& entry = tab->whmEntries[targetEntryIndex];
-        keyText = QString("0x%1").arg(entry.hash, 8, 16, QChar('0'));
+        keyText = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0');
         valueText = QString::fromStdString(entry.text);
     } else {
         tableName = QString::fromStdString(tab->tables[targetTableIndex].name);
@@ -6558,44 +6558,44 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         tab.keyEdit = keyEdit;
         tab.valueEdit = valueEdit;
         tab.addEntryButton = addEntryButton;
-        
-        // 创建文本渲染预览窗格
-        TextRenderWidget* textRenderWidget = new TextRenderWidget();
-        textRenderWidget->setMaximumHeight(40);
-        textRenderWidget->setMinimumHeight(40);
-        rightLayout->addWidget(textRenderWidget);
-        
-        // 设置GTA版本 - 根据当前文件的版本设置正确的颜色映射
-        int versionNum = 0;
-        if (tab.isDAT) {
-            // DAT文件使用GTA IV的渲染方式
-            versionNum = 4;
-        } else {
-            switch (tab.version) {
-                case GXTVersion::GTA_III:
-                    versionNum = 0;
-                    break;
-                case GXTVersion::GTA_VC:
-                    versionNum = 1;
-                    break;
-                case GXTVersion::GTA_SA:
-                    versionNum = 2;
-                    break;
-                case GXTVersion::GTA_IV:
-                    versionNum = 4;
-                    break;
-                case GXTVersion::GXT2:
-                default:
-                    versionNum = 2; // 默认为SA版本
-                    break;
-            }
-        }
-        textRenderWidget->setGtaVersion(versionNum);
-        
-        // 保存渲染窗格引用
-        tab.textRenderWidget = textRenderWidget;
-    }
+    }  // 结束 if (!tab.isWHM)
 
+    // 创建文本渲染预览窗格 - 所有文件类型都支持
+    TextRenderWidget* textRenderWidget = new TextRenderWidget();
+    textRenderWidget->setMaximumHeight(40);
+    textRenderWidget->setMinimumHeight(40);
+    rightLayout->addWidget(textRenderWidget);
+    
+    // 设置GTA版本 - 根据当前文件的版本设置正确的颜色映射
+    int versionNum = 0;
+    if (tab.isDAT || tab.isWHM || tab.isWHMRSC) {
+        // DAT文件和WHM文件（RSC格式）使用GTA IV的渲染方式
+        versionNum = 4;
+    } else {
+        switch (tab.version) {
+            case GXTVersion::GTA_III:
+                versionNum = 0;
+                break;
+            case GXTVersion::GTA_VC:
+                versionNum = 1;
+                break;
+            case GXTVersion::GTA_SA:
+                versionNum = 2;
+                break;
+            case GXTVersion::GTA_IV:
+                versionNum = 4;
+                break;
+            case GXTVersion::GXT2:
+            default:
+                versionNum = 2; // 默认为SA版本
+                break;
+        }
+    }
+    textRenderWidget->setGtaVersion(versionNum);
+    
+    // 保存渲染窗格引用
+    tab.textRenderWidget = textRenderWidget;
+    
     
     // 将左右面板添加到分割器
     splitter->addWidget(leftPanel);
@@ -9165,7 +9165,7 @@ void GXTStudio::onExecuteTranslate()
                 
                 const auto& entry = currentTab->whmEntries[i];
                 QString value = QString::fromStdString(entry.text);
-                QString key = QString("0x%1").arg(entry.hash, 8, 16, QChar('0'));
+                QString key = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0');
                 
                 // 跳过空值和过长数据
                 if (!value.trimmed().isEmpty() && value.length() <= 10000 && key.length() <= 1000) {
