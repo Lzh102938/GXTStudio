@@ -1,64 +1,53 @@
 #pragma once
 
-#include <QWidget>
-#include <QPixmap>
-#include <QCache>
-#include <QPoint>
+#include <QPlainTextEdit>
+#include <QSet>
 #include "CharTableParser.h"
 
-class CharTableWidget : public QWidget {
+class QLabel;
+
+class CharTableWidget : public QPlainTextEdit {
     Q_OBJECT
 public:
     explicit CharTableWidget(QWidget* parent = nullptr);
-    ~CharTableWidget();
-    void setData(const CharTableData& data);
-    void setCellSize(int size);
-    int cellSize() const { return m_cellSize; }
-    QSize minimumSizeHint() const override;
     
-    // 获取当前字符表数据
-    const CharTableData& data() const { return m_data; }
-    CharTableData& data() { return m_data; }
+    // 加载字符表数据
+    void setData(const CharTableData& data);
+    
+    // 获取当前数据
+    CharTableData data() const { return m_data; }
+    
+    // 获取当前行列位置（从1开始，像记事本一样）
+    void getCursorPosition(int& line, int& column) const;
+    
+    // 设置提示标签
+    void setHintLabel(QLabel* label);
+
+signals:
+    // 光标位置变化信号
+    void cursorPositionChanged(int line, int column);
+    // 字符数超限信号
+    void maxCharsReached();
+    // 重复字符信号
+    void duplicateChar(QChar ch);
 
 protected:
-    void paintEvent(QPaintEvent* ev) override;
-    void mousePressEvent(QMouseEvent* event) override;
-    void mouseMoveEvent(QMouseEvent* event) override;
-    void mouseReleaseEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
-    void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
 
 private:
-    // 字符缓存相关
-    struct CacheKey {
-        uint16_t charCode;
-        int cellSize;
-        bool operator==(const CacheKey& other) const {
-            return charCode == other.charCode && cellSize == other.cellSize;
-        }
-    };
-
-    // 声明友元函数
-    friend uint qHash(const CacheKey& key, uint seed);
-
-    QPixmap* getOrCreateCharPixmap(uint16_t charCode);
-    void copySelectedCells();
-    void editCell(const QPoint& cellPos);
-    QPoint getCellFromPos(const QPoint& pos);
-    void normalizeSelection();
-    void clearSelection();
-
     CharTableData m_data;
-    int m_cellSize = 48;
-    QFont m_charFont;
-    QFont m_scaledFont;
-    bool m_useScaledFont = false;
-
-    // 极致优化：轻量级字符缓存系统（只缓存最近使用的字符）
-    QCache<CacheKey, QPixmap> m_charCache;
-
-    // 选择相关
-    bool m_isSelecting = false;
-    QPoint m_selectionStart = QPoint(-1, -1);
-    QPoint m_selectionEnd = QPoint(-1, -1);
+    int m_cellSize = 0;
+    static const int COLS_PER_LINE = 64;
+    static const int MAX_ROWS = 64;
+    static const int MAX_CHARS = COLS_PER_LINE * MAX_ROWS;  // 64x64 = 4096
+    bool m_formatting = false;  // 防止递归
+    bool m_maxReached = false;  // 是否已达到最大字符数
+    QLabel* m_hintLabel = nullptr;  // 提示标签
+    QSet<QChar> m_existingChars;  // 已存在的字符集合，用于查重
+    
+    void emitCursorPosition();
+    void reformatText();  // 重新格式化文本，确保每行64字符
+    void updateHint();  // 更新提示信息
+    void rebuildCharSet();  // 重建字符集合
 };

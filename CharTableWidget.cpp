@@ -1,381 +1,306 @@
 #include "CharTableWidget.h"
 #include <QPainter>
 #include <QFontMetrics>
-#include <QDebug>
-#include <QPaintEvent>
-#include <QRegion>
-#include <QMouseEvent>
+#include <QScrollBar>
+#include <QTextBlock>
 #include <QKeyEvent>
-#include <QApplication>
-#include <QClipboard>
-#include <QInputDialog>
-#include <QMessageBox>
-
-// CacheKey 的哈希函数实现
-uint qHash(const CharTableWidget::CacheKey& key, uint seed) {
-    return qHash(key.charCode, seed) ^ qHash(key.cellSize, seed);
-}
+#include <QMouseEvent>
+#include <QLabel>
+#include <QTimer>
+#include <algorithm>
 
 CharTableWidget::CharTableWidget(QWidget* parent)
-    : QWidget(parent)
+    : QPlainTextEdit(parent)
 {
-    // 极致优化：不使用双缓冲，减少内存占用
-    setAttribute(Qt::WA_OpaquePaintEvent, true);
-    setAttribute(Qt::WA_NoSystemBackground, true);
-
-    // 设置焦点策略
-    setFocusPolicy(Qt::StrongFocus);
-
-    // 使用更轻量的字体
-    m_charFont = QFont("Arial", 18);
-    m_charFont.setWeight(QFont::Normal);
-    m_charFont.setStyleHint(QFont::SansSerif, QFont::PreferBitmap);
-
-    // 极致优化：只缓存最近使用的500个字符，大幅减少内存占用
-    m_charCache.setMaxCost(500);
+    // 基础设置 - 优化性能
+    setLineWrapMode(QPlainTextEdit::NoWrap);
+    setUndoRedoEnabled(false);
+    setCenterOnScroll(false);
+    
+    // 设置微软雅黑字体
+    QFont font("Microsoft YaHei", 11);
+    font.setStyleHint(QFont::SansSerif);
+    setFont(font);
+    
+    // 计算单元格大小
+    QFontMetrics fm(font);
+    m_cellSize = fm.horizontalAdvance('W');
+    
+    // 移除所有边距
+    setViewportMargins(0, 0, 0, 0);
+    document()->setDocumentMargin(0);
+    
+    // 优化文本选项
+    QTextOption option;
+    option.setWrapMode(QTextOption::NoWrap);
+    option.setUseDesignMetrics(false);  // 使用整数度量，更快
+    document()->setDefaultTextOption(option);
+    
+    // 使用默认绘制，不自定义 paintEvent 以利用 Qt 的优化
+    
+    // 设置样式
+    setStyleSheet(R"(
+        QPlainTextEdit {
+            background-color: white;
+            border: 1px solid #ccc;
+            selection-background-color: #3399ff;
+            padding: 0px;
+        }
+    )");
+    
+    // 连接 Qt 自带的光标位置变化信号
+    connect(this, &QPlainTextEdit::cursorPositionChanged, [this]() {
+        emitCursorPosition();
+    });
+    
+    // 连接文本变化信号，强制格式化
+    connect(this, &QPlainTextEdit::textChanged, [this]() {
+        reformatText();
+    });
 }
 
-CharTableWidget::~CharTableWidget()
+void CharTableWidget::getCursorPosition(int& line, int& column) const
 {
-    m_charCache.clear();
+    QTextCursor cursor = textCursor();
+    line = cursor.blockNumber() + 1;  // 从1开始
+    column = cursor.positionInBlock() + 1;  // 从1开始
+}
+
+void CharTableWidget::emitCursorPosition()
+{
+    int line, column;
+    getCursorPosition(line, column);
+    emit cursorPositionChanged(line, column);
+}
+
+void CharTableWidget::keyPressEvent(QKeyEvent* event)
+{
+    // 禁止回车键
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        event->accept();
+        return;
+    }
+    
+    // 检查是否是输入字符（排除功能键）
+    if (!event->text().isEmpty() && event->text()[0].isPrint()) {
+        QChar inputChar = event->text()[0];
+        
+        // 检查是否是ASCII字符 (0-127)
+        if (inputChar.unicode() < 128) {
+            if (m_hintLabel) {
+                m_hintLabel->setText("不允许输入ASCII字符");
+                m_hintLabel->setStyleSheet("color: red; font-size: 12px;");
+                m_hintLabel->repaint();
+            }
+            event->accept();
+            return;
+        }
+        
+        // 检查当前字符数
+        QString text = toPlainText();
+        text.remove('\n');
+        int currentChars = text.length();
+        
+        // 如果已达到最大字符数，禁止输入
+        if (currentChars >= MAX_CHARS) {
+            updateHint();
+            emit maxCharsReached();
+            event->accept();
+            return;
+        }
+        
+        // 检查是否输入重复字符
+        if (m_existingChars.contains(inputChar)) {
+            if (m_hintLabel) {
+                m_hintLabel->setText(QString("字符 '%1' 已存在，不允许重复").arg(inputChar));
+                m_hintLabel->setStyleSheet("color: red; font-size: 12px;");
+                m_hintLabel->repaint();  // 强制刷新
+            }
+            emit duplicateChar(inputChar);
+            event->accept();
+            return;
+        }
+    }
+    
+    // 其他按键正常处理
+    QPlainTextEdit::keyPressEvent(event);
+    
+    // 如果输入了有效字符，延迟清除错误提示
+    if (!event->text().isEmpty() && event->text()[0].isPrint()) {
+        QChar inputChar = event->text()[0];
+        if (!m_existingChars.contains(inputChar) && m_hintLabel) {
+            QTimer::singleShot(2000, this, [this]() {
+                updateHint();
+            });
+        }
+    }
+}
+
+void CharTableWidget::mousePressEvent(QMouseEvent* event)
+{
+    QPlainTextEdit::mousePressEvent(event);
+    emitCursorPosition();
+}
+
+void CharTableWidget::setHintLabel(QLabel* label)
+{
+    m_hintLabel = label;
+}
+
+void CharTableWidget::updateHint()
+{
+    if (!m_hintLabel) return;
+    
+    QString text = toPlainText();
+    text.remove('\n');
+    int currentChars = text.length();
+    
+    if (currentChars >= MAX_CHARS) {
+        m_hintLabel->setText(QString("字符数最多 %1 x %2 (已达上限)").arg(COLS_PER_LINE).arg(MAX_ROWS));
+        m_hintLabel->setStyleSheet("color: red; font-size: 12px;");
+        m_maxReached = true;
+    } else {
+        m_hintLabel->clear();
+        m_hintLabel->setStyleSheet("color: #666; font-size: 12px;");
+        m_maxReached = false;
+    }
+}
+
+void CharTableWidget::rebuildCharSet()
+{
+    m_existingChars.clear();
+    QString text = toPlainText();
+    for (const QChar& ch : text) {
+        if (ch != '\n') {
+            m_existingChars.insert(ch);
+        }
+    }
+}
+
+void CharTableWidget::reformatText()
+{
+    if (m_formatting) return;  // 防止递归
+    m_formatting = true;
+    
+    QString text = toPlainText();
+    // 移除所有换行符，合并成一行
+    text.remove('\n');
+    
+    // 检测并移除重复字符（只保留第一个出现的）
+    QString deduped;
+    deduped.reserve(text.length());
+    QSet<QChar> seen;
+    bool hasDuplicate = false;
+    QChar dupChar;
+    
+    for (const QChar& ch : text) {
+        if (seen.contains(ch)) {
+            hasDuplicate = true;
+            dupChar = ch;
+            continue;  // 跳过重复字符
+        }
+        seen.insert(ch);
+        deduped.append(ch);
+    }
+    
+    // 显示重复字符提示
+    if (hasDuplicate && m_hintLabel) {
+        m_hintLabel->setText(QString("字符 '%1' 已存在，不允许重复").arg(dupChar));
+        m_hintLabel->setStyleSheet("color: red; font-size: 12px;");
+        emit duplicateChar(dupChar);
+        QTimer::singleShot(2000, this, [this]() {
+            updateHint();
+        });
+    }
+    
+    text = deduped;
+    
+    // 限制字符数不超过 64x64
+    if (text.length() > MAX_CHARS) {
+        text = text.left(MAX_CHARS);
+        emit maxCharsReached();
+    }
+    
+    // 重新按每64字符分行
+    QString formatted;
+    for (int i = 0; i < text.length(); ++i) {
+        formatted.append(text[i]);
+        if ((i + 1) % COLS_PER_LINE == 0 && i < text.length() - 1) {
+            formatted.append('\n');
+        }
+    }
+    
+    // 获取当前光标位置
+    QTextCursor cursor = textCursor();
+    int oldPos = cursor.position();
+    
+    // 只有在文本确实变化时才更新
+    if (formatted != toPlainText()) {
+        setPlainText(formatted);
+        
+        // 恢复光标位置（尽量保持在原位置）
+        cursor.setPosition(qMin(oldPos, formatted.length()));
+        setTextCursor(cursor);
+    }
+    
+    // 重建字符集合
+    rebuildCharSet();
+    
+    // 更新提示
+    updateHint();
+    
+    m_formatting = false;
 }
 
 void CharTableWidget::setData(const CharTableData& data)
 {
     m_data = data;
-    int fs = qMax(10, m_cellSize / 2);
-    m_charFont.setPointSize(fs);
-
-    // 预计算字体缩放
-    QFontMetrics fm(m_charFont);
-    QString sampleText = QChar(0x4E00);
-    QSizeF sampleSize = fm.size(Qt::TextSingleLine, sampleText);
-    bool needsScaling = (sampleSize.width() > m_cellSize - 6 || sampleSize.height() > m_cellSize - 6);
-    if (needsScaling) {
-        qreal scale = qMin((m_cellSize - 6) / sampleSize.width(), (m_cellSize - 6) / sampleSize.height());
-        int newFs = qMax(8, int(m_charFont.pointSizeF() * scale));
-        m_scaledFont = m_charFont;
-        m_scaledFont.setPointSize(newFs);
-        m_useScaledFont = true;
-    } else {
-        m_scaledFont = m_charFont;
-        m_useScaledFont = false;
-    }
-
-    clearSelection();
-    m_charCache.clear();
-    updateGeometry();
-    update();
-}
-
-void CharTableWidget::setCellSize(int size)
-{
-    if (size < 12) size = 12;
-    if (size > 256) size = 256;
-    if (m_cellSize == size) return;
-
-    m_cellSize = size;
-    int fs = qMax(10, m_cellSize / 2);
-    m_charFont.setPointSize(fs);
-
-    // 预计算字体缩放
-    QFontMetrics fm(m_charFont);
-    QString sampleText = QChar(0x4E00);
-    QSizeF sampleSize = fm.size(Qt::TextSingleLine, sampleText);
-    bool needsScaling = (sampleSize.width() > m_cellSize - 6 || sampleSize.height() > m_cellSize - 6);
-    if (needsScaling) {
-        qreal scale = qMin((m_cellSize - 6) / sampleSize.width(), (m_cellSize - 6) / sampleSize.height());
-        int newFs = qMax(8, int(m_charFont.pointSizeF() * scale));
-        m_scaledFont = m_charFont;
-        m_scaledFont.setPointSize(newFs);
-        m_useScaledFont = true;
-    } else {
-        m_scaledFont = m_charFont;
-        m_useScaledFont = false;
-    }
-
-    updateGeometry();
-    update();
-}
-
-QPixmap* CharTableWidget::getOrCreateCharPixmap(uint16_t charCode)
-{
-    // 过滤空白字符
-    if (charCode == 0x0000 || charCode == 0x0020 || charCode == 0x0009 ||
-        charCode == 0x000A || charCode == 0x000D) {
-        return nullptr;
-    }
-
-    // 创建缓存键
-    CacheKey key{charCode, m_cellSize};
-
-    // 检查缓存
-    if (m_charCache.contains(key)) {
-        return m_charCache.object(key);
-    }
-
-    // 创建新的字符位图（尽量小）
-    int padding = 2;
-    int pixmapSize = m_cellSize - padding * 2;
-    QPixmap* pixmap = new QPixmap(pixmapSize, pixmapSize);
-    pixmap->fill(Qt::transparent);
-
-    QPainter p(pixmap);
-    p.setRenderHint(QPainter::TextAntialiasing, false); // 关闭抗锯齿提升性能
-
-    // 设置字体
-    if (m_useScaledFont) {
-        p.setFont(m_scaledFont);
-    } else {
-        p.setFont(m_charFont);
-    }
-
-    // 绘制字符
-    p.setPen(QColor(34, 34, 34));
-    QRect textRect(0, 0, pixmapSize, pixmapSize);
-    QString s = QChar((ushort)charCode);
-    p.drawText(textRect, Qt::AlignCenter, s);
-
-    // 添加到缓存（cost=1，每个字符占用相同的缓存空间）
-    m_charCache.insert(key, pixmap, 1);
-
-    return pixmap;
-}
-
-void CharTableWidget::paintEvent(QPaintEvent* ev)
-{
-    // 提前返回检查
-    if (m_data.rows <= 0 || m_data.cols <= 0) {
-        QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing, false);
-        p.setRenderHint(QPainter::TextAntialiasing, false);
-        p.fillRect(rect(), (m_data.type == CharTableData::GTA_VC) ? QColor("#f3f6fb") : Qt::white);
+    
+    if (m_data.rows <= 0 || m_data.cols <= 0 || m_data.cells.isEmpty()) {
+        setPlainText(QString());
         return;
     }
-
-    const int w = m_cellSize;
-    const int h = m_cellSize;
-
-    // 极致优化：直接绘制到屏幕，关闭所有抗锯齿
-    QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing, false);
-    p.setRenderHint(QPainter::TextAntialiasing, false);
-
-    // 绘制背景
-    p.fillRect(rect(), (m_data.type == CharTableData::GTA_VC) ? QColor("#f3f6fb") : Qt::white);
-
-    // 计算可见区域（只绘制可见部分）
-    QRect visibleRect = ev->region().boundingRect();
-    if (visibleRect.isEmpty()) {
-        visibleRect = rect();
-    }
-
-    // 精确计算可见区域的行列范围
-    int startCol = qMax(0, visibleRect.left() / w);
-    int endCol = qMin(m_data.cols, (visibleRect.right() + w - 1) / w + 1);
-    int startRow = qMax(0, visibleRect.top() / h);
-    int endRow = qMin(m_data.rows, (visibleRect.bottom() + h - 1) / h + 1);
-
-    // 批量绘制网格线（一次性绘制所有线条）
-    QPen gridPen(QColor(220, 220, 220));
-    gridPen.setWidth(1);
-    p.setPen(gridPen);
-
-    // 绘制可见区域的垂直网格线
-    const int topY = startRow * h;
-    const int bottomY = endRow * h;
-    for (int c = startCol; c <= endCol; ++c) {
-        const int x = c * w;
-        p.drawLine(x, topY, x, bottomY);
-    }
-
-    // 绘制可见区域的水平网格线
-    const int leftX = startCol * w;
-    const int rightX = endCol * w;
-    for (int r = startRow; r <= endRow; ++r) {
-        const int y = r * h;
-        p.drawLine(leftX, y, rightX, y);
-    }
-
-    // 批量绘制字符和背景
-    const int padding = 2;
-    const bool isSelected = (m_selectionStart.x() != -1 && m_selectionEnd.x() != -1);
-    int selStartRow = isSelected ? qMin(m_selectionStart.y(), m_selectionEnd.y()) : -1;
-    int selEndRow = isSelected ? qMax(m_selectionStart.y(), m_selectionEnd.y()) : -1;
-    int selStartCol = isSelected ? qMin(m_selectionStart.x(), m_selectionEnd.x()) : -1;
-    int selEndCol = isSelected ? qMax(m_selectionStart.x(), m_selectionEnd.x()) : -1;
-
-    for (int r = startRow; r < endRow; ++r) {
-        const int y = r * h;
-        for (int c = startCol; c < endCol; ++c) {
-            const int x = c * w;
-            const bool cellSelected = isSelected && r >= selStartRow && r <= selEndRow &&
-                                   c >= selStartCol && c <= selEndCol;
-
-            // 绘制单元格背景
-            p.fillRect(x, y, w, h, cellSelected ? QColor(51, 153, 255) : Qt::white);
-            p.drawRect(x, y, w, h);
-
-            // 绘制字符
-            const int idx = r * m_data.cols + c;
-            if (idx >= 0 && idx < m_data.cells.size()) {
-                const uint16_t ch = m_data.cells[idx];
-                QPixmap* pixmap = getOrCreateCharPixmap(ch);
-                if (pixmap) {
-                    p.drawPixmap(x + padding, y + padding, *pixmap);
-                }
-            }
+    
+    // 收集有效字符
+    QVector<uint16_t> characters;
+    characters.reserve(m_data.cells.size());
+    for (uint16_t ch : m_data.cells) {
+        if (ch != 0x0000 && ch != 0x0020 && ch != 0x0009 && ch != 0x000A && ch != 0x000D) {
+            characters.append(ch);
         }
     }
-}
-
-QSize CharTableWidget::minimumSizeHint() const
-{
-    if (m_data.rows <= 0 || m_data.cols <= 0) return QSize(200,200);
-    return QSize(m_data.cols * m_cellSize, m_data.rows * m_cellSize);
-}
-
-void CharTableWidget::mousePressEvent(QMouseEvent* event)
-{
-    if (event->button() == Qt::LeftButton) {
-        m_isSelecting = true;
-        m_selectionStart = getCellFromPos(event->pos());
-        m_selectionEnd = m_selectionStart;
-        update();
-    }
-}
-
-void CharTableWidget::mouseMoveEvent(QMouseEvent* event)
-{
-    if (m_isSelecting) {
-        m_selectionEnd = getCellFromPos(event->pos());
-        update();
-    }
-}
-
-void CharTableWidget::mouseReleaseEvent(QMouseEvent* event)
-{
-    if (event->button() == Qt::LeftButton && m_isSelecting) {
-        m_isSelecting = false;
-        normalizeSelection();
-    }
-}
-
-void CharTableWidget::keyPressEvent(QKeyEvent* event)
-{
-    // Ctrl+C 复制选中的字符
-    if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_C) {
-        copySelectedCells();
-        return;
-    }
-    QWidget::keyPressEvent(event);
-}
-
-void CharTableWidget::mouseDoubleClickEvent(QMouseEvent* event)
-{
-    if (event->button() == Qt::LeftButton) {
-        QPoint cell = getCellFromPos(event->pos());
-        if (cell.x() >= 0 && cell.y() >= 0) {
-            editCell(cell);
+    
+    // 排序
+    std::sort(characters.begin(), characters.end());
+    
+    // 构建文本
+    QString text;
+    for (int i = 0; i < characters.size(); ++i) {
+        text.append(QChar(characters[i]));
+        if ((i + 1) % COLS_PER_LINE == 0 && i < characters.size() - 1) {
+            text.append('\n');
         }
     }
-    QWidget::mouseDoubleClickEvent(event);
-}
-
-void CharTableWidget::copySelectedCells()
-{
-    if (m_selectionStart.x() == -1 || m_selectionEnd.x() == -1) return;
-
-    QString copiedText;
-    normalizeSelection();
-
-    int startRow = qMin(m_selectionStart.y(), m_selectionEnd.y());
-    int endRow = qMax(m_selectionStart.y(), m_selectionEnd.y());
-    int startCol = qMin(m_selectionStart.x(), m_selectionEnd.x());
-    int endCol = qMax(m_selectionStart.x(), m_selectionEnd.x());
-
-    for (int r = startRow; r <= endRow; ++r) {
-        for (int c = startCol; c <= endCol; ++c) {
-            int idx = r * m_data.cols + c;
-            if (idx >= 0 && idx < m_data.cells.size()) {
-                uint16_t ch = m_data.cells[idx];
-                // 过滤空白字符
-                if (ch != 0x0000 && ch != 0x0020 && ch != 0x0009 && ch != 0x000A && ch != 0x000D) {
-                    copiedText.append(QChar((ushort)ch));
-                }
-            }
-        }
-    }
-
-    if (!copiedText.isEmpty()) {
-        QClipboard* clipboard = QApplication::clipboard();
-        clipboard->setText(copiedText);
-    }
-}
-
-void CharTableWidget::editCell(const QPoint& cellPos)
-{
-    int row = cellPos.y();
-    int col = cellPos.x();
-    int idx = row * m_data.cols + col;
     
-    if (idx < 0 || idx >= m_data.cells.size()) {
-        return;
-    }
-
-    uint16_t currentChar = m_data.cells[idx];
-    QString currentCharStr = (currentChar != 0) ? QChar(currentChar) : QString("空");
+    // 使用光标插入文本，保持格式
+    setPlainText(text);
     
-    bool ok = false;
-    QString text = QInputDialog::getText(this, "编辑字符",
-        QString("位置: [%1, %2]\n当前字符: %3\n输入新字符:").arg(row).arg(col).arg(currentCharStr),
-        QLineEdit::Normal, QString(), &ok);
-
-    if (ok && !text.isEmpty()) {
-        // 获取第一个字符的Unicode码点
-        uint16_t newCharCode = text.at(0).unicode();
-        
-        // 更新单元格数据
-        m_data.cells[idx] = newCharCode;
-        
-        // 清除该字符的缓存，以便重新渲染
-        CacheKey key{currentChar, m_cellSize};
-        m_charCache.remove(key);
-        
-        // 重绘单元格
-        update();
-    }
-}
-
-QPoint CharTableWidget::getCellFromPos(const QPoint& pos)
-{
-    if (m_data.rows <= 0 || m_data.cols <= 0) return QPoint(-1, -1);
-    int col = pos.x() / m_cellSize;
-    int row = pos.y() / m_cellSize;
-    // 确保在有效范围内
-    if (col < 0) col = 0;
-    if (col >= m_data.cols) col = m_data.cols - 1;
-    if (row < 0) row = 0;
-    if (row >= m_data.rows) row = m_data.rows - 1;
-    return QPoint(col, row);
-}
-
-void CharTableWidget::normalizeSelection()
-{
-    // 确保选择的范围有效
-    if (m_selectionStart.x() == -1 || m_selectionEnd.x() == -1) return;
+    // 设置固定行高
+    QFontMetrics fm(font());
+    int lineHeight = fm.height();
     
-    // 确保在有效范围内
-    m_selectionStart.setX(qBound(0, m_selectionStart.x(), m_data.cols - 1));
-    m_selectionStart.setY(qBound(0, m_selectionStart.y(), m_data.rows - 1));
-    m_selectionEnd.setX(qBound(0, m_selectionEnd.x(), m_data.cols - 1));
-    m_selectionEnd.setY(qBound(0, m_selectionEnd.y(), m_data.rows - 1));
-}
-
-void CharTableWidget::clearSelection()
-{
-    m_selectionStart = QPoint(-1, -1);
-    m_selectionEnd = QPoint(-1, -1);
-    m_isSelecting = false;
-    update();
+    for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
+        QTextCursor cursor(block);
+        QTextBlockFormat format;
+        format.setLineHeight(lineHeight, QTextBlockFormat::FixedHeight);
+        format.setTopMargin(0);
+        format.setBottomMargin(0);
+        cursor.setBlockFormat(format);
+    }
+    
+    // 重建字符集合
+    rebuildCharSet();
+    
+    // 更新提示
+    updateHint();
 }

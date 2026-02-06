@@ -5040,10 +5040,14 @@ void GXTStudio::onTabChanged(int index)
             }
 
             // 更新表格列表，这会设置正确的 currentTableIndex 并更新模型
-            updateTableList();
+            // 注意：CharTable 没有 tableList，跳过 updateTableList
+            if (!currentTab->isCharTable) {
+                updateTableList();
+            }
 
             // 不再单独调用 updateEntryTable()，因为 updateTableList 已经更新了模型
             updateWindowTitle();
+            updateStatusBar();
 
             // 【关键修复】强制更新表格视图，确保数据立即显示
             if (currentTab->entryTableView) {
@@ -5551,6 +5555,15 @@ void GXTStudio::updateStatusBar()
             status += " | WHM";
         } else if (currentTab->isDAT) {
             status += " | DAT";
+        } else if (currentTab->isCharTable) {
+            // 字符表文件显示 CHAR_VC 或 CHAR_IV
+            if (currentTab->charTableData.type == CharTableData::GTA_VC) {
+                status += " | CHAR_VC";
+            } else if (currentTab->charTableData.type == CharTableData::GTA_IV) {
+                status += " | CHAR_IV";
+            } else {
+                status += " | CHAR";
+            }
         } else {
             status += " | " + getVersionName(currentTab->version);
         }
@@ -5747,11 +5760,26 @@ void GXTStudio::startAsyncParse(const QString& filePath)
                 newTab.charTableData = data;
                 newTab.charTableWidget = charTableWidget;
                 
-                m_fileTabs.push_back(newTab);
-                m_currentTabIndex = static_cast<int>(m_fileTabs.size()) - 1;
+                // 确保m_fileTabs和m_tabWidget的索引一致
+                // tabIndex是m_tabWidget->addTab返回的索引
+                if (tabIndex <= static_cast<int>(m_fileTabs.size())) {
+                    m_fileTabs.insert(m_fileTabs.begin() + tabIndex, newTab);
+                } else {
+                    m_fileTabs.push_back(newTab);
+                }
+                m_currentTabIndex = tabIndex;
                 
                 // 自动切换到新打开的字符表标签页
+                // 阻塞信号避免onTabChanged干扰，然后手动更新UI
+                m_tabWidget->blockSignals(true);
                 m_tabWidget->setCurrentIndex(tabIndex);
+                m_tabWidget->blockSignals(false);
+                
+                // 手动更新状态栏和标题
+                updateStatusBar();
+                updateWindowTitle();
+                updateActions();
+                
                 return;
             }
         }
@@ -10153,18 +10181,6 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     topRow->addWidget(nameLabel);
     topRow->addStretch();
 
-    QLabel* zoomLabel = new QLabel("大小:");
-    topRow->addWidget(zoomLabel);
-    QSlider* zoomSlider = new QSlider(Qt::Horizontal);
-    zoomSlider->setRange(20, 128);
-    zoomSlider->setValue(48);
-    zoomSlider->setFixedWidth(160);
-    topRow->addWidget(zoomSlider);
-
-    QPushButton* saveBtn = new QPushButton("保存");
-    saveBtn->setStyleSheet("background-color: #4CAF50; color: white; padding: 4px 12px;");
-    topRow->addWidget(saveBtn);
-
     QPushButton* exportBtn = new QPushButton("导出为图片");
     topRow->addWidget(exportBtn);
 
@@ -10173,49 +10189,62 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     // CharTableWidget inside scroll area
     CharTableWidget* widget = new CharTableWidget(page);
     widget->setData(data);
-    widget->setCellSize(48);
 
     QScrollArea* scroll = new QScrollArea(page);
     scroll->setWidgetResizable(true);
     scroll->setWidget(widget);
     layout->addWidget(scroll);
 
-    // connect zoom
-    connect(zoomSlider, &QSlider::valueChanged, widget, &CharTableWidget::setCellSize);
+    // 底部状态栏
+    QHBoxLayout* bottomRow = new QHBoxLayout();
+    bottomRow->setContentsMargins(4, 0, 4, 0);
+    
+    // 行列位置标签
+    QLabel* posLabel = new QLabel("第 1 行, 第 1 列", page);
+    posLabel->setStyleSheet("color: #666; font-size: 12px;");
+    posLabel->setMinimumWidth(120);
+    
+    // 字符数提示标签
+    QLabel* hintLabel = new QLabel(page);
+    hintLabel->setStyleSheet("color: #666; font-size: 12px;");
+    hintLabel->setMinimumWidth(200);
+    
+    bottomRow->addWidget(posLabel);
+    bottomRow->addStretch();
+    bottomRow->addWidget(hintLabel);
+    layout->addLayout(bottomRow);
 
-    // save button: save modified char table
-    connect(saveBtn, &QPushButton::clicked, [this, widget, fileName]() {
-        FileTab* currentTab = getCurrentTab();
-        if (!currentTab || !currentTab->isCharTable) {
-            QMessageBox::warning(this, "保存失败", "当前标签页不是字符表文件");
-            return;
-        }
-
-        const CharTableData& data = widget->data();
-        bool success = false;
-
-        if (data.type == CharTableData::GTA_VC) {
-            success = CharTableParser::saveGtaVc(currentTab->filePath, data);
-        } else if (data.type == CharTableData::GTA_IV) {
-            success = CharTableParser::saveGtaIv(currentTab->filePath, data);
-        }
-
-        if (success) {
-            currentTab->isModified = false;
-            showLogMessage("字符表已保存: " + currentTab->filePath);
-            QMessageBox::information(this, "保存成功", "字符表已成功保存！");
-        } else {
-            QMessageBox::critical(this, "保存失败", "无法保存字符表文件");
-        }
+    // 连接光标位置变化信号
+    connect(widget, &CharTableWidget::cursorPositionChanged, [posLabel](int line, int column) {
+        posLabel->setText(QString("第 %1 行, 第 %2 列").arg(line).arg(column));
+    });
+    
+    // 设置提示标签
+    widget->setHintLabel(hintLabel);
+    
+    // 连接字符数超限信号
+    connect(widget, &CharTableWidget::maxCharsReached, [hintLabel]() {
+        hintLabel->setText("字符数最多 64 x 64 (已达上限)");
+        hintLabel->setStyleSheet("color: red; font-size: 12px;");
+    });
+    
+    // 连接重复字符信号
+    connect(widget, &CharTableWidget::duplicateChar, [hintLabel](QChar ch) {
+        hintLabel->setText(QString("字符 '%1' 已存在，不允许重复").arg(ch));
+        hintLabel->setStyleSheet("color: red; font-size: 12px;");
     });
 
     // export button: render widget to image
     connect(exportBtn, &QPushButton::clicked, [this, widget, fileName]() {
         QString out = QFileDialog::getSaveFileName(this, "导出为PNG", QFileInfo(fileName).completeBaseName() + ".png", "PNG 图片 (*.png)");
         if (out.isEmpty()) return;
-        QSize imgSize = widget->minimumSizeHint();
+        // 使用文档的实际大小
+        QSize imgSize = widget->document()->size().toSize();
+        if (imgSize.isEmpty()) {
+            imgSize = QSize(800, 600);
+        }
         QImage image(imgSize, QImage::Format_ARGB32);
-        image.fill(Qt::transparent);
+        image.fill(Qt::white);
         QPainter painter(&image);
         widget->render(&painter);
         image.save(out);
