@@ -79,6 +79,17 @@ set(PROJECT_SOURCES
     GXTStudio.ui
     GXTStudio.h
     GXTStudio.cpp
+    FontAwesome.h
+    MultiThreadProgressDialog.h
+    MultiThreadProgressDialog.cpp
+    GXTTableModel.h
+    GXTTableModel.cpp
+    ParseWorker.h
+    ParseWorker.cpp
+    SaveWorker.h
+    SaveWorker.cpp
+    ItemPool.h
+    ItemPool.cpp
     GXTParser.h
     GXTParser.cpp
     GXTEditor.h
