@@ -124,6 +124,8 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_smartTranslateAction(nullptr)
     , m_configTranslateAction(nullptr)
     , m_executeTranslateAction(nullptr)
+    , m_setBackgroundAction(nullptr)
+    , m_clearBackgroundAction(nullptr)
     , m_smartTranslator(nullptr)
     , m_smartTranslatorThread(nullptr)
     , m_translateProgressDialog(nullptr)
@@ -148,6 +150,9 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_autoSaveFutureWatcher(nullptr)
     , m_cleanupTimer(nullptr)
     , m_resizeDebouncer(nullptr)
+    , m_backgroundOpacity(1.0)  // 默认透明度100%（完全不透明）
+    , m_backgroundEnabled(false)  // 默认禁用背景
+    , m_backgroundAspectRatioMode(Qt::KeepAspectRatioByExpanding)  // 默认保持比例填充
 {
     ui.setupUi(this);
     
@@ -439,19 +444,23 @@ QString GXTStudio::getButtonStyle(const QString& color, bool darker) const
 QWidget* GXTStudio::createWelcomeTab()
 {
     QWidget* defaultTab = new QWidget();
+    defaultTab->setStyleSheet("background: transparent;");
     QVBoxLayout* mainLayout = new QVBoxLayout(defaultTab);
     mainLayout->setContentsMargins(20, 20, 20, 20);
     mainLayout->setSpacing(15);
-    
+
     // 创建滚动区域
     QScrollArea* scrollArea = new QScrollArea(defaultTab);
     scrollArea->setWidgetResizable(true);
     scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scrollArea->setFrameShape(QFrame::NoFrame);
-    
+    scrollArea->setStyleSheet("background: transparent;");
+    scrollArea->viewport()->setStyleSheet("background: transparent;");
+
     // 创建内容容器
     QWidget* contentWidget = new QWidget();
+    contentWidget->setStyleSheet("background: transparent;");
     QVBoxLayout* layout = new QVBoxLayout(contentWidget);
     layout->setContentsMargins(10, 10, 10, 10);
     layout->setSpacing(20);
@@ -741,7 +750,7 @@ void GXTStudio::setupMenus()
 {
     // 菜单已通过UI文件创建，这里获取指针
     m_menuBar = ui.menuBar;
-    
+
     // 获取动作指针
     m_openAction = ui.actionOpen;
     m_saveAction = ui.actionSave;
@@ -757,9 +766,19 @@ void GXTStudio::setupMenus()
     m_aboutAction = ui.actionAbout;
     m_codeTableAction = ui.actionCodeTable;
     m_smartTranslateAction = ui.actionSmartTranslate;
-    
+
     // 设置只读模式初始状态
     m_readOnlyAction->setChecked(m_isReadOnly);
+
+    // 添加背景设置菜单到视图菜单
+    if (ui.menuView) {
+        ui.menuView->addSeparator();
+        m_setBackgroundAction = new QAction("设置背景图片...", this);
+        m_clearBackgroundAction = new QAction("清除背景", this);
+        m_clearBackgroundAction->setEnabled(false);  // 初始状态禁用
+        ui.menuView->addAction(m_setBackgroundAction);
+        ui.menuView->addAction(m_clearBackgroundAction);
+    }
 }
 
 void GXTStudio::setupToolBars()
@@ -1051,7 +1070,15 @@ void GXTStudio::connectSignals()
     connect(m_increaseFontAction, &QAction::triggered, this, &GXTStudio::increaseFont);
     connect(m_decreaseFontAction, &QAction::triggered, this, &GXTStudio::decreaseFont);
     connect(m_aboutAction, &QAction::triggered, this, &GXTStudio::showAbout);
-    
+
+    // 背景设置菜单连接
+    if (m_setBackgroundAction) {
+        connect(m_setBackgroundAction, &QAction::triggered, this, &GXTStudio::onSetBackground);
+    }
+    if (m_clearBackgroundAction) {
+        connect(m_clearBackgroundAction, &QAction::triggered, this, &GXTStudio::onClearBackground);
+    }
+
     // 标签页信号连接
     connect(m_tabWidget, &QTabWidget::currentChanged, this, &GXTStudio::onTabChanged);
     connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, &GXTStudio::closeTab);
@@ -5156,7 +5183,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
             border-radius: 6px;
             padding: 6px 12px;
             padding-left: 14px;
-            background-color: #ffffff;
+            background-color: rgba(255, 255, 255, 0.5);
             font-size: 12px;
         }
         QLineEdit:focus {
@@ -6335,7 +6362,143 @@ void GXTStudio::resizeEvent(QResizeEvent* event)
     m_lastWindowSize = newSize;
 }
 
+// ==================== 自定义背景相关方法 ====================
 
+void GXTStudio::paintEvent(QPaintEvent* event)
+{
+    // 先调用父类的绘制（绘制默认背景）
+    QMainWindow::paintEvent(event);
+
+    // 如果启用了背景并且背景图片有效，则绘制自定义背景
+    if (m_backgroundEnabled && !m_backgroundPixmap.isNull()) {
+        QPainter painter(this);
+        drawBackground(&painter);
+    }
+}
+
+void GXTStudio::drawBackground(QPainter* painter)
+{
+    if (!painter || m_backgroundPixmap.isNull()) {
+        return;
+    }
+
+    // 保存画家状态
+    painter->save();
+
+    // 设置透明度
+    painter->setOpacity(m_backgroundOpacity);
+
+    // 获取窗口中央部件的几何区域（用于绘制背景）
+    QWidget* centralWidget = this->centralWidget();
+    QRect targetRect;
+    if (centralWidget) {
+        targetRect = centralWidget->geometry();
+    } else {
+        targetRect = this->rect();
+    }
+
+    // 缩放图片以适应目标区域
+    QPixmap scaledPixmap = m_backgroundPixmap.scaled(
+        targetRect.size(),
+        m_backgroundAspectRatioMode,
+        Qt::SmoothTransformation
+    );
+
+    // 计算图片居中显示的位置
+    int x = targetRect.x() + (targetRect.width() - scaledPixmap.width()) / 2;
+    int y = targetRect.y() + (targetRect.height() - scaledPixmap.height()) / 2;
+
+    // 绘制背景图片
+    painter->drawPixmap(x, y, scaledPixmap);
+
+    // 恢复画家状态
+    painter->restore();
+}
+
+void GXTStudio::setBackgroundImage(const QString& imagePath)
+{
+    if (imagePath.isEmpty()) {
+        clearBackground();
+        return;
+    }
+
+    QPixmap newPixmap(imagePath);
+    if (newPixmap.isNull()) {
+        showLogMessage(QString("无法加载背景图片: %1").arg(imagePath));
+        return;
+    }
+
+    m_backgroundPixmap = newPixmap;
+    m_backgroundEnabled = true;
+    if (m_clearBackgroundAction) {
+        m_clearBackgroundAction->setEnabled(true);
+    }
+    showLogMessage(QString("已设置背景图片: %1").arg(imagePath));
+    update();  // 触发重绘
+}
+
+void GXTStudio::setBackgroundOpacity(qreal opacity)
+{
+    // 限制透明度范围在 0.0 - 1.0 之间
+    m_backgroundOpacity = qBound(0.0, opacity, 1.0);
+    if (m_backgroundEnabled) {
+        update();  // 触发重绘
+    }
+}
+
+void GXTStudio::setBackgroundEnabled(bool enabled)
+{
+    m_backgroundEnabled = enabled;
+    update();  // 触发重绘
+}
+
+void GXTStudio::clearBackground()
+{
+    m_backgroundPixmap = QPixmap();
+    m_backgroundEnabled = false;
+    if (m_clearBackgroundAction) {
+        m_clearBackgroundAction->setEnabled(false);
+    }
+    update();  // 触发重绘
+    showLogMessage("已清除背景图片");
+}
+
+bool GXTStudio::isBackgroundEnabled() const
+{
+    return m_backgroundEnabled;
+}
+
+qreal GXTStudio::backgroundOpacity() const
+{
+    return m_backgroundOpacity;
+}
+
+void GXTStudio::onSetBackground()
+{
+    QString filePath = QFileDialog::getOpenFileName(
+        this,
+        "选择背景图片",
+        QString(),
+        "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif);;所有文件 (*.*)"
+    );
+
+    if (!filePath.isEmpty()) {
+        setBackgroundImage(filePath);
+        if (m_clearBackgroundAction) {
+            m_clearBackgroundAction->setEnabled(true);
+        }
+    }
+}
+
+void GXTStudio::onClearBackground()
+{
+    clearBackground();
+    if (m_clearBackgroundAction) {
+        m_clearBackgroundAction->setEnabled(false);
+    }
+}
+
+// ==================== 自定义背景方法结束 ====================
 
 void GXTStudio::precomputeTableMetrics()
 {

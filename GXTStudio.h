@@ -392,12 +392,20 @@ class GXTStudio : public QMainWindow
 public:
     GXTStudio(QWidget *parent = nullptr);
     ~GXTStudio();
-    
+
     // 公共工具方法 - 需要在public中以便DraggableTableList访问
     FileTab* getCurrentTab();
     FileTab* getTab(int index);
     void showLogMessage(const QString& message);
     void showSaveSuccessDialog(const SaveResult& result);
+
+    // 自定义背景相关公共方法
+    void setBackgroundImage(const QString& imagePath);  // 设置背景图片路径
+    void setBackgroundOpacity(qreal opacity);           // 设置背景透明度 (0.0 - 1.0)
+    void setBackgroundEnabled(bool enabled);            // 启用/禁用背景
+    void clearBackground();                             // 清除背景
+    bool isBackgroundEnabled() const;                   // 获取背景是否启用
+    qreal backgroundOpacity() const;                    // 获取当前透明度
     
     // 提供给后台线程的公共保存方法
     SaveResult performSaveTask(const SaveTask& task);
@@ -447,7 +455,11 @@ private slots:
     void onSmartTranslate();
     void onConfigTranslate();
     void onExecuteTranslate();
-    
+
+    // 背景设置相关
+    void onSetBackground();    // 设置背景图片
+    void onClearBackground();  // 清除背景图片
+
     // 码表转换相关
     void onMountCodeTable(); // 挂载码表
     void onConvertCodeTable(); // 执行转换
@@ -531,10 +543,18 @@ protected:
     void resizeEvent(QResizeEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
     void dropEvent(QDropEvent* event) override;
+    void paintEvent(QPaintEvent* event) override;  // 自定义背景绘制
 
 private:
     Ui::GXTStudioClass ui;
-    
+
+    // 自定义背景相关
+    QPixmap m_backgroundPixmap;  // 背景图片
+    qreal m_backgroundOpacity;   // 背景透明度 (0.0 - 1.0)
+    bool m_backgroundEnabled;    // 是否启用背景
+    Qt::AspectRatioMode m_backgroundAspectRatioMode;  // 图片缩放模式
+    void drawBackground(QPainter* painter);  // 绘制背景方法
+
     // 主要控件
     QTabWidget* m_tabWidget;
     QLabel* m_statusLabel;
@@ -561,6 +581,8 @@ private:
     QAction* m_smartTranslateAction; // 智能翻译
     QAction* m_configTranslateAction; // 配置翻译
     QAction* m_executeTranslateAction; // 执行翻译
+    QAction* m_setBackgroundAction;    // 设置背景图片
+    QAction* m_clearBackgroundAction;  // 清除背景图片
     
     // 码表转换相关
     QToolButton* m_codeTableButton; // 码表转换下拉按钮
