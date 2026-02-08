@@ -5360,9 +5360,9 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         tableListText = QString("%1 表格列表").arg(QString(FA::QClipboardList));
     } else {
         // 如果字体加载成功，使用富文本格式
-        tableListText = QString("<span style=\"font-family:'%1'; font-size:%2px;\">%3</span> 表格列表")
+        tableListText = QString("<span style=\"font-family:'%1'; font-size:%2px;\">%3</span> <span style=\"font-size:14px;\">表格列表</span>")
             .arg(tableFontFamily)
-            .arg(m_fontSize - 1)
+            .arg(14)
             .arg(QString(FA::QClipboardList));
     }
     QLabel* tableListLabel = new QLabel(tableListText);
@@ -5371,6 +5371,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     tableListLabel->setStyleSheet(R"(
         QLabel {
             font-weight: bold;
+            font-size: 14px;
             color: #495057;
             padding: 6px 8px;
             background-color: transparent;
@@ -5594,9 +5595,9 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         entryTableText = QString("%1 文本条目").arg(QString(FA::QEdit));
     } else {
         // 如果字体加载成功，使用富文本格式
-        entryTableText = QString("<span style=\"font-family:'%1'; font-size:%2px;\">%3</span> 文本条目")
+        entryTableText = QString("<span style=\"font-family:'%1'; font-size:%2px;\">%3</span> <span style=\"font-size:14px;\">文本条目</span>")
             .arg(entryFontFamily)
-            .arg(m_fontSize - 1)
+            .arg(14)
             .arg(QString(FA::QEdit));
     }
     QLabel* entryTableLabel = new QLabel(entryTableText);
@@ -5605,6 +5606,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     entryTableLabel->setStyleSheet(R"(
         QLabel {
             font-weight: bold;
+            font-size: 14px;
             color: #495057;
             padding: 6px 8px;
             background-color: transparent;
