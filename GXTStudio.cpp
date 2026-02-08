@@ -152,7 +152,7 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_resizeDebouncer(nullptr)
     , m_backgroundOpacity(1.0)  // 默认透明度100%（完全不透明）
     , m_backgroundEnabled(false)  // 默认禁用背景
-    , m_backgroundAspectRatioMode(Qt::IgnoreAspectRatio)  // 填充模式：拉伸以适应窗口，防止白边
+    , m_backgroundAspectRatioMode(Qt::KeepAspectRatioByExpanding)  // 填充模式：保持比例填充，可能裁剪边缘
 {
     ui.setupUi(this);
     
@@ -4232,6 +4232,11 @@ void GXTStudio::onTabChanged(int index)
                 currentTab->entryTableView->repaint();
             }
 
+            // 如果启用了背景，更新搜索UI颜色以匹配当前背景
+            if (m_backgroundEnabled) {
+                updateSearchUIColors(*currentTab);
+            }
+
             // 触发一次内存清理
             QTimer::singleShot(100, [this]() {
                 cleanupDelegatesCache();
@@ -5180,15 +5185,20 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     wrapperLayout->setContentsMargins(0, 0, 0, 0);
     wrapperLayout->setSpacing(4);
     
+    // 获取搜索区域应该使用的颜色（使用现有判断颜色的方法）
+    QPoint searchPos = tabWidget->mapTo(this, QPoint(100, 20));
+    QColor searchTextColor = getTextColorForPosition(searchPos);
+    QString searchTextColorName = searchTextColor.name();
+    
     // 创建搜索框
     QLineEdit* searchEdit = new QLineEdit();
     searchEdit->setPlaceholderText("搜索文本或哈希值...");
     searchEdit->setMinimumHeight(32);
     
-    // 设置搜索框样式和字体
+    // 设置搜索框样式和字体 - 使用自动判断的颜色
     QFont searchFont("Microsoft YaHei", m_fontSize);
     searchEdit->setFont(searchFont);
-    searchEdit->setStyleSheet(R"(
+    searchEdit->setStyleSheet(QString(R"(
         QLineEdit {
             border: 2px solid #e1e5e9;
             border-radius: 6px;
@@ -5196,12 +5206,13 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
             padding-left: 14px;
             background-color: rgba(255, 255, 255, 0.5);
             font-size: 12px;
+            color: %1;
         }
         QLineEdit:focus {
             border-color: #2196f3;
             outline: none;
         }
-    )");
+    )").arg(searchTextColorName));
     
     // 创建大小写敏感图标按钮
     QToolButton* caseSensitiveButton = new QToolButton();
@@ -5217,21 +5228,21 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     regexButton->setText(FA::Regex);
     regexButton->setToolTip("正则表达式");
 
-    // 设置图标按钮样式（显式指定 FontAwesome 字体族）
+    // 设置图标按钮样式（显式指定 FontAwesome 字体族）- 使用自动判断的颜色
     QString fontFamily = FA::solidFontFamily();
     QString buttonStyle;
     if (fontFamily.isEmpty()) {
         // 如果字体加载失败，使用默认样式
-        buttonStyle = R"(
+        buttonStyle = QString(R"(
             QToolButton {
                 border: none;
                 border-radius: 4px;
                 background-color: transparent;
-                color: #6c757d;
+                color: %1;
             }
             QToolButton:hover {
                 background-color: rgba(255, 255, 255, 0.5);
-                color: #495057;
+                color: %1;
             }
             QToolButton:pressed {
                 background-color: #e9ecef;
@@ -5243,7 +5254,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
             QToolButton:checked:hover {
                 background-color: #bbdefb;
             }
-        )";
+        )").arg(searchTextColorName);
     } else {
         // 如果字体加载成功，显式指定字体族
         buttonStyle = QString(R"(
@@ -5251,13 +5262,13 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
                 border: none;
                 border-radius: 4px;
                 background-color: transparent;
-                color: #6c757d;
-                font-family: '%1';
+                color: %1;
+                font-family: '%2';
                 font-size: 13px;
             }
             QToolButton:hover {
                 background-color: rgba(255, 255, 255, 0.5);
-                color: #495057;
+                color: %1;
             }
             QToolButton:pressed {
                 background-color: #e9ecef;
@@ -5269,7 +5280,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
             QToolButton:checked:hover {
                 background-color: #bbdefb;
             }
-        )").arg(fontFamily);
+        )").arg(searchTextColorName, fontFamily);
     }
 
     caseSensitiveButton->setStyleSheet(buttonStyle);
@@ -5279,29 +5290,31 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     caseSensitiveButton->setFont(FA::solidFont(12));
     regexButton->setFont(FA::solidFont(12));
     
-    // 创建搜索按钮
+    // 创建搜索按钮 - 使用0.5不透明度的白色背景和自动判断的颜色
     QPushButton* prevButton = new QPushButton();
     QPushButton* nextButton = new QPushButton();
     
     int btnSize = qMax(30, m_fontSize + 10);
+    QString navButtonStyle = QString(R"(
+        QPushButton {
+            background-color: rgba(255, 255, 255, 0.5);
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            color: %1;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: rgba(255, 255, 255, 0.7);
+            border-color: #adb5bd;
+        }
+        QPushButton:pressed {
+            background-color: rgba(255, 255, 255, 0.9);
+        }
+    )").arg(searchTextColorName);
+    
     for (auto* btn : {prevButton, nextButton}) {
         btn->setFixedSize(btnSize, btnSize);
-        btn->setStyleSheet(R"(
-            QPushButton {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
-                border-radius: 6px;
-                color: #495057;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #e9ecef;
-                border-color: #adb5bd;
-            }
-            QPushButton:pressed {
-                background-color: #dee2e6;
-            }
-        )");
+        btn->setStyleSheet(navButtonStyle);
     }
     
     prevButton->setText(FA::QChevronLeft);
@@ -5329,6 +5342,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     QSplitter* splitter = new QSplitter(Qt::Horizontal);
     splitter->setHandleWidth(2);
     splitter->setChildrenCollapsible(false);
+    splitter->setStyleSheet("QSplitter::handle { background-color: transparent; border: none; }");
     
     // 创建左侧面板容器
     QWidget* leftPanel = new QWidget();
@@ -6423,6 +6437,9 @@ void GXTStudio::drawBackground(QPainter* painter)
         targetRect = this->rect();
     }
 
+    // 设置裁剪区域，只绘制到中央部件区域，避免覆盖工具栏和状态栏
+    painter->setClipRect(targetRect);
+
     // 缩放图片以适应目标区域
     QPixmap scaledPixmap = m_backgroundPixmap.scaled(
         targetRect.size(),
@@ -6516,7 +6533,7 @@ static void applyLabelStyle(QLabel* label, const QColor& textColor)
 
 void GXTStudio::updateLabelColors()
 {
-    // 更新所有标签页的标签颜色
+    // 更新所有标签页的标签颜色和搜索UI颜色
     for (auto& tab : m_fileTabs) {
         if (tab.tableListLabel) {
             QPoint pos = tab.tableListLabel->mapTo(this, QPoint(tab.tableListLabel->width() / 2, tab.tableListLabel->height() / 2));
@@ -6529,6 +6546,123 @@ void GXTStudio::updateLabelColors()
             QColor textColor = getTextColorForPosition(pos);
             applyLabelStyle(tab.entryTableLabel, textColor);
         }
+        
+        // 更新搜索UI颜色
+        updateSearchUIColors(tab);
+    }
+}
+
+void GXTStudio::updateSearchUIColors(FileTab& tab)
+{
+    // 获取搜索区域的位置（使用搜索框的中心点）
+    if (!tab.searchEdit) return;
+    
+    QPoint searchPos = tab.searchEdit->mapTo(this, QPoint(tab.searchEdit->width() / 2, tab.searchEdit->height() / 2));
+    QColor textColor = getTextColorForPosition(searchPos);
+    QString colorName = textColor.name();
+    
+    // 更新搜索框文字颜色
+    if (tab.searchEdit) {
+        tab.searchEdit->setStyleSheet(QString(R"(
+            QLineEdit {
+                border: 2px solid #e1e5e9;
+                border-radius: 6px;
+                padding: 6px 12px;
+                padding-left: 14px;
+                background-color: rgba(255, 255, 255, 0.5);
+                font-size: 12px;
+                color: %1;
+            }
+            QLineEdit:focus {
+                border-color: #2196f3;
+                outline: none;
+            }
+        )").arg(colorName));
+    }
+    
+    // 更新图标按钮颜色
+    QString fontFamily = FA::solidFontFamily();
+    QString buttonStyle;
+    if (fontFamily.isEmpty()) {
+        buttonStyle = QString(R"(
+            QToolButton {
+                border: none;
+                border-radius: 4px;
+                background-color: transparent;
+                color: %1;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.5);
+                color: %1;
+            }
+            QToolButton:pressed {
+                background-color: #e9ecef;
+            }
+            QToolButton:checked {
+                color: #2196f3;
+                background-color: #e3f2fd;
+            }
+            QToolButton:checked:hover {
+                background-color: #bbdefb;
+            }
+        )").arg(colorName);
+    } else {
+        buttonStyle = QString(R"(
+            QToolButton {
+                border: none;
+                border-radius: 4px;
+                background-color: transparent;
+                color: %1;
+                font-family: '%2';
+                font-size: 13px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.5);
+                color: %1;
+            }
+            QToolButton:pressed {
+                background-color: #e9ecef;
+            }
+            QToolButton:checked {
+                color: #2196f3;
+                background-color: #e3f2fd;
+            }
+            QToolButton:checked:hover {
+                background-color: #bbdefb;
+            }
+        )").arg(colorName, fontFamily);
+    }
+    
+    if (tab.caseSensitiveButton) {
+        tab.caseSensitiveButton->setStyleSheet(buttonStyle);
+    }
+    if (tab.regexButton) {
+        tab.regexButton->setStyleSheet(buttonStyle);
+    }
+    
+    // 更新上下个按钮样式
+    QString navButtonStyle = QString(R"(
+        QPushButton {
+            background-color: rgba(255, 255, 255, 0.5);
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            color: %1;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: rgba(255, 255, 255, 0.7);
+            border-color: #adb5bd;
+        }
+        QPushButton:pressed {
+            background-color: rgba(255, 255, 255, 0.9);
+        }
+    )").arg(colorName);
+    
+    if (tab.searchPrevButton) {
+        tab.searchPrevButton->setStyleSheet(navButtonStyle);
+    }
+    if (tab.searchNextButton) {
+        tab.searchNextButton->setStyleSheet(navButtonStyle);
     }
 }
 

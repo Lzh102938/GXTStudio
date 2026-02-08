@@ -560,6 +560,7 @@ private:
     void drawBackground(QPainter* painter);  // 绘制背景方法
     QColor getTextColorForPosition(const QPoint& pos);  // 根据背景位置获取文字颜色
     void updateLabelColors();  // 更新标签文字颜色
+    void updateSearchUIColors(FileTab& tab);  // 更新搜索UI颜色
 
     // 主要控件
     QTabWidget* m_tabWidget;
