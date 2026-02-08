@@ -152,7 +152,7 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_resizeDebouncer(nullptr)
     , m_backgroundOpacity(1.0)  // 默认透明度100%（完全不透明）
     , m_backgroundEnabled(false)  // 默认禁用背景
-    , m_backgroundAspectRatioMode(Qt::KeepAspectRatioByExpanding)  // 默认保持比例填充
+    , m_backgroundAspectRatioMode(Qt::IgnoreAspectRatio)  // 填充模式：拉伸以适应窗口，防止白边
 {
     ui.setupUi(this);
     
@@ -5230,7 +5230,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
                 color: #6c757d;
             }
             QToolButton:hover {
-                background-color: #f8f9fa;
+                background-color: rgba(255, 255, 255, 0.5);
                 color: #495057;
             }
             QToolButton:pressed {
@@ -5256,7 +5256,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
                 font-size: 13px;
             }
             QToolButton:hover {
-                background-color: #f8f9fa;
+                background-color: rgba(255, 255, 255, 0.5);
                 color: #495057;
             }
             QToolButton:pressed {
@@ -5353,14 +5353,15 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     }
     QLabel* tableListLabel = new QLabel(tableListText);
     tableListLabel->setTextFormat(Qt::RichText);
+    // 设置默认样式（透明背景，灰色文字）- 与 applyLabelStyle 使用完全相同的格式
     tableListLabel->setStyleSheet(R"(
         QLabel {
             font-weight: bold;
             color: #495057;
             padding: 6px 8px;
-            background-color: #f8f9fa;
+            background-color: transparent;
             border-radius: 6px;
-            border: 1px solid #e9ecef;
+            border: none;
         }
     )");
     
@@ -5586,14 +5587,15 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     }
     QLabel* entryTableLabel = new QLabel(entryTableText);
     entryTableLabel->setTextFormat(Qt::RichText);
+    // 设置默认样式（透明背景，灰色文字）- 与 applyLabelStyle 使用完全相同的格式
     entryTableLabel->setStyleSheet(R"(
         QLabel {
             font-weight: bold;
             color: #495057;
             padding: 6px 8px;
-            background-color: #f8f9fa;
+            background-color: transparent;
             border-radius: 6px;
-            border: 1px solid #e9ecef;
+            border: none;
         }
     )");
     
@@ -5915,6 +5917,8 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     tab.searchNextButton = nextButton;
     tab.caseSensitiveButton = caseSensitiveButton;
     tab.regexButton = regexButton;
+    tab.tableListLabel = tableListLabel;
+    tab.entryTableLabel = entryTableLabel;
     
     // 计算标签页标题（只显示文件名）
     QString title = tab.fileName;
@@ -5975,6 +5979,11 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         
         // 【性能优化】立即处理事件，确保UI立即更新显示
         QCoreApplication::processEvents();
+    }
+    
+    // 如果启用了背景，更新标签颜色
+    if (m_backgroundEnabled) {
+        QTimer::singleShot(100, this, &GXTStudio::updateLabelColors);
     }
 }
 
@@ -6372,6 +6381,11 @@ void GXTStudio::resizeEvent(QResizeEvent* event)
     
     // 记录新的大小
     m_lastWindowSize = newSize;
+    
+    // 如果启用了背景，更新标签颜色以匹配新位置的背景
+    if (m_backgroundEnabled) {
+        updateLabelColors();
+    }
 }
 
 // ==================== 自定义背景相关方法 ====================
@@ -6427,6 +6441,97 @@ void GXTStudio::drawBackground(QPainter* painter)
     painter->restore();
 }
 
+QColor GXTStudio::getTextColorForPosition(const QPoint& pos)
+{
+    if (!m_backgroundEnabled || m_backgroundPixmap.isNull()) {
+        return QColor("#495057");  // 默认灰色
+    }
+
+    // 获取窗口中央部件的几何区域
+    QWidget* centralWidget = this->centralWidget();
+    QRect targetRect;
+    if (centralWidget) {
+        targetRect = centralWidget->geometry();
+    } else {
+        targetRect = this->rect();
+    }
+
+    // 计算缩放后的图片位置和大小
+    QPixmap scaledPixmap = m_backgroundPixmap.scaled(
+        targetRect.size(),
+        m_backgroundAspectRatioMode,
+        Qt::SmoothTransformation
+    );
+
+    int imgX = targetRect.x() + (targetRect.width() - scaledPixmap.width()) / 2;
+    int imgY = targetRect.y() + (targetRect.height() - scaledPixmap.height()) / 2;
+
+    // 将窗口坐标转换为图片坐标
+    int pixelX = pos.x() - imgX;
+    int pixelY = pos.y() - imgY;
+
+    // 确保坐标在图片范围内
+    if (pixelX < 0 || pixelX >= scaledPixmap.width() ||
+        pixelY < 0 || pixelY >= scaledPixmap.height()) {
+        return QColor("#495057");  // 图片外的区域返回默认灰色
+    }
+
+    // 获取该位置的像素颜色
+    QImage image = scaledPixmap.toImage();
+    QColor bgColor = image.pixelColor(pixelX, pixelY);
+
+    // 计算亮度 (使用相对亮度公式)
+    qreal luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
+
+    // 考虑透明度
+    luminance = luminance * bgColor.alphaF() * m_backgroundOpacity + 0.95 * (1 - bgColor.alphaF() * m_backgroundOpacity);
+
+    // 如果亮度大于0.5，使用灰色文字；否则使用白色
+    if (luminance > 0.5) {
+        return QColor("#495057");  // 深色文字（原来的灰色）
+    } else {
+        return QColor("#ffffff");  // 白色文字
+    }
+}
+
+// 辅助函数：应用标签样式，确保除颜色外所有样式一致
+static void applyLabelStyle(QLabel* label, const QColor& textColor)
+{
+    if (!label) return;
+    
+    // 使用完全一致的样式模板，只改变颜色
+    static const QString styleTemplate = R"(
+        QLabel {
+            font-weight: bold;
+            color: %1;
+            padding: 6px 8px;
+            background-color: transparent;
+            border-radius: 6px;
+            border: none;
+        }
+    )";
+    
+    label->setStyleSheet(styleTemplate.arg(textColor.name()));
+}
+
+void GXTStudio::updateLabelColors()
+{
+    // 更新所有标签页的标签颜色
+    for (auto& tab : m_fileTabs) {
+        if (tab.tableListLabel) {
+            QPoint pos = tab.tableListLabel->mapTo(this, QPoint(tab.tableListLabel->width() / 2, tab.tableListLabel->height() / 2));
+            QColor textColor = getTextColorForPosition(pos);
+            applyLabelStyle(tab.tableListLabel, textColor);
+        }
+        
+        if (tab.entryTableLabel) {
+            QPoint pos = tab.entryTableLabel->mapTo(this, QPoint(tab.entryTableLabel->width() / 2, tab.entryTableLabel->height() / 2));
+            QColor textColor = getTextColorForPosition(pos);
+            applyLabelStyle(tab.entryTableLabel, textColor);
+        }
+    }
+}
+
 void GXTStudio::setBackgroundImage(const QString& imagePath)
 {
     if (imagePath.isEmpty()) {
@@ -6447,6 +6552,9 @@ void GXTStudio::setBackgroundImage(const QString& imagePath)
     }
     showLogMessage(QString("已设置背景图片: %1").arg(imagePath));
     update();  // 触发重绘
+    
+    // 更新标签颜色以匹配背景
+    QTimer::singleShot(100, this, &GXTStudio::updateLabelColors);
 }
 
 void GXTStudio::setBackgroundOpacity(qreal opacity)
@@ -6473,6 +6581,7 @@ void GXTStudio::clearBackground()
     }
     update();  // 触发重绘
     showLogMessage("已清除背景图片");
+    updateLabelColors();  // 恢复默认颜色
 }
 
 bool GXTStudio::isBackgroundEnabled() const

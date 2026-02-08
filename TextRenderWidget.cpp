@@ -125,7 +125,7 @@ TextRenderWidget::TextRenderWidget(QWidget* parent)
     , m_pngCacheValid(false)
 {
     // 启用硬件加速和优化渲染
-    setAttribute(Qt::WA_OpaquePaintEvent); // 不透明绘制，减少合成，提升性能
+    setAttribute(Qt::WA_TranslucentBackground); // 启用透明背景
     setAttribute(Qt::WA_NoSystemBackground); // 禁用系统背景，手动绘制
     setAttribute(Qt::WA_NativeWindow); // 使用原生窗口，启用GPU硬件加速
     setMinimumHeight(40);  // 降低最小高度
@@ -552,11 +552,11 @@ void TextRenderWidget::drawGradientBackground(QPainter* painter)
 {
     QRect rect = this->rect();
     
-    // 使用现代化灰色背景填充
-    painter->fillRect(rect, QColor(240, 240, 240));  // #f0f0f0
+    // 背景完全透明
+    painter->fillRect(rect, Qt::transparent);
     
-    // 绘制圆角边框
-    painter->setPen(QPen(QColor(208, 208, 208), 1));  // #d0d0d0
+    // 绘制圆角边框（半透明）
+    painter->setPen(QPen(QColor(208, 208, 208, 128), 1));  // #d0d0d0 半透明
     painter->setBrush(Qt::NoBrush);
     
     // 使用抗锯齿绘制圆角矩形

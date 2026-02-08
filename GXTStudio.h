@@ -134,6 +134,10 @@ struct FileTab {
     
     // 文本渲染预览控件
     class TextRenderWidget* textRenderWidget = nullptr;
+    
+    // 标题标签（用于动态颜色更新）
+    QLabel* tableListLabel = nullptr;
+    QLabel* entryTableLabel = nullptr;
 
     // 字符表相关控件和数据
     class CharTableWidget* charTableWidget = nullptr;  // 字符表显示控件
@@ -554,6 +558,8 @@ private:
     bool m_backgroundEnabled;    // 是否启用背景
     Qt::AspectRatioMode m_backgroundAspectRatioMode;  // 图片缩放模式
     void drawBackground(QPainter* painter);  // 绘制背景方法
+    QColor getTextColorForPosition(const QPoint& pos);  // 根据背景位置获取文字颜色
+    void updateLabelColors();  // 更新标签文字颜色
 
     // 主要控件
     QTabWidget* m_tabWidget;
