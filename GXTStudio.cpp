@@ -59,9 +59,9 @@ protected:
                 QRect listRect = m_listWidget->geometry();
 
                 // 按钮右对齐列表控件右侧，下移到底部留白区域
-                // 按钮大小为42x42，在底部50px的留白区域中，距离底部5px
-                int buttonX = listRect.right() - 42;  // 右对齐列表控件右侧
-                int buttonY = listRect.bottom() + 5;  // 下移到底部留白，距离底部5px
+                // 按钮大小为40x40，在底部45px的留白区域中，与右侧文本渲染控件中间对齐
+                int buttonX = listRect.right() - 40;  // 右对齐列表控件右侧
+                int buttonY = listRect.bottom() + 5;  // 下移到底部留白，与文本渲染控件中间对齐
 
                 m_button->move(buttonX, buttonY);
             }
@@ -457,6 +457,17 @@ QWidget* GXTStudio::createWelcomeTab()
     scrollArea->setFrameShape(QFrame::NoFrame);
     scrollArea->setStyleSheet("background: transparent;");
     scrollArea->viewport()->setStyleSheet("background: transparent;");
+    
+    // 防画面撕裂设置 - 优化绘制属性，避免背景重绘
+    scrollArea->viewport()->setAttribute(Qt::WA_OpaquePaintEvent, true);   // 启用不透明绘制，减少重绘区域
+    scrollArea->viewport()->setAttribute(Qt::WA_NoSystemBackground, true); // 禁用系统背景绘制
+    scrollArea->setAutoFillBackground(false);                              // 禁用自动填充背景，避免双重绘制
+    scrollArea->viewport()->setAutoFillBackground(false);
+    
+    // 平滑滚动设置 - 适中的滚动步长
+    QScrollBar* vScrollBar = scrollArea->verticalScrollBar();
+    vScrollBar->setSingleStep(30);  // 适中的单步滚动距离，平衡平滑度和响应性
+    vScrollBar->setPageStep(100);   // 设置页面滚动距离
 
     // 创建内容容器
     QWidget* contentWidget = new QWidget();
@@ -5470,14 +5481,15 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     tableListPanelLayout->setContentsMargins(0, 0, 0, 0);
     tableListPanelLayout->setSpacing(0);
     tableListPanelLayout->addWidget(tableListLabel);
+    tableListPanelLayout->addSpacing(6);  // 添加间距使表格列表与右侧表格对齐
     tableListPanelLayout->addWidget(tableList, 1);
     
     // 为列表底部添加额外空间，防止按钮遮挡最后一项
-    tableListPanelLayout->addSpacing(55);  // 添加55px的底部空间（按钮42px + 底部距离5px + 8px额外空间）
+    tableListPanelLayout->addSpacing(45);  // 添加45px的底部空间（与右侧键值对添加区域45px对齐）
     
     // 创建圆形添加按钮 - 放在列表控件内侧右下角
     QToolButton* addTableButton = new QToolButton(tableListPanel);
-    addTableButton->setFixedSize(42, 42);  // 设置固定大小为42x42，用于圆形
+    addTableButton->setFixedSize(40, 40);  // 设置固定大小为40x40，与右侧文本渲染控件40px高度对齐
     addTableButton->setCursor(Qt::PointingHandCursor);
     addTableButton->setToolTip("创建新的表格");
     addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM && !tab.isDAT);
@@ -5501,8 +5513,8 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
             background-color: %1;
             color: white;
             border: none;
-            border-radius: 21px;  /* 设置为宽度的一半，形成圆形 */
-            font-size: 18px;
+            border-radius: 20px;  /* 设置为宽度的一半，形成圆形（40px/2=20px） */
+            font-size: 16px;
             font-weight: bold;
             padding: 0px;  /* 移除内边距 */
             margin: 0px;   /* 移除外边距 */
@@ -5522,16 +5534,16 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     
     // 如果Font Awesome字体可用，使用它以确保图标居中
     if (!addTableFontFamily.isEmpty()) {
-        addTableButton->setFont(FA::solidFont(18));
+        addTableButton->setFont(FA::solidFont(16));
     } else {
-        addTableButton->setFont(QFont("Microsoft YaHei", 16, QFont::Bold));
+        addTableButton->setFont(QFont("Microsoft YaHei", 14, QFont::Bold));
     }
     
     // 初始定位按钮：右对齐列表控件右侧，下移到底部留白区域
-    // 按钮大小为42x42，在底部50px的留白区域中，距离底部5px
+    // 按钮大小为40x40，在底部45px的留白区域中，与文本渲染控件中间对齐
     QRect listRect = tableList->geometry();
-    int buttonX = listRect.right() - 42;  // 右对齐列表控件右侧
-    int buttonY = listRect.bottom() + 5;  // 下移到底部留白，距离底部5px
+    int buttonX = listRect.right() - 40;  // 右对齐列表控件右侧
+    int buttonY = listRect.bottom() + 10;  // 下移到底部留白，与文本渲染控件中间对齐（45-40)/2≈2.5px，再加一点偏移使其视觉居中
     addTableButton->move(buttonX, buttonY);
 
     // 当父容器大小改变时，重新定位按钮
