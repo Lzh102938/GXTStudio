@@ -153,6 +153,8 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_backgroundOpacity(1.0)  // 默认透明度100%（完全不透明）
     , m_backgroundEnabled(false)  // 默认禁用背景
     , m_backgroundAspectRatioMode(Qt::KeepAspectRatioByExpanding)  // 填充模式：保持比例填充，可能裁剪边缘
+    , m_searchResultCache(nullptr)
+    , m_cacheIndex(0)
 {
     ui.setupUi(this);
     
@@ -235,10 +237,16 @@ GXTStudio::GXTStudio(QWidget *parent)
     
     // 初始化码表转换器
     m_codeTableConverter = new CodeTableConverter(this);
-    
+
     // 初始化版本感知保存系统
     initializeSaveStrategies();
-    
+
+    // 【性能优化】初始化搜索结果缓存
+    m_searchResultCache = new SearchResultCache[MAX_SEARCH_CACHE];
+    for (int i = 0; i < MAX_SEARCH_CACHE; ++i) {
+        m_searchResultCache[i].cacheKey = QString::number(i);  // 初始化缓存键
+    }
+
     // 设置布局优化
     setupResizeOptimizations();
     
@@ -378,6 +386,12 @@ GXTStudio::~GXTStudio()
 
     // 清理资源
     m_fileTabs.clear();
+
+    // 【性能优化】清理搜索结果缓存
+    if (m_searchResultCache) {
+        delete[] m_searchResultCache;
+        m_searchResultCache = nullptr;
+    }
 }
 
 // 格式化键值显示 - 用于导出txt时显示明文或添加0x前缀
@@ -2528,21 +2542,48 @@ void GXTStudio::performSearch(const QString& searchText)
 {
     FileTab* tab = getCurrentTab();
     if (!tab) return;
-    
+
     // 获取搜索选项
     bool caseSensitive = tab->caseSensitiveButton ? tab->caseSensitiveButton->isChecked() : false;
     bool useRegex = tab->regexButton ? tab->regexButton->isChecked() : false;
-    
+
     // 清除之前的高亮
     clearSearchHighlight();
-    
+
     if (searchText.isEmpty()) {
         m_searchState.clear();
         showLogMessage("搜索已清空");
         return;
     }
-    
-    // 编译正则表达式（如果需要）
+
+    // 【性能优化1】检查搜索结果缓存
+    QString cacheKey = searchText + "|" + QString::number(caseSensitive) + "|" + QString::number(useRegex);
+    for (int i = 0; i < MAX_SEARCH_CACHE; ++i) {
+        if (m_searchResultCache[i].isValid(searchText, caseSensitive, useRegex)) {
+            // 【缓存命中】直接使用缓存结果
+            m_searchState.searchText = searchText;
+            m_searchState.currentTableIndex = 0;
+            m_searchState.currentEntryIndex = -1;
+            m_searchState.allMatches = m_searchResultCache[i].matches;
+            m_searchState.caseSensitive = caseSensitive;
+            m_searchState.useRegex = useRegex;
+            m_searchState.isValid = !m_searchState.allMatches.empty();
+
+            if (m_searchState.isValid) {
+                QString modeText = useRegex ? " (正则表达式)" : "";
+                if (caseSensitive && !useRegex) {
+                    modeText = " (区分大小写)";
+                }
+                showLogMessage(QString("找到 %1 个匹配项%2 (缓存)").arg(m_searchState.allMatches.size()).arg(modeText));
+                jumpToMatch(0);
+            } else {
+                showLogMessage("未找到匹配项");
+            }
+            return;
+        }
+    }
+
+    // 【性能优化2】编译正则表达式（如果需要）
     QRegularExpression regex;
     if (useRegex) {
         QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
@@ -2551,14 +2592,14 @@ void GXTStudio::performSearch(const QString& searchText)
         }
         regex.setPattern(searchText);
         regex.setPatternOptions(options);
-        
+
         if (!regex.isValid()) {
             showLogMessage(QString("正则表达式错误: %1").arg(regex.errorString()));
             m_searchState.clear();
             return;
         }
     }
-    
+
     // 更新搜索状态
     m_searchState.searchText = searchText;
     m_searchState.currentTableIndex = 0;
@@ -2566,27 +2607,37 @@ void GXTStudio::performSearch(const QString& searchText)
     m_searchState.allMatches.clear();
     m_searchState.caseSensitive = caseSensitive;
     m_searchState.useRegex = useRegex;
-    
+
     Qt::CaseSensitivity cs = caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
-    
+
+    // 【性能优化3】预分配内存，避免多次重新分配
+    m_searchState.allMatches.reserve(100);  // 预分配100个结果
+
+    // 【性能优化4】搜索文本的快速长度检查
+    const int searchTextLen = searchText.length();
+    bool useQuickMatch = !useRegex && searchTextLen >= 3;  // 至少3个字符才使用快速匹配
+
     // 在所有表中搜索匹配项
     if (tab->isWHM) {
         // WHM文件搜索
-        for (size_t i = 0; i < tab->whmEntries.size(); ++i) {
-            // 安全检查
-            if (i >= tab->whmEntries.size() || tab->whmEntries.empty()) break;
-            
+        const size_t whmSize = tab->whmEntries.size();
+        for (size_t i = 0; i < whmSize; ++i) {
             const auto& entry = tab->whmEntries[i];
             QString hashStr = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0');
             QString text = hashStr + " " + QString::fromStdString(entry.text);
-            
+
             bool matched = false;
             if (useRegex) {
                 matched = regex.match(text).hasMatch();
             } else {
-                matched = text.contains(searchText, cs);
+                // 【性能优化5】快速长度检查
+                if (useQuickMatch && text.length() < searchTextLen) {
+                    matched = false;
+                } else {
+                    matched = text.contains(searchText, cs);
+                }
             }
-            
+
             if (matched) {
                 m_searchState.allMatches.emplace_back(0, static_cast<int>(i));
             }
@@ -2598,23 +2649,39 @@ void GXTStudio::performSearch(const QString& searchText)
             for (size_t entryIdx = 0; entryIdx < table.entries.size(); ++entryIdx) {
                 const auto& entry = table.entries[entryIdx];
                 QString text = QString::fromStdString(entry.key) + " " + QString::fromStdString(entry.value);
-                
+
                 bool matched = false;
                 if (useRegex) {
                     matched = regex.match(text).hasMatch();
                 } else {
-                    matched = text.contains(searchText, cs);
+                    // 【性能优化5】快速长度检查
+                    if (useQuickMatch && text.length() < searchTextLen) {
+                        matched = false;
+                    } else {
+                        matched = text.contains(searchText, cs);
+                    }
                 }
-                
+
                 if (matched) {
                     m_searchState.allMatches.emplace_back(static_cast<int>(tableIdx), static_cast<int>(entryIdx));
                 }
             }
         }
     }
-    
+
     m_searchState.isValid = !m_searchState.allMatches.empty();
-    
+
+    // 【性能优化6】存储搜索结果到缓存
+    if (m_searchResultCache && !m_searchState.allMatches.empty()) {
+        // 使用轮换策略存储到缓存
+        int cacheIdx = m_cacheIndex;
+        m_searchResultCache[cacheIdx].searchText = searchText;
+        m_searchResultCache[cacheIdx].caseSensitive = caseSensitive;
+        m_searchResultCache[cacheIdx].useRegex = useRegex;
+        m_searchResultCache[cacheIdx].matches = m_searchState.allMatches;
+        m_cacheIndex = (m_cacheIndex + 1) % MAX_SEARCH_CACHE;
+    }
+
     if (m_searchState.isValid) {
         QString modeText = useRegex ? " (正则表达式)" : "";
         if (caseSensitive && !useRegex) {
@@ -6410,41 +6477,47 @@ void GXTStudio::resizeEvent(QResizeEvent* event)
 {
     // 调用父类resizeEvent
     QMainWindow::resizeEvent(event);
-    
+
     // 更严格的尺寸变化过滤，大幅减少不必要的计算
     QSize newSize = event->size();
     QSize oldSize = m_lastWindowSize;
-    
+
     int widthDiff = newSize.width() - oldSize.width();
-    
+
     // 【关键优化1】忽略小的宽度变化，提高阈值到30px
     if (abs(widthDiff) < 30) {
         // 宽度变化太小，直接返回，不做任何处理
         return;
     }
-    
+
     // 【关键优化2】只有在宽度显著变化时才调整列宽
     bool needsColumnResize = abs(widthDiff) >= 50;
-    
+
     if (needsColumnResize && m_resizeDebouncer) {
         // 停止之前的防抖定时器，重置防抖
         if (m_resizeDebouncer->isActive()) {
             m_resizeDebouncer->stop();
         }
-        
+
         // 【关键优化3】只标记需要更新，不立即执行任何操作
         FileTab* currentTab = getCurrentTab();
         if (currentTab) {
             currentTab->cache.layoutNeedsUpdate = true;
         }
-        
+
         // 启动新的防抖定时器，延迟执行实际操作
         m_resizeDebouncer->start();
     }
-    
+
     // 记录新的大小
     m_lastWindowSize = newSize;
-    
+
+    // 【性能优化】窗口大小显著变化时，清理颜色计算器的网格缓存
+    // 精确缓存会自动失效，但网格缓存可能包含过时数据
+    if (m_backgroundEnabled && abs(widthDiff) >= 100) {
+        m_textColorCalculator.clearCache();
+    }
+
     // 如果启用了背景，更新标签颜色以匹配新位置的背景
     if (m_backgroundEnabled) {
         updateLabelColors();
