@@ -16,6 +16,98 @@
 #include <QThread>
 #include <functional>
 
+// ============================================================================
+// 优化的文本颜色计算器 - 缓存计算结果以提高性能
+// ============================================================================
+class TextColorCalculator {
+public:
+    // 更新背景图片缓存（在背景图片变化时调用）
+    void updateBackground(const QPixmap& pixmap, Qt::AspectRatioMode aspectRatioMode, qreal opacity) {
+        m_backgroundImage = pixmap.toImage();
+        m_aspectRatioMode = aspectRatioMode;
+        m_opacity = opacity;
+        m_cachedTargetSize = QSize(); // 清除缓存的大小
+    }
+    
+    // 启用/禁用背景
+    void setEnabled(bool enabled) { m_enabled = enabled; }
+    bool isEnabled() const { return m_enabled; }
+    
+    // 计算指定位置的文字颜色（窗口坐标）
+    // targetRect: 背景图片绘制的目标区域（通常是centralWidget的几何区域）
+    QColor calculateColor(const QPoint& pos, const QRect& targetRect) {
+        if (!m_enabled || m_backgroundImage.isNull()) {
+            return m_defaultColor;
+        }
+        
+        // 只在目标大小变化时重新计算缩放参数
+        if (targetRect.size() != m_cachedTargetSize) {
+            m_cachedTargetSize = targetRect.size();
+            m_cachedScaledImage = m_backgroundImage.scaled(
+                targetRect.size(),
+                m_aspectRatioMode,
+                Qt::SmoothTransformation
+            );
+            m_cachedImgX = targetRect.x() + (targetRect.width() - m_cachedScaledImage.width()) / 2;
+            m_cachedImgY = targetRect.y() + (targetRect.height() - m_cachedScaledImage.height()) / 2;
+        }
+        
+        // 将窗口坐标转换为图片坐标
+        int pixelX = pos.x() - m_cachedImgX;
+        int pixelY = pos.y() - m_cachedImgY;
+        
+        // 确保坐标在图片范围内
+        if (pixelX < 0 || pixelX >= m_cachedScaledImage.width() ||
+            pixelY < 0 || pixelY >= m_cachedScaledImage.height()) {
+            return m_defaultColor;
+        }
+        
+        // 直接获取像素颜色（无需再转换）
+        QColor bgColor = m_cachedScaledImage.pixelColor(pixelX, pixelY);
+        
+        // 计算亮度 (使用相对亮度公式)
+        qreal luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
+        
+        // 考虑透明度
+        luminance = luminance * bgColor.alphaF() * m_opacity + 0.95 * (1 - bgColor.alphaF() * m_opacity);
+        
+        // 根据亮度返回对比色
+        return (luminance > 0.5) ? m_darkTextColor : m_lightTextColor;
+    }
+    
+    // 批量计算多个位置的颜色（返回平均颜色以保持一致性）
+    QColor calculateColorForRegion(const QRect& region, const QRect& targetRect) {
+        if (!m_enabled || m_backgroundImage.isNull()) {
+            return m_defaultColor;
+        }
+        
+        // 简单优化：使用区域中心点
+        return calculateColor(region.center(), targetRect);
+    }
+    
+    // 设置自定义颜色
+    void setDefaultColor(const QColor& color) { m_defaultColor = color; }
+    void setDarkTextColor(const QColor& color) { m_darkTextColor = color; }
+    void setLightTextColor(const QColor& color) { m_lightTextColor = color; }
+    
+private:
+    QImage m_backgroundImage;           // 原始背景图片
+    Qt::AspectRatioMode m_aspectRatioMode = Qt::KeepAspectRatioByExpanding;
+    qreal m_opacity = 1.0;
+    bool m_enabled = false;
+    
+    // 缓存的缩放结果
+    QImage m_cachedScaledImage;
+    QSize m_cachedTargetSize;
+    int m_cachedImgX = 0;
+    int m_cachedImgY = 0;
+    
+    // 颜色配置
+    QColor m_defaultColor = QColor("#495057");   // 默认灰色
+    QColor m_darkTextColor = QColor("#495057");  // 深色背景上的文字
+    QColor m_lightTextColor = QColor("#ffffff"); // 浅色背景上的文字
+};
+
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QMenuBar>
 #include <QtWidgets/QToolBar>
@@ -237,8 +329,13 @@ class OptimizedListItemDelegate : public QStyledItemDelegate {
     
 public:
     explicit OptimizedListItemDelegate(QObject* parent = nullptr)
-        : QStyledItemDelegate(parent) {
+        : QStyledItemDelegate(parent), m_cachedTextColor(33, 37, 41) {
         m_deleteIconRect = QRect(); // 初始化删除图标区域
+    }
+    
+    // 设置缓存的文本颜色（由外部在背景变化时更新）
+    void setCachedTextColor(const QColor& color) {
+        m_cachedTextColor = color;
     }
     
     // 核心绘制函数 - 使用原生绘制避免QWidget开销
@@ -253,26 +350,20 @@ public:
         bool isSelected = (option.state & QStyle::State_Selected);
         bool isHovered = (option.state & QStyle::State_MouseOver);
         
-        QColor bgColor;
+        // 绘制圆角矩形背景 - 未选中状态完全透明
         if (isSelected) {
-            bgColor = QColor(227, 242, 253);
+            QColor bgColor = QColor(187, 222, 251, 220);  // 加深选中背景色：从(227,242,253,200)到(187,222,251,220)
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(bgColor);
+            painter->drawRoundedRect(option.rect.adjusted(4, 2, -4, -2), 6, 6);
         } else if (isHovered) {
-            bgColor = QColor(248, 249, 250);
-        } else {
-            bgColor = Qt::white;
-        }
-        
-        // 绘制圆角矩形背景
-        painter->setPen(Qt::NoPen);
-        painter->setBrush(bgColor);
-        painter->drawRoundedRect(option.rect.adjusted(4, 2, -4, -2), 6, 6);
-        
-        // 绘制微妙的底部边框（只在非悬停和未选中时）
-        if (!isSelected && !isHovered) {
-            painter->setPen(QColor(240, 240, 240));
-            painter->setBrush(Qt::NoBrush);
+            QColor bgColor = QColor(227, 242, 253, 180);  // 加深悬停背景色：从(248,249,250,150)到(227,242,253,180)
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(bgColor);
             painter->drawRoundedRect(option.rect.adjusted(4, 2, -4, -2), 6, 6);
         }
+        
+        // 未选中状态不绘制边框，保持完全透明
         
         // 获取数据 - 从UserRole获取分开的表名和计数
         QString tableName = index.data(Qt::UserRole + 1).toString();
@@ -287,7 +378,9 @@ public:
         
         // 绘制表格名称 - 使用原始字体
         painter->setFont(option.font);
-        painter->setPen(isMain ? QColor(25, 118, 210) : QColor(33, 37, 41));
+        // MAIN表使用更深的蓝色，其他表使用缓存的自动判断颜色
+        QColor textColor = isMain ? QColor(13, 71, 161) : m_cachedTextColor;  // 加深蓝色：从(25,118,210)到(13,71,161)
+        painter->setPen(textColor);
         
         // 文本省略处理
         QString elidedName = painter->fontMetrics().elidedText(
@@ -358,6 +451,7 @@ signals:
 
 private:
     QRect m_deleteIconRect; // 删除图标区域
+    QColor m_cachedTextColor; // 缓存的文本颜色（避免每次绘制重复计算）
 };
 
 
@@ -557,8 +651,9 @@ private:
     qreal m_backgroundOpacity;   // 背景透明度 (0.0 - 1.0)
     bool m_backgroundEnabled;    // 是否启用背景
     Qt::AspectRatioMode m_backgroundAspectRatioMode;  // 图片缩放模式
+    TextColorCalculator m_textColorCalculator;  // 优化的文本颜色计算器
     void drawBackground(QPainter* painter);  // 绘制背景方法
-    QColor getTextColorForPosition(const QPoint& pos);  // 根据背景位置获取文字颜色
+    QColor getTextColorForPosition(const QPoint& pos);  // 根据背景位置获取文字颜色（包装方法）
     void updateLabelColors();  // 更新标签文字颜色
     void updateSearchUIColors(FileTab& tab);  // 更新搜索UI颜色
 
@@ -765,7 +860,7 @@ public:
         m_yaheiFont.setPointSize(QApplication::font().pointSize()); // 立即设置字体大小
         
         // 预计算颜色，避免每次都查询
-        m_zebraColor = QColor(240, 248, 255);
+        m_zebraColor = QColor(227, 242, 253, 200);  // 加深斑马纹蓝色：从(240,248,255,180)到(227,242,253,200)
         m_highlightColor = QColor(255, 235, 59, 180);
     }
     
@@ -788,40 +883,43 @@ public:
         if (text.isEmpty()) {
             return;
         }
-        
-        // 【性能优化1】使用预计算的颜色，避免频繁查询调色板
+
+        // 【关键优化】每次绘制都清除背景，消除残留问题
         const bool isSelected = (option.state & QStyle::State_Selected);
-        
-        // 【性能优化2】快速绘制背景 - 斑马纹只在奇数行绘制
+
+        // 【关键修复】强制绘制背景，确保清除任何残留内容
         if (isSelected) {
             painter->fillRect(option.rect, option.palette.highlight());
         } else if (index.row() & 1) { // 使用位运算代替取模，更快速
             painter->fillRect(option.rect, m_zebraColor);
+        } else {
+            // 偶数行也绘制透明背景，清除残留
+            painter->fillRect(option.rect, Qt::transparent);
         }
-        
-        // 【性能优化3】预计算文本颜色，减少条件判断
+
+        // 【性能优化】预计算文本颜色，减少条件判断
         if (isSelected) {
             painter->setPen(option.palette.highlightedText().color());
         } else {
             painter->setPen(option.palette.text().color());
         }
-        
-        // 【性能优化4】按列设置字体 - 减少不必要的设置
+
+        // 【性能优化】按列设置字体 - 减少不必要的设置
         painter->setFont(index.column() == 0 ? m_monospaceFont : m_yaheiFont);
-        
+
         // 预计算文本区域
         const QRect textRect = option.rect.adjusted(4, 2, -4, -2);
-        
-        // 【性能优化5】搜索高亮优化 - 快速判断，避免复杂逻辑
+
+        // 【性能优化】搜索高亮优化 - 快速判断，避免复杂逻辑
         if (!m_searchText.isEmpty()) {
             if (text.contains(m_searchText, m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
                 paintTextWithSimpleHighlight(painter, text, textRect);
                 return;
             }
         }
-        
-        // 【性能优化6】快速文本绘制 - 省略号优化
-        painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, 
+
+        // 【性能优化】快速文本绘制 - 省略号优化
+        painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter,
                         painter->fontMetrics().elidedText(text, Qt::ElideRight, textRect.width()));
     }
     

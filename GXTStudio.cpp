@@ -4563,6 +4563,13 @@ void GXTStudio::updateTableList()
         auto* delegate = new OptimizedListItemDelegate(tab->tableList);
         tab->tableList->setItemDelegate(delegate);
         
+        // 计算一次文本颜色（使用颜色计算器，避免重复计算）
+        QWidget* centralWidget = this->centralWidget();
+        QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
+        QPoint listCenter = tab->tableList->mapTo(this, QPoint(tab->tableList->width() / 2, tab->tableList->height() / 2));
+        QColor textColor = m_textColorCalculator.calculateColor(listCenter, targetRect);
+        delegate->setCachedTextColor(textColor);
+        
         // 连接删除表格信号
         connect(delegate, &OptimizedListItemDelegate::deleteTableRequested,
                 this, &GXTStudio::onDeleteTableFromList);
@@ -5433,11 +5440,6 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         "QListWidget::item:hover {"
         "   background-color: transparent;"
         "}"
-        "QScrollBar:vertical {"
-        "   width: 12px;"
-        "   background: #f5f5f5;"
-        "   margin: 0px;"
-        "}"
     );
     
     // 设置现代化的列表样式
@@ -5445,7 +5447,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         QListWidget {
             border: 1px solid #dee2e6;
             border-radius: 8px;
-            background-color: #ffffff;
+            background-color: rgba(255, 255, 255, 0.5);
             padding: 6px;
             outline: none;
             alternate-background-color: #f8f9fa;
@@ -5453,23 +5455,55 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         QListWidget::item {
             border: 1px solid #e9ecef;
             border-radius: 6px;
-            background-color: #ffffff;
+            background-color: transparent;
             padding: 10px 12px;
             margin: 2px 1px;
             min-height: 18px;
         }
         QListWidget::item:selected {
-            background-color: #e3f2fd;
-            border-color: #2196f3;
-            color: #1976d2;
+            background-color: rgba(187, 222, 251, 0.9);  // 加深选中背景色
+            border-color: #1976d2;
+            color: #0d47a1;  // 加深文字颜色
             font-weight: 500;
         }
         QListWidget::item:hover {
-            background-color: #f8f9fa;
-            border-color: #dee2e6;
+            background-color: rgba(227, 242, 253, 0.6);  // 加深悬停背景色
+            border-color: #90caf9;
         }
         QListWidget::item:selected:hover {
-            background-color: #bbdefb;
+            background-color: rgba(144, 202, 249, 0.95);  // 更深的选中悬停背景色
+        }
+        /* 垂直滚动条样式 */
+        QScrollBar:vertical {
+            width: 12px;
+            background: transparent;
+            margin: 0px;
+        }
+        /* 滚动条滑块样式 - 圆角矩形 */
+        QScrollBar::handle:vertical {
+            background: rgba(150, 150, 150, 0.6);
+            min-height: 30px;
+            border-radius: 6px;
+            margin: 2px;
+        }
+        /* 滑块悬停效果 */
+        QScrollBar::handle:vertical:hover {
+            background: rgba(120, 120, 120, 0.8);
+        }
+        /* 滑块按下效果 */
+        QScrollBar::handle:vertical:pressed {
+            background: rgba(100, 100, 100, 0.9);
+        }
+        /* 向上/向下按钮隐藏 */
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {
+            height: 0px;
+            background: none;
+        }
+        /* 滚动条上下边缘隐藏 */
+        QScrollBar::add-page:vertical,
+        QScrollBar::sub-page:vertical {
+            background: none;
         }
     )");
     
@@ -5626,11 +5660,11 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     entryTableView->setStyleSheet(R"(
         QTableView {
             border: none;
-            background-color: #ffffff;
+            background-color: rgba(255, 255, 255, 0.5);
             gridline-color: #f0f0f0;
             outline: none;
-            selection-background-color: #e3f2fd;
-            selection-color: #1976d2;
+            selection-background-color: #bbdefb;
+            selection-color: #0d47a1;
         }
         QTableView::item {
             padding: 6px 8px;
@@ -5639,17 +5673,17 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
             outline: none;
         }
         QTableView::item:selected {
-            background-color: #e3f2fd;
-            color: #1976d2;
+            background-color: #bbdefb;
+            color: #0d47a1;
         }
         QTableView::item:hover {
-            background-color: #f8f9ff;
+            background-color: #e3f2fd;
         }
         QTableView::item:focus {
             background-color: #fff;
         }
         QHeaderView::section {
-            background-color: #f5f5f5;
+            background-color: rgba(245, 245, 245, 0.5);
             border: 1px solid #ddd;
             border-bottom: 2px solid #ccc;
             padding: 4px 8px;
@@ -5662,7 +5696,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
             min-width: 120px;
         }
         QHeaderView::section:hover {
-            background-color: #e8e8e8;
+            background-color: rgba(232, 232, 232, 0.5);
         }
     )");
     
@@ -5695,7 +5729,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
                 border-radius: 6px;
                 padding: 6px 12px;
                 font-size: 12px;
-                background-color: #ffffff;
+                background-color: rgba(255, 255, 255, 0.5);
             }
             QLineEdit:focus {
                 border-color: #2196f3;
@@ -5713,7 +5747,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
                 border-radius: 6px;
                 padding: 6px 12px;
                 font-size: 12px;
-                background-color: #ffffff;
+                background-color: rgba(255, 255, 255, 0.5);
             }
             QLineEdit:focus {
                 border-color: #2196f3;
@@ -5845,43 +5879,50 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         }
     });
 
-    // 修复表格闪烁和性能问题 - 禁用不透明绘制以使用系统背景
+    // 修复表格滚动残留问题 - 正确的绘制属性设置
     entryTableView->setAttribute(Qt::WA_OpaquePaintEvent, false);
     entryTableView->setAttribute(Qt::WA_NoSystemBackground, false);
     entryTableView->setAttribute(Qt::WA_TranslucentBackground, false);
     entryTableView->setAttribute(Qt::WA_StyledBackground, true);
     entryTableView->setAttribute(Qt::WA_PaintOnScreen, false);
+    entryTableView->setAttribute(Qt::WA_StaticContents, false);  // 关键：禁用静态内容
     entryTableView->setAutoFillBackground(true);
-    
+
     // 应用表格优化设置
     setupTableOptimizations(entryTableView);
-    
+
     // 应用优化的委托
     OptimizedItemDelegate* delegate = new OptimizedItemDelegate(entryTableView);
     entryTableView->setItemDelegate(delegate);
     delegate->setHashKeyColumn(true);
-    
-    // 视口优化 - 关键的虚拟滚动设置
-    entryTableView->viewport()->setAttribute(Qt::WA_StaticContents, true);
+
+    // 视口优化 - 关键的虚拟滚动设置，消除残留
+    entryTableView->viewport()->setAttribute(Qt::WA_StaticContents, false);  // 关键：禁用静态内容
     entryTableView->viewport()->setAttribute(Qt::WA_OpaquePaintEvent, false);
     entryTableView->viewport()->setAttribute(Qt::WA_NoSystemBackground, false);
     entryTableView->viewport()->setAutoFillBackground(true);
+    entryTableView->viewport()->setAttribute(Qt::WA_PaintOnScreen, false);
     entryTableView->viewport()->setPalette(entryTableView->palette());
     
     // 设置视口大小策略以优化渲染
     entryTableView->viewport()->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     
-    // 【性能优化】连接滚动事件 - 使用防抖减少重绘频率
-    connect(entryTableView->verticalScrollBar(), &QScrollBar::valueChanged, this, 
+    // 【关键优化】连接滚动事件 - 强制重绘消除残留
+    connect(entryTableView->verticalScrollBar(), &QScrollBar::valueChanged, this,
             [this, entryTableView](int value) {
+                Q_UNUSED(value);
+                // 强制刷新视口以消除滚动残留
+                if (entryTableView) {
+                    entryTableView->viewport()->update();
+                }
+
                 // 懒加载：当滚动到接近底部时预加载数据
                 if (entryTableView && entryTableView->model()) {
                     int total = entryTableView->model()->rowCount();
                     int visible = entryTableView->viewport()->height() / entryTableView->verticalHeader()->defaultSectionSize();
                     int triggerPoint = total - visible - 20; // 提前20行触发
-                    
+
                     // 这里可以添加预加载逻辑
-                    Q_UNUSED(value);
                     Q_UNUSED(triggerPoint);
                 }
             });
@@ -6029,19 +6070,19 @@ void GXTStudio::setupTableOptimizations(QTableView* table)
     table->setSelectionBehavior(QAbstractItemView::SelectItems);
     table->setSelectionMode(QAbstractItemView::SingleSelection);
     
-    // 【关键优化】虚拟滚动优化设置 - 提升渲染性能
-    table->setAttribute(Qt::WA_StaticContents, true);      // 静态内容，减少重绘
-    table->setAttribute(Qt::WA_OpaquePaintEvent, true);   // 启用不透明绘制，减少合成开销
-    table->setAttribute(Qt::WA_NoSystemBackground, true);  // 禁用系统背景，减少绘制层级
-    table->setAutoFillBackground(false);                  // 禁用自动填充背景
-    table->setAttribute(Qt::WA_PaintOnScreen, true);      // 直接在屏幕上绘制，跳过中间缓冲
+    // 【关键优化】虚拟滚动优化设置 - 消除滚动残留问题
+    table->setAttribute(Qt::WA_StaticContents, false);     // 禁用静态内容，确保滚动时正确重绘
+    table->setAttribute(Qt::WA_OpaquePaintEvent, false);    // 禁用不透明绘制，使用透明合成
+    table->setAttribute(Qt::WA_NoSystemBackground, false);  // 启用系统背景，正确绘制背景
+    table->setAutoFillBackground(true);                    // 启用自动填充背景，清除残留内容
+    table->setAttribute(Qt::WA_PaintOnScreen, false);       // 禁用直接屏幕绘制，使用双缓冲
     
-    // 【关键优化】视口优化
-    table->viewport()->setAttribute(Qt::WA_StaticContents, true);
-    table->viewport()->setAttribute(Qt::WA_OpaquePaintEvent, true);
-    table->viewport()->setAttribute(Qt::WA_NoSystemBackground, true);
-    table->viewport()->setAutoFillBackground(false);
-    table->viewport()->setAttribute(Qt::WA_PaintOnScreen, true);
+    // 【关键优化】视口优化 - 消除残留的核心设置
+    table->viewport()->setAttribute(Qt::WA_StaticContents, false);     // 禁用静态内容
+    table->viewport()->setAttribute(Qt::WA_OpaquePaintEvent, false);    // 禁用不透明绘制
+    table->viewport()->setAttribute(Qt::WA_NoSystemBackground, false);  // 启用系统背景
+    table->viewport()->setAutoFillBackground(true);                    // 启用自动填充背景
+    table->viewport()->setAttribute(Qt::WA_PaintOnScreen, false);       // 禁用直接屏幕绘制
     
     // 表头优化
     table->verticalHeader()->setVisible(false);
@@ -6462,55 +6503,10 @@ void GXTStudio::drawBackground(QPainter* painter)
 
 QColor GXTStudio::getTextColorForPosition(const QPoint& pos)
 {
-    if (!m_backgroundEnabled || m_backgroundPixmap.isNull()) {
-        return QColor("#495057");  // 默认灰色
-    }
-
-    // 获取窗口中央部件的几何区域
+    // 使用优化的颜色计算器
     QWidget* centralWidget = this->centralWidget();
-    QRect targetRect;
-    if (centralWidget) {
-        targetRect = centralWidget->geometry();
-    } else {
-        targetRect = this->rect();
-    }
-
-    // 计算缩放后的图片位置和大小
-    QPixmap scaledPixmap = m_backgroundPixmap.scaled(
-        targetRect.size(),
-        m_backgroundAspectRatioMode,
-        Qt::SmoothTransformation
-    );
-
-    int imgX = targetRect.x() + (targetRect.width() - scaledPixmap.width()) / 2;
-    int imgY = targetRect.y() + (targetRect.height() - scaledPixmap.height()) / 2;
-
-    // 将窗口坐标转换为图片坐标
-    int pixelX = pos.x() - imgX;
-    int pixelY = pos.y() - imgY;
-
-    // 确保坐标在图片范围内
-    if (pixelX < 0 || pixelX >= scaledPixmap.width() ||
-        pixelY < 0 || pixelY >= scaledPixmap.height()) {
-        return QColor("#495057");  // 图片外的区域返回默认灰色
-    }
-
-    // 获取该位置的像素颜色
-    QImage image = scaledPixmap.toImage();
-    QColor bgColor = image.pixelColor(pixelX, pixelY);
-
-    // 计算亮度 (使用相对亮度公式)
-    qreal luminance = (0.299 * bgColor.red() + 0.587 * bgColor.green() + 0.114 * bgColor.blue()) / 255.0;
-
-    // 考虑透明度
-    luminance = luminance * bgColor.alphaF() * m_backgroundOpacity + 0.95 * (1 - bgColor.alphaF() * m_backgroundOpacity);
-
-    // 如果亮度大于0.5，使用灰色文字；否则使用白色
-    if (luminance > 0.5) {
-        return QColor("#495057");  // 深色文字（原来的灰色）
-    } else {
-        return QColor("#ffffff");  // 白色文字
-    }
+    QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
+    return m_textColorCalculator.calculateColor(pos, targetRect);
 }
 
 // 辅助函数：应用标签样式，确保除颜色外所有样式一致
@@ -6683,6 +6679,11 @@ void GXTStudio::setBackgroundImage(const QString& imagePath)
 
     m_backgroundPixmap = newPixmap;
     m_backgroundEnabled = true;
+    
+    // 更新文本颜色计算器的缓存
+    m_textColorCalculator.setEnabled(true);
+    m_textColorCalculator.updateBackground(m_backgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+    
     if (m_clearBackgroundAction) {
         m_clearBackgroundAction->setEnabled(true);
     }
@@ -6697,6 +6698,12 @@ void GXTStudio::setBackgroundOpacity(qreal opacity)
 {
     // 限制透明度范围在 0.0 - 1.0 之间
     m_backgroundOpacity = qBound(0.0, opacity, 1.0);
+    
+    // 更新颜色计算器的透明度设置
+    if (m_backgroundEnabled && !m_backgroundPixmap.isNull()) {
+        m_textColorCalculator.updateBackground(m_backgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+    }
+    
     if (m_backgroundEnabled) {
         update();  // 触发重绘
     }
@@ -6705,6 +6712,7 @@ void GXTStudio::setBackgroundOpacity(qreal opacity)
 void GXTStudio::setBackgroundEnabled(bool enabled)
 {
     m_backgroundEnabled = enabled;
+    m_textColorCalculator.setEnabled(enabled);
     update();  // 触发重绘
 }
 
@@ -6712,6 +6720,7 @@ void GXTStudio::clearBackground()
 {
     m_backgroundPixmap = QPixmap();
     m_backgroundEnabled = false;
+    m_textColorCalculator.setEnabled(false);
     if (m_clearBackgroundAction) {
         m_clearBackgroundAction->setEnabled(false);
     }
