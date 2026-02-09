@@ -123,6 +123,9 @@ TextRenderWidget::TextRenderWidget(QWidget* parent)
     , m_dragStartPos(0, 0)
     , m_isDragging(false)
     , m_pngCacheValid(false)
+    , m_cachedLineHeight(0)
+    , m_cachedFontScale(1.0)
+    , m_parseCacheValid(false)
 {
     // 启用硬件加速和优化渲染
     setAttribute(Qt::WA_TranslucentBackground); // 启用透明背景
@@ -132,6 +135,12 @@ TextRenderWidget::TextRenderWidget(QWidget* parent)
     setMaximumHeight(40);  // 降低最大高度
     setMinimumWidth(400);
     setAutoFillBackground(false);
+
+    // 【性能优化】初始化PNG缓存更新定时器（延迟500ms更新）
+    m_pngCacheUpdateTimer = new QTimer(this);
+    m_pngCacheUpdateTimer->setSingleShot(true);
+    m_pngCacheUpdateTimer->setInterval(500);  // 500ms延迟
+    connect(m_pngCacheUpdateTimer, &QTimer::timeout, this, &TextRenderWidget::onPNGCacheUpdateTimeout);
 
     loadViceCityFont();
     setupUI();
@@ -423,8 +432,10 @@ void TextRenderWidget::setGtaVersion(int version)
         m_gtaVersion = version;
         // 重新加载字体
         loadViceCityFont();
-        // 标记PNG缓存无效
+        // 标记缓存无效
+        m_parseCacheValid = false;
         m_pngCacheValid = false;
+        schedulePNGCacheUpdate();
         // 触发重绘
         update();
     }
@@ -492,11 +503,15 @@ void TextRenderWidget::setText(const QString& text)
     if (m_text == text) {
         return;
     }
-    
+
     m_text = text;
 
-    // 更新PNG缓存
+    // 【性能优化】标记缓存无效
+    m_parseCacheValid = false;
     m_pngCacheValid = false;
+
+    // 【性能优化】使用延迟PNG更新，避免频繁生成PNG
+    schedulePNGCacheUpdate();
 
     // 直接触发重绘，不再显示预览标记
     update(); // 触发重绘
@@ -511,6 +526,7 @@ void TextRenderWidget::onOutlineEnabledChanged(int state)
 {
     m_outlineEnabled = (state == Qt::Checked);
     m_pngCacheValid = false;
+    schedulePNGCacheUpdate();
     update();
 }
 
@@ -518,6 +534,7 @@ void TextRenderWidget::onShadowEnabledChanged(int state)
 {
     m_shadowEnabled = (state == Qt::Checked);
     m_pngCacheValid = false;
+    schedulePNGCacheUpdate();
     update();
 }
 
@@ -526,7 +543,9 @@ void TextRenderWidget::onFontSizeChanged(int size)
     m_fontSize = size;
     m_mainFont.setPointSize(m_fontSize);
     m_fallbackFont.setPointSize(m_fontSize);
+    m_parseCacheValid = false;  // 字体大小改变，需要重新解析
     m_pngCacheValid = false;
+    schedulePNGCacheUpdate();
     update();
 }
 
@@ -582,202 +601,150 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
     if (m_text.isEmpty()) {
         return;
     }
-    
+
     QRect rect = this->rect();
     QRect textRect = rect.adjusted(10, 6, -10, -6);  // 增加边距使外观更现代化
 
-    // 计算文本总高度用于垂直居中
-    QStringList lines = m_text.split('\n');
+    // 【性能优化】如果缓存无效，解析文本片段
+    if (!m_parseCacheValid) {
+        parseTextFragments(m_text);
+    }
+
     QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
     QFontMetrics fm(currentFont);
-    // 统一使用主字体和备用字体中较大的高度，确保中英文字符有足够的显示空间
-    QFontMetrics fm_fallback(m_fallbackFont);
-    int singleLineHeight = qMax(fm.height(), fm_fallback.height());
-    int totalTextHeight = lines.size() * singleLineHeight;
+    int totalTextHeight = m_parsedLinesCache.size() * m_cachedLineHeight;
 
-    // 计算中文字符缩放比例，使其与英文字符视觉高度一致
-    double fontScale = 1.0;
-    if (m_mainFontLoaded) {
-        fontScale = static_cast<double>(fm.height()) / static_cast<double>(fm_fallback.height());
-    }
-
-    // 调试输出
-    qDebug() << "Family:" << currentFont.family();
-    
     // 如果总文本高度超过可用空间，则限制在可用空间内
     int availableHeight = textRect.height();
+    int maxLines = m_parsedLinesCache.size();
     if (totalTextHeight > availableHeight) {
         // 如果文本太高，只显示能容纳的部分
-        int maxLines = availableHeight / singleLineHeight;
-        if (maxLines < lines.size()) {
-            lines = lines.mid(0, maxLines);
-            totalTextHeight = maxLines * singleLineHeight;
-        }
+        maxLines = availableHeight / m_cachedLineHeight;
+        totalTextHeight = maxLines * m_cachedLineHeight;
     }
-    
+
     // 计算垂直居中的起始Y位置
     int startY = textRect.top() + (availableHeight - totalTextHeight) / 2;
-    
+
     // 绘制阴影
     if (m_shadowEnabled) {
         painter->save();
         painter->setPen(QColor(0, 0, 0, 120)); // 减淡阴影
 
-        for (int i = 0; i < lines.size(); ++i) {
-            QString line = lines[i];
-            if (!line.isEmpty()) {
-                // 与主文本渲染一样，移除隐藏标记，只显示可见文本
-                QStringList parts = splitTextAndTokens(line);
+        for (int i = 0; i < maxLines; ++i) {
+            const LineFragments& line = m_parsedLinesCache[i];
 
-                int shadowXPos = textRect.left() + 2;
-                int shadowYPos = startY + 2 + i * singleLineHeight;
+            int shadowXPos = textRect.left() + 2;
+            int shadowYPos = startY + 2 + i * m_cachedLineHeight;
 
-                // 统一的基线：使用主字体的ascent，确保不同字体的字符在同一水平线上
-                int baseline = shadowYPos + fm.ascent();
+            // 统一的基线：使用主字体的ascent，确保不同字体的字符在同一水平线上
+            int baseline = shadowYPos + fm.ascent();
 
-                for (const QString& part : parts) {
-                    if (part.startsWith("~") && part.endsWith("~") && part.length() == 3) {
-                        // 这是一个颜色标记
-                        QString token = part.toLower();
+            for (const TextFragment& fragment : line.fragments) {
+                if (fragment.isHiddenToken || fragment.isColorToken) {
+                    continue;
+                }
 
-                        // 检查是否是隐藏标记
-                        if (!isHiddenToken(token)) {
-                            // 不是隐藏标记，但颜色标记本身不显示在文本中，只影响颜色
-                            // 所以我们跳过颜色标记，只添加普通文本
-                        }
-                    } else {
-                        // 普通文本，逐字符绘制
-                        for (const QChar& ch : part) {
-                            // 为当前字符选择合适的字体
-                            QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
+                // 使用缓存的文本片段
+                for (const QChar& ch : fragment.text) {
+                    // 为当前字符选择合适的字体
+                    QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
 
-                            // 如果是中文字符且主字体已加载，按比例缩放使其与英文字符视觉高度一致
-                            if (needsFallbackFont(ch) && m_mainFontLoaded && fontScale < 1.0) {
-                                QFont scaledFont = charFont;
-                                scaledFont.setPointSizeF(charFont.pointSizeF() * fontScale);
-                                charFont = scaledFont;
-                            }
-
-                            QFontMetrics fm_char(charFont);
-                            int charWidth = fm_char.horizontalAdvance(ch);
-
-                            // 检查是否超出边界
-                            if (shadowXPos + charWidth > textRect.right()) {
-                                break;
-                            }
-
-                            painter->setFont(charFont);
-                            // 使用统一的基线绘制阴影
-                            painter->drawText(shadowXPos, baseline, ch);
-                            shadowXPos += charWidth;
-                        }
+                    // 如果是中文字符且主字体已加载，按比例缩放使其与英文字符视觉高度一致
+                    if (needsFallbackFont(ch) && m_mainFontLoaded && m_cachedFontScale < 1.0) {
+                        QFont scaledFont = charFont;
+                        scaledFont.setPointSizeF(charFont.pointSizeF() * m_cachedFontScale);
+                        charFont = scaledFont;
                     }
+
+                    QFontMetrics fm_char(charFont);
+                    int charWidth = fm_char.horizontalAdvance(ch);
+
+                    // 检查是否超出边界
+                    if (shadowXPos + charWidth > textRect.right()) {
+                        break;
+                    }
+
+                    painter->setFont(charFont);
+                    painter->drawText(shadowXPos, baseline, ch);
+                    shadowXPos += charWidth;
                 }
             }
         }
         painter->restore();
     }
-    
+
     // 绘制文字（所有颜色都使用100%不透明度）
     painter->save();
 
     QColor currentColor(255, 255, 255, 255); // 默认白色100%不透明度
     painter->setPen(currentColor);
     painter->setOpacity(1.0); // 使用1.0不透明度
-    for (int i = 0; i < lines.size(); ++i) {
-        QString line = lines[i];
-        if (line.isEmpty()) {
-            continue;
-        }
 
+    for (int i = 0; i < maxLines; ++i) {
+        const LineFragments& line = m_parsedLinesCache[i];
         int xPos = textRect.left();
-        int yPos = startY + i * singleLineHeight;
+        int yPos = startY + i * m_cachedLineHeight;
 
         // 统一的基线：使用主字体的ascent，确保不同字体的字符在同一水平线上
         int baseline = yPos + fm.ascent();
 
-        // 分割文本和颜色标记
-        QStringList parts = splitTextAndTokens(line);
+        for (const TextFragment& fragment : line.fragments) {
+            if (fragment.isHiddenToken) {
+                continue;
+            }
 
-        for (const QString& part : parts) {
-            if (part.startsWith("~") && part.endsWith("~") && part.length() == 3) {
-                // 这是一个颜色标记
-                            QString token = part.toLower();
-
-                // 检查是否是隐藏标记
-                if (isHiddenToken(token)) {
-                    // 隐藏标记，不显示在文本中，只做逻辑处理
-                    continue;
-                }
-
-                // 更新颜色 - 使用当前版本信息
-                currentColor = getColorForToken(token, m_gtaVersion);
+            if (fragment.isColorToken) {
+                // 更新颜色
+                currentColor = fragment.color;
                 painter->setPen(currentColor);
             } else {
-                    // 这是普通文本，进行绘制
-                    if (!part.isEmpty()) {
-                        QFontMetrics fm_part(currentFont);
+                // 绘制文本
+                for (const QChar& ch : fragment.text) {
+                    // 为当前字符选择合适的字体
+                    QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
 
-                        // 检查是否超出边界
-                        for (const QChar& ch : part) {
-                            // 为当前字符选择合适的字体
-                            QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
-
-                            // 如果是中文字符且主字体已加载，按比例缩放使其与英文字符视觉高度一致
-                            if (needsFallbackFont(ch) && m_mainFontLoaded && fontScale < 1.0) {
-                                QFont scaledFont = charFont;
-                                scaledFont.setPointSizeF(charFont.pointSizeF() * fontScale);
-                                charFont = scaledFont;
-                            }
-
-                            QFontMetrics fm_char(charFont);
-                            int charWidth = fm_char.horizontalAdvance(ch);
-
-                            // 检查是否超出边界
-                            if (xPos + charWidth > textRect.right()) {
-                                break;
-                            }
-
-                            // 关键：每次绘制字符前都设置正确的字体
-                            painter->setFont(charFont);
-
-                        // 绘制描边
-                        if (m_outlineEnabled) {
-                            painter->save();
-                            QColor outlineColor(0, 0, 0, 255); // 黑色描边，完全不透明
-
-                            // 使用更细的描边 - 绘制一层
-                            QPainterPath path;
-                            // 使用统一的基线，而不是各自字体的ascent
-                            path.addText(xPos, baseline, charFont, ch);
-
-                            // 绘制单层描边，增加描边粗细
-                            painter->setPen(QPen(outlineColor, 3.5));
-                            painter->setBrush(outlineColor);
-                            painter->drawPath(path);
-
-                            painter->restore();
-
-                            // 重新设置文字颜色（已包含90%不透明度）
-                            painter->setPen(currentColor);
-                            // restore后字体可能被重置，重新设置
-                            painter->setFont(charFont);
-                        }
-
-                        // 绘制字符 - 使用统一的基线
-                        painter->drawText(xPos, baseline, ch);
-                        xPos += charWidth;
+                    // 如果是中文字符且主字体已加载，按比例缩放使其与英文字符视觉高度一致
+                    if (needsFallbackFont(ch) && m_mainFontLoaded && m_cachedFontScale < 1.0) {
+                        QFont scaledFont = charFont;
+                        scaledFont.setPointSizeF(charFont.pointSizeF() * m_cachedFontScale);
+                        charFont = scaledFont;
                     }
+
+                    QFontMetrics fm_char(charFont);
+                    int charWidth = fm_char.horizontalAdvance(ch);
+
+                    // 检查是否超出边界
+                    if (xPos + charWidth > textRect.right()) {
+                        break;
+                    }
+
+                    painter->setFont(charFont);
+
+                    // 绘制描边
+                    if (m_outlineEnabled) {
+                        painter->save();
+                        QColor outlineColor(0, 0, 0, 255); // 黑色描边，完全不透明
+
+                        QPainterPath path;
+                        path.addText(xPos, baseline, charFont, ch);
+
+                        painter->setPen(QPen(outlineColor, 3.5));
+                        painter->setBrush(outlineColor);
+                        painter->drawPath(path);
+
+                        painter->restore();
+                        painter->setPen(currentColor);
+                        painter->setFont(charFont);
+                    }
+
+                    painter->drawText(xPos, baseline, ch);
+                    xPos += charWidth;
                 }
             }
         }
-        
-        // 检查是否超出高度边界
-            if (yPos > textRect.bottom()) {
-            break;
-        }
     }
-    
+
     painter->restore();
 }
 
@@ -850,6 +817,11 @@ void TextRenderWidget::exportToImage()
         return;
     }
 
+    // 【性能优化】停止延迟更新定时器（如果正在运行），立即更新PNG缓存
+    if (m_pngCacheUpdateTimer->isActive()) {
+        m_pngCacheUpdateTimer->stop();
+    }
+
     // 确保PNG缓存已生成
     if (!m_pngCacheValid) {
         updateCachedPNG();
@@ -889,16 +861,19 @@ void TextRenderWidget::mouseMoveEvent(QMouseEvent* event)
 
     m_isDragging = true;
 
-
     // 创建拖拽对象
     QDrag* drag = new QDrag(this);
     QMimeData* mimeData = new QMimeData();
+
+    // 【性能优化】停止延迟更新定时器（如果正在运行），立即更新PNG缓存
+    if (m_pngCacheUpdateTimer->isActive()) {
+        m_pngCacheUpdateTimer->stop();
+    }
 
     // 确保PNG缓存已生成
     if (!m_pngCacheValid) {
         updateCachedPNG();
     }
-
 
     // 从缓存创建图片用于显示
     QImage image = QImage::fromData(m_cachedPNGData, "PNG");
@@ -923,10 +898,8 @@ void TextRenderWidget::mouseMoveEvent(QMouseEvent* event)
     drag->setPixmap(QPixmap::fromImage(image));
     drag->setHotSpot(event->pos());
 
-
     // 执行拖拽 - 强制使用CopyAction
     Qt::DropAction result = drag->exec(Qt::CopyAction, Qt::CopyAction);
-
 
     // 清理临时文件（延迟删除，让接收方有时间复制）
     QTimer::singleShot(1000, [tempPath]() {
@@ -964,28 +937,22 @@ void TextRenderWidget::dropEvent(QDropEvent* event)
 
 void TextRenderWidget::updateCachedPNG()
 {
-    // 计算文字的实际大小
-    QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
-    QFontMetrics fm(currentFont);
-    // 统一使用主字体和备用字体中较大的高度，确保中英文字符有足够的显示空间
-    QFontMetrics fm_fallback(m_fallbackFont);
-    int singleLineHeight = qMax(fm.height(), fm_fallback.height());
-
-    // 计算中文字符缩放比例，使其与英文字符视觉高度一致
-    double fontScale = 1.0;
-    if (m_mainFontLoaded) {
-        fontScale = static_cast<double>(fm.height()) / static_cast<double>(fm_fallback.height());
+    // 【性能优化】确保解析缓存有效
+    if (!m_parseCacheValid) {
+        parseTextFragments(m_text);
     }
 
-    QStringList lines = m_text.split('\n');
-    int maxWidth = 0;
-    int totalHeight = lines.size() * singleLineHeight;
+    // 使用缓存的解析结果
+    QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
+    QFontMetrics fm(currentFont);
 
-    for (const QString& line : lines) {
-        QString cleanLine = removeHiddenTokens(line);
-        int lineWidth = fm.horizontalAdvance(cleanLine);
-        if (lineWidth > maxWidth) {
-            maxWidth = lineWidth;
+    // 计算图片尺寸
+    int maxWidth = 0;
+    int totalHeight = m_parsedLinesCache.size() * m_cachedLineHeight;
+
+    for (const LineFragments& line : m_parsedLinesCache) {
+        if (line.width > maxWidth) {
+            maxWidth = line.width;
         }
     }
 
@@ -998,7 +965,6 @@ void TextRenderWidget::updateCachedPNG()
         imageSize = this->size();
     }
 
-
     QImage image(imageSize, QImage::Format_ARGB32);
     image.fill(Qt::transparent);
 
@@ -1008,51 +974,55 @@ void TextRenderWidget::updateCachedPNG()
     painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     painter.setFont(currentFont);
 
-        // 绘制文字（不带背景）
-        if (!m_text.isEmpty()) {
-            QRect textRect(margin, margin, imageSize.width() - margin * 2, imageSize.height() - margin * 2);
+    // 【性能优化】使用缓存的解析结果绘制文字
+    if (!m_text.isEmpty()) {
+        QColor currentColor(255, 255, 255, 255);
+        painter.setPen(currentColor);
+        painter.setOpacity(1.0);
 
-            QColor currentColor(255, 255, 255, 255);
-            painter.setPen(currentColor);
-            painter.setOpacity(1.0);
+        int yPos = margin;
 
-            int yPos = margin;
+        for (const LineFragments& lineFrags : m_parsedLinesCache) {
+            int xPos = margin;
+            int baseline = yPos + fm.ascent();
 
-            for (const QString& line : lines) {
-                QStringList parts = splitTextAndTokens(line);
-                int xPos = margin;
+            for (const TextFragment& fragment : lineFrags.fragments) {
+                if (fragment.isHiddenToken) {
+                    continue;
+                }
 
-                for (const QString& part : parts) {
-                    if (part.startsWith("~") && part.endsWith("~") && part.length() == 3) {
-                        QString token = part.toLower();
-                        if (!isHiddenToken(token)) {
-                            currentColor = getColorForToken(token, m_gtaVersion);
-                            painter.setPen(currentColor);
+                if (fragment.isColorToken) {
+                    // 更新颜色
+                    currentColor = fragment.color;
+                    painter.setPen(currentColor);
+                } else {
+                    // 绘制文本
+                    for (const QChar& ch : fragment.text) {
+                        // 为当前字符选择合适的字体
+                        QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
+
+                        // 如果是中文字符且主字体已加载，按比例缩放使其与英文字符视觉高度一致
+                        if (needsFallbackFont(ch) && m_mainFontLoaded && m_cachedFontScale < 1.0) {
+                            QFont scaledFont = charFont;
+                            scaledFont.setPointSizeF(charFont.pointSizeF() * m_cachedFontScale);
+                            charFont = scaledFont;
                         }
-                    } else {
-                        for (const QChar& ch : part) {
-                            QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
 
-                            // 如果是中文字符且主字体已加载，按比例缩放使其与英文字符视觉高度一致
-                            if (needsFallbackFont(ch) && m_mainFontLoaded && fontScale < 1.0) {
-                                QFont scaledFont = charFont;
-                                scaledFont.setPointSizeF(charFont.pointSizeF() * fontScale);
-                                charFont = scaledFont;
-                            }
+                        QFontMetrics fm_char(charFont);
+                        int charWidth = fm_char.horizontalAdvance(ch);
 
-                            QFontMetrics fm_char(charFont);
-                            int charWidth = fm_char.horizontalAdvance(ch);
-                            // 使用主字体的ascent作为统一的基线，确保中英文字符在同一水平线上
-                            int baseline = yPos + fm.ascent();
-
+                        // 绘制描边
                         if (m_outlineEnabled) {
                             painter.save();
                             QColor outlineColor(0, 0, 0, 255); // 黑色描边，完全不透明
+
                             QPainterPath path;
                             path.addText(xPos, baseline, charFont, ch);
+
                             painter.setPen(QPen(outlineColor, 3.5));
                             painter.setBrush(outlineColor);
                             painter.drawPath(path);
+
                             painter.restore();
                             painter.setPen(currentColor);
                             painter.setFont(charFont);
@@ -1064,7 +1034,8 @@ void TextRenderWidget::updateCachedPNG()
                     }
                 }
             }
-            yPos += singleLineHeight;
+
+            yPos += m_cachedLineHeight;
         }
     }
 
@@ -1077,6 +1048,91 @@ void TextRenderWidget::updateCachedPNG()
     image.save(&buffer, "PNG");
     buffer.close();
 
-
     m_pngCacheValid = true;
 }
+
+// 【性能优化】解析文本片段
+void TextRenderWidget::parseTextFragments(const QString& text)
+{
+    m_parsedLinesCache.clear();
+
+    QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
+    QFontMetrics fm(currentFont);
+    QFontMetrics fm_fallback(m_fallbackFont);
+
+    // 计算行高度和字体缩放比例
+    m_cachedLineHeight = qMax(fm.height(), fm_fallback.height());
+    if (m_mainFontLoaded) {
+        m_cachedFontScale = static_cast<double>(fm.height()) / static_cast<double>(fm_fallback.height());
+    } else {
+        m_cachedFontScale = 1.0;
+    }
+
+    // 分割文本为行
+    QStringList lines = text.split('\n');
+    m_parsedLinesCache.reserve(lines.size());
+
+    // 解析每一行
+    for (const QString& lineStr : lines) {
+        LineFragments lineFrags;
+        lineFrags.width = 0;
+        lineFrags.fragments.reserve(10);  // 预分配，减少重新分配
+
+        QStringList parts = splitTextAndTokens(lineStr);
+
+        for (const QString& part : parts) {
+            TextFragment fragment;
+
+            if (part.startsWith("~") && part.endsWith("~") && part.length() == 3) {
+                // 这是一个颜色标记
+                QString token = part.toLower();
+                fragment.isColorToken = true;
+                fragment.isHiddenToken = isHiddenToken(token);
+                fragment.color = getColorForToken(token, m_gtaVersion);
+                fragment.text = part;
+            } else {
+                // 普通文本
+                fragment.isColorToken = false;
+                fragment.isHiddenToken = false;
+                fragment.color = QColor(255, 255, 255, 255); // 默认白色
+                fragment.text = part;
+
+                // 计算文本宽度（预计算）
+                int textWidth = 0;
+                for (const QChar& ch : part) {
+                    QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
+                    QFontMetrics fm_char(charFont);
+                    textWidth += fm_char.horizontalAdvance(ch);
+                }
+                lineFrags.width += textWidth;
+            }
+
+            lineFrags.fragments.append(fragment);
+        }
+
+        m_parsedLinesCache.append(lineFrags);
+    }
+
+    m_parseCacheValid = true;
+}
+
+// 【性能优化】触发延迟PNG缓存更新
+void TextRenderWidget::schedulePNGCacheUpdate()
+{
+    // 如果已经有一个定时器在运行，重新启动它（取消之前的更新）
+    if (m_pngCacheUpdateTimer->isActive()) {
+        m_pngCacheUpdateTimer->stop();
+    }
+    // 启动定时器，延迟500ms更新
+    m_pngCacheUpdateTimer->start();
+}
+
+// 【性能优化】延迟PNG缓存更新槽函数
+void TextRenderWidget::onPNGCacheUpdateTimeout()
+{
+    // 如果PNG缓存无效，更新它
+    if (!m_pngCacheValid) {
+        updateCachedPNG();
+    }
+}
+

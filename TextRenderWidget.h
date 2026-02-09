@@ -79,7 +79,31 @@ private:
     // 检查字符是否需要使用备用字体
     bool needsFallbackFont(const QChar& ch) const;
 
+    // 【性能优化】解析文本片段
+    void parseTextFragments(const QString& text);
+
+    // 【性能优化】触发延迟PNG缓存更新
+    void schedulePNGCacheUpdate();
+
+private slots:
+    // 【性能优化】延迟PNG缓存更新槽函数
+    void onPNGCacheUpdateTimeout();
+
 private:
+    // 【性能优化】文本片段结构
+    struct TextFragment {
+        QString text;        // 文本内容
+        QColor color;        // 颜色
+        bool isColorToken;   // 是否为颜色标记
+        bool isHiddenToken;  // 是否为隐藏标记
+    };
+
+    // 【性能优化】行片段结构
+    struct LineFragments {
+        QVector<TextFragment> fragments;  // 行内的所有片段
+        int width;                         // 行总宽度
+    };
+
     QString m_text;
 
     // 字体
@@ -108,4 +132,13 @@ private:
     // 缓存的PNG图片数据
     QByteArray m_cachedPNGData;
     bool m_pngCacheValid;
+
+    // 【性能优化】文本解析缓存
+    QVector<LineFragments> m_parsedLinesCache;  // 解析后的行片段缓存
+    int m_cachedLineHeight;                       // 缓存的行高度
+    double m_cachedFontScale;                    // 缓存的字体缩放比例
+    bool m_parseCacheValid;                      // 解析缓存是否有效
+
+    // 【性能优化】延迟PNG更新定时器
+    QTimer* m_pngCacheUpdateTimer;  // PNG缓存更新定时器
 };
