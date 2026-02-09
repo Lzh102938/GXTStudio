@@ -5123,6 +5123,12 @@ void GXTStudio::updateFontSizes()
             tab.entryTableView->setFont(tableFont);
             tab.entryTableView->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);  // 增加行高适应更大字体
             tab.cache.layoutNeedsUpdate = true;
+            
+            // 【性能优化】字体大小变化时清理委托缓存
+            auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab.entryTableView->itemDelegate());
+            if (delegate) {
+                delegate->clearCache();
+            }
         }
         
         if (tab.tableList) {

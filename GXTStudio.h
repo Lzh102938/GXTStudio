@@ -862,9 +862,17 @@ public:
         // 预计算颜色，避免每次都查询
         m_zebraColor = QColor(227, 242, 253, 200);  // 加深斑马纹蓝色：从(240,248,255,180)到(227,242,253,200)
         m_highlightColor = QColor(255, 235, 59, 180);
+        
+        // 初始化缓存系统
+        m_textWidthCache.setMaxCost(500);  // 缓存500个文本宽度
+        m_highlightCache.setMaxCost(100);   // 缓存100个高亮结果
     }
     
     void setSearchText(const QString& text, bool useRegex = false, bool caseSensitive = false) {
+        // 如果搜索文本发生变化，清理高亮缓存
+        if (text != m_searchText || m_caseSensitive != caseSensitive || m_useRegex != useRegex) {
+            m_highlightCache.clear();
+        }
         m_searchText = text;
         m_useRegex = useRegex;
         m_caseSensitive = caseSensitive;
@@ -910,9 +918,10 @@ public:
         // 预计算文本区域
         const QRect textRect = option.rect.adjusted(4, 2, -4, -2);
 
-        // 【性能优化】搜索高亮优化 - 快速判断，避免复杂逻辑
+        // 【性能优化】搜索高亮优化 - 使用缓存
         if (!m_searchText.isEmpty()) {
-            if (text.contains(m_searchText, m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive)) {
+            Qt::CaseSensitivity cs = m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+            if (text.contains(m_searchText, cs)) {
                 paintTextWithSimpleHighlight(painter, text, textRect);
                 return;
             }
@@ -1050,14 +1059,51 @@ public:
         return QStyledItemDelegate::eventFilter(watched, event);
     }
     
-    // 空实现 - 已移除缓存系统
-    void clearCache() const {}
+    // 清理缓存 - 当需要强制刷新时调用
+    void clearCache() const {
+        m_textWidthCache.clear();
+        m_highlightCache.clear();
+    }
     
-    // 空实现 - 已移除缓存系统
-    int getCacheSize() const { return 0; }
+    // 获取缓存大小 - 用于调试和监控
+    int getCacheSize() const {
+        return m_textWidthCache.size() + m_highlightCache.size();
+    }
     
-    // 优化的搜索高亮绘制 - 减少函数调用和内存分配
+    // 优化的搜索高亮绘制 - 使用缓存减少重复计算
     void paintTextWithSimpleHighlight(QPainter* painter, const QString& text, const QRect& rect) const {
+        // 检查缓存
+        QString cacheKey = text + "|" + m_searchText + "|" + QString::number(m_caseSensitive ? 1 : 0);
+        HighlightCacheEntry* cachedEntry = m_highlightCache.object(cacheKey);
+        
+        if (cachedEntry && cachedEntry->textHash == qHash(text)) {
+            // 使用缓存的高亮片段
+            painter->save();
+            const int rectTop = rect.top();
+            const int rectBottom = rect.bottom() - painter->fontMetrics().descent();
+            const int rectLeft = rect.left();
+            const int rectHeight = rect.height();
+            
+            // 使用缓存的片段信息进行绘制
+            int currentXOffset = 0;
+            for (const auto& fragment : cachedEntry->fragments) {
+                const int xOffset = rectLeft + currentXOffset;
+                
+                if (fragment.isMatch) {
+                    // 绘制高亮背景和匹配文本
+                    painter->fillRect(xOffset, rectTop, fragment.width, rectHeight, m_highlightColor);
+                    painter->drawText(xOffset, rectBottom, fragment.text);
+                } else {
+                    // 绘制普通文本
+                    painter->drawText(xOffset, rectBottom, fragment.text);
+                }
+                currentXOffset += fragment.width;
+            }
+            painter->restore();
+            return;
+        }
+        
+        // 缓存未命中，执行完整的计算和绘制
         painter->save();
         QFontMetrics fm = painter->fontMetrics();
         const Qt::CaseSensitivity cs = m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
@@ -1074,14 +1120,23 @@ public:
         // 预计算累计宽度，避免重复计算
         int currentXOffset = 0;
         
+        // 创建缓存条目
+        HighlightCacheEntry* cacheEntry = new HighlightCacheEntry();
+        cacheEntry->textHash = qHash(text);
+        cacheEntry->fragments.reserve(10); // 预分配，减少重新分配
+        
         while ((pos = text.indexOf(m_searchText, pos, cs)) != -1) {
             // 绘制匹配前的文本
             const int beforeLength = pos - lastPos;
             if (beforeLength > 0) {
                 const QString before = text.mid(lastPos, beforeLength);
+                const int beforeWidth = fm.horizontalAdvance(before);
                 const int xOffset = rectLeft + currentXOffset;
                 painter->drawText(xOffset, rectBottom, before);
-                currentXOffset += fm.horizontalAdvance(before);
+                currentXOffset += beforeWidth;
+                
+                // 添加到缓存片段
+                cacheEntry->fragments.append({before, beforeWidth, false});
             }
             
             // 计算并绘制高亮背景
@@ -1093,6 +1148,9 @@ public:
             painter->drawText(xOffset, rectBottom, m_searchText);
             currentXOffset += matchWidth;
             
+            // 添加到缓存片段
+            cacheEntry->fragments.append({m_searchText, matchWidth, true});
+            
             pos += searchTextLength;
             lastPos = pos;
         }
@@ -1100,14 +1158,35 @@ public:
         // 绘制剩余文本
         if (lastPos < textLength) {
             const QString remaining = text.mid(lastPos);
+            const int remainingWidth = fm.horizontalAdvance(remaining);
             const int xOffset = rectLeft + currentXOffset;
             painter->drawText(xOffset, rectBottom, remaining);
+            currentXOffset += remainingWidth;
+            
+            // 添加到缓存片段
+            cacheEntry->fragments.append({remaining, remainingWidth, false});
         }
+        
+        // 存储到缓存
+        m_highlightCache.insert(cacheKey, cacheEntry);
         
         painter->restore();
     }
     
 private:
+    // 高亮片段结构体
+    struct HighlightFragment {
+        QString text;    // 文本内容
+        int width;       // 文本宽度
+        bool isMatch;    // 是否为匹配的搜索文本
+    };
+    
+    // 高亮缓存条目结构体
+    struct HighlightCacheEntry {
+        uint textHash;                        // 文本哈希值，用于验证缓存有效性
+        QList<HighlightFragment> fragments;    // 高亮片段列表
+    };
+    
     QString m_searchText;
     bool m_isHashKeyColumn = false;
     bool m_useRegex = false;
@@ -1120,4 +1199,10 @@ private:
     // 预计算的颜色，提升性能
     QColor m_zebraColor;
     QColor m_highlightColor;
+    
+    // 【新增性能优化】文本宽度缓存 - 避免重复计算
+    mutable QCache<QString, int> m_textWidthCache;  // 缓存文本字符串的宽度
+    
+    // 【新增性能优化】搜索高亮缓存 - 避免重复计算高亮片段
+    mutable QCache<QString, HighlightCacheEntry> m_highlightCache;  // 缓存高亮结果
 };
