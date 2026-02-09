@@ -690,6 +690,9 @@ private slots:
     void applyPartialTranslationResults(const QList<TranslateResult>& results);
     void onTranslationFinished(const QList<TranslateResult>& results);
 
+    // 延迟调度表格列表更新（防抖合并多次更新请求）
+    void scheduleUpdateTableList(int delayMs = 80);
+
 private:
     QPair<int, int> applyTranslationResultsToFile(const QList<TranslateResult>& results);
     void onTranslationRequestProgress(int completed, int total, const QString& message);
@@ -778,6 +781,8 @@ private:
     // 异步解析相关
     QThread* m_parseThread;
     ParseWorker* m_parseWorker;
+    // 表格列表更新防抖定时器
+    QTimer* m_tableListUpdateTimer;
     
     // 异步保存相关
     QThread* m_saveThread;

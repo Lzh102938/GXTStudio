@@ -155,6 +155,7 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_backgroundAspectRatioMode(Qt::KeepAspectRatioByExpanding)  // 填充模式：保持比例填充，可能裁剪边缘
     , m_searchResultCache(nullptr)
     , m_cacheIndex(0)
+    , m_tableListUpdateTimer(nullptr)
 {
     ui.setupUi(this);
     
@@ -2464,8 +2465,8 @@ void GXTStudio::onAddTableClicked(const QModelIndex& index)
         // 添加到表格列表
         currentTab->tables.push_back(newTable);
         
-        // 更新UI列表
-        updateTableList();
+        // 更新UI列表（合并更新请求以减少重绘）
+        scheduleUpdateTableList();
         
         // 切换到新表
         switchToTable(static_cast<int>(currentTab->tables.size()) - 1);
@@ -2507,7 +2508,7 @@ void GXTStudio::onTableNameChanged(const QModelIndex& index, const QString& newN
         if (i != static_cast<size_t>(tableIndex) && 
             QString::fromStdString(currentTab->tables[i].name) == trimmedName) {
             QMessageBox::warning(this, "错误", "表名已存在，请使用不同的名称。");
-            updateTableList(); // 恢复原始名称
+            scheduleUpdateTableList(); // 恢复原始名称（延迟合并）
             return;
         }
     }
@@ -3381,7 +3382,7 @@ void GXTStudio::addNewTable()
     currentTab->tables.push_back(newTable);
     
     currentTab->isModified = true;
-    updateTableList();
+    scheduleUpdateTableList();
     updateEntryTable();
     updateWindowTitle();
     
@@ -3582,8 +3583,8 @@ void GXTStudio::renameTable(int tableIndex)
     // 重命名表
     currentTab->tables[tableIndex].name = newTableName.toStdString();
     currentTab->isModified = true;
-
-    updateTableList();
+    
+    scheduleUpdateTableList();
     updateEntryTable();
     updateWindowTitle();
 
@@ -3754,7 +3755,7 @@ void GXTStudio::deleteTable()
             currentTab->tables.erase(currentTab->tables.begin() + tableIndex);
             currentTab->currentTableIndex = 0; // 重置到第一个表
             currentTab->isModified = true;
-            updateTableList();
+            scheduleUpdateTableList();
             updateEntryTable();
             updateWindowTitle();
             showLogMessage("已删除表: " + tableName);
@@ -3789,7 +3790,7 @@ void GXTStudio::onDeleteTableFromList(const QModelIndex& index)
             currentTab->currentTableIndex = 0; // 重置到第一个表
             currentTab->isModified = true;
             currentTab->listCache.needsRebuild = true; // 标记缓存需要重建
-            updateTableList();
+            scheduleUpdateTableList();
             updateEntryTable();
             updateWindowTitle();
             showLogMessage("已删除表: " + tableName);
@@ -4286,7 +4287,7 @@ void GXTStudio::onTabChanged(int index)
             // 更新表格列表，这会设置正确的 currentTableIndex 并更新模型
             // 注意：CharTable 没有 tableList，跳过 updateTableList
             if (!currentTab->isCharTable) {
-                updateTableList();
+                scheduleUpdateTableList();
             }
 
             // 不再单独调用 updateEntryTable()，因为 updateTableList 已经更新了模型
@@ -4550,7 +4551,7 @@ void GXTStudio::onTabMoved(int from, int to)
         if (currentTab->tableList) {
             currentTab->tableList->setUpdatesEnabled(true);
             currentTab->tableList->viewport()->setUpdatesEnabled(true);
-            updateTableList();
+            scheduleUpdateTableList();
         }
 
         // 立即处理所有待处理事件
@@ -4621,55 +4622,53 @@ void GXTStudio::updateTableList()
     // 极致渲染优化
     tab->tableList->setUpdatesEnabled(false);
     tab->tableList->blockSignals(true);
-    
-    // 智能更新：只在需要时清空
-    if (tab->tableList->count() != static_cast<int>(currentTableCount)) {
-        tab->tableList->clear();
-        
-        // 设置高性能委托（总是设置以确保删除图标显示）
-        auto* delegate = new OptimizedListItemDelegate(tab->tableList);
+
+    // 确保委托存在并且缓存了文本颜色（避免重复创建）
+    auto* delegate = qobject_cast<OptimizedListItemDelegate*>(tab->tableList->itemDelegate());
+    if (!delegate) {
+        delegate = new OptimizedListItemDelegate(tab->tableList);
         tab->tableList->setItemDelegate(delegate);
-        
-        // 计算一次文本颜色（使用颜色计算器，避免重复计算）
-        QWidget* centralWidget = this->centralWidget();
-        QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
-        QPoint listCenter = tab->tableList->mapTo(this, QPoint(tab->tableList->width() / 2, tab->tableList->height() / 2));
-        QColor textColor = m_textColorCalculator.calculateColor(listCenter, targetRect);
-        delegate->setCachedTextColor(textColor);
-        
-        // 连接删除表格信号
         connect(delegate, &OptimizedListItemDelegate::deleteTableRequested,
                 this, &GXTStudio::onDeleteTableFromList);
-        
-        // 启用虚拟滚动和批量布局优化
-        tab->tableList->setUniformItemSizes(true);
-        tab->tableList->setLayoutMode(QListView::Batched);
-        tab->tableList->setBatchSize(20); // 批量处理20个项目
-        
-        // 禁用不必要的动画以提升性能
-        tab->tableList->setMovement(QListView::Static);
-        tab->tableList->setResizeMode(QListView::Fixed);
-        
-        // 启用滚动优化
-        tab->tableList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-        tab->tableList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-        
-        // 批量创建项目（预分配内存）
-        tab->tableList->setUpdatesEnabled(false);
-        for (size_t i = 0; i < currentTableCount; ++i) {
+    }
+
+    // 计算一次文本颜色（使用颜色计算器，避免重复计算）
+    QWidget* centralWidget = this->centralWidget();
+    QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
+    QPoint listCenter = tab->tableList->mapTo(this, QPoint(tab->tableList->width() / 2, tab->tableList->height() / 2));
+    QColor textColor = m_textColorCalculator.calculateColor(listCenter, targetRect);
+    delegate->setCachedTextColor(textColor);
+
+    // 启用虚拟滚动和批量布局优化（只需设置一次，但这里无害）
+    tab->tableList->setUniformItemSizes(true);
+    tab->tableList->setLayoutMode(QListView::Batched);
+    tab->tableList->setBatchSize(20); // 批量处理20个项目
+    tab->tableList->setMovement(QListView::Static);
+    tab->tableList->setResizeMode(QListView::Fixed);
+    tab->tableList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    tab->tableList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+
+    // 差量更新：在可能的情况下只插入/删除末端并更新变更项
+    int existingCount = tab->tableList->count();
+    if (existingCount != static_cast<int>(currentTableCount)) {
+        // 如果当前更短，则删除末尾多余的项目
+        if (existingCount > static_cast<int>(currentTableCount)) {
+            for (int k = existingCount - 1; k >= static_cast<int>(currentTableCount); --k) {
+                QListWidgetItem* it = tab->tableList->takeItem(k);
+                delete it;
+            }
+        }
+
+        // 如果需要新增，则在末尾创建缺失的项
+        for (int i = existingCount; i < static_cast<int>(currentTableCount); ++i) {
             QListWidgetItem* item = new QListWidgetItem();
-            item->setData(Qt::UserRole, static_cast<int>(i));
-            item->setData(Qt::DisplayRole, tab->listCache.cachedDisplayTexts[i]);
-            item->setData(Qt::UserRole + 1, tab->listCache.cachedTableNames[i]);
-            item->setData(Qt::UserRole + 2, tab->listCache.cachedCounts[i]);
-            item->setData(Qt::UserRole + 3, static_cast<bool>(tab->listCache.cachedMainFlags[i]));
-            item->setSizeHint(QSize(tab->tableList->width() - 10, 36)); // 增加宽度以确保删除图标可见
-            
+            item->setData(Qt::UserRole, i);
+            item->setSizeHint(QSize(tab->tableList->width() - 10, 36));
             tab->tableList->addItem(item);
         }
-    } else {
-        // 增量更新：只更新数据，不重建项目
-        for (int i = 0; i < tab->tableList->count(); ++i) {
+
+        // 更新所有现有项的数据（比完全重建更轻量）
+        for (int i = 0; i < static_cast<int>(currentTableCount); ++i) {
             QListWidgetItem* item = tab->tableList->item(i);
             if (item) {
                 item->setData(Qt::DisplayRole, tab->listCache.cachedDisplayTexts[i]);
@@ -4677,6 +4676,22 @@ void GXTStudio::updateTableList()
                 item->setData(Qt::UserRole + 2, tab->listCache.cachedCounts[i]);
                 item->setData(Qt::UserRole + 3, static_cast<bool>(tab->listCache.cachedMainFlags[i]));
             }
+        }
+    } else {
+        // 同样数量：仅更新发生变化的字段以减小工作量
+        for (int i = 0; i < existingCount; ++i) {
+            QListWidgetItem* item = tab->tableList->item(i);
+            if (!item) continue;
+
+            // 仅在真实变化时设置数据
+            if (item->data(Qt::DisplayRole).toString() != tab->listCache.cachedDisplayTexts[i])
+                item->setData(Qt::DisplayRole, tab->listCache.cachedDisplayTexts[i]);
+            if (item->data(Qt::UserRole + 1).toString() != tab->listCache.cachedTableNames[i])
+                item->setData(Qt::UserRole + 1, tab->listCache.cachedTableNames[i]);
+            if (item->data(Qt::UserRole + 2).toString() != tab->listCache.cachedCounts[i])
+                item->setData(Qt::UserRole + 2, tab->listCache.cachedCounts[i]);
+            if (item->data(Qt::UserRole + 3).toBool() != tab->listCache.cachedMainFlags[i])
+                item->setData(Qt::UserRole + 3, static_cast<bool>(tab->listCache.cachedMainFlags[i]));
         }
     }
     
@@ -6088,8 +6103,8 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         connect(tableList, &QListWidget::itemDoubleClicked, this, &GXTStudio::onTableDoubleClicked);
     }
 
-    // 填充左侧表格列表
-    updateTableList();
+    // 填充左侧表格列表（延迟更新以合并多次创建时的开销）
+    scheduleUpdateTableList();
     
     // 【关键修复】强制刷新表格视图，确保内容立即显示
     if (entryTableView && entryTableModel) {
@@ -9573,4 +9588,17 @@ void GXTStudio::onCharTableCharacterSelected(uint16_t charCode, const QString& d
     QClipboard* cb = QApplication::clipboard();
     cb->setText(displayChar);
     showLogMessage(QString("字符已复制到剪贴板: %1 (0x%2)").arg(displayChar).arg(charCode, 0, 16));
+}
+
+// 防抖式调度：合并频繁的列表更新请求
+void GXTStudio::scheduleUpdateTableList(int delayMs)
+{
+    if (!m_tableListUpdateTimer) {
+        m_tableListUpdateTimer = new QTimer(this);
+        m_tableListUpdateTimer->setSingleShot(true);
+        connect(m_tableListUpdateTimer, &QTimer::timeout, this, &GXTStudio::updateTableList);
+    }
+
+    // 重启定时器以合并多次请求（延迟合并）
+    m_tableListUpdateTimer->start(delayMs);
 }
