@@ -184,14 +184,11 @@ bool CharTableParser::saveGtaIv(const QString& datPath, const CharTableData& dat
         return false;
     }
 
-    // 写入BOM (Byte Order Mark for UTF-16LE)
-    file.putChar(0xFF);
-    file.putChar(0xFE);
-
-    // 按行优先顺序写入UTF-16LE字符序列
+    // GTA IV char_table.dat 格式：UTF-16LE字符序列，无BOM
+    // 按行优先顺序写入有效字符（跳过空白字符：0x0000, 0x0020, 0x0009, 0x000A, 0x000D）
     for (int idx = 0; idx < data.cells.size(); ++idx) {
         uint16_t ch = data.cells[idx];
-        // 跳过空白字符
+        // 跳过空白字符（与loadGtaIv保持一致）
         if (ch != 0x0000 && ch != 0x0020 && ch != 0x0009 && ch != 0x000A && ch != 0x000D) {
             // 小端序：低字节在前，高字节在后
             file.putChar(static_cast<char>(ch & 0xFF));

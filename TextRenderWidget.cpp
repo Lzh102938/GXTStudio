@@ -1135,4 +1135,3 @@ void TextRenderWidget::onPNGCacheUpdateTimeout()
         updateCachedPNG();
     }
 }
-

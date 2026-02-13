@@ -347,7 +347,8 @@ bool GXTEditor::saveAsGTA_VC(const std::string& path) {
 
                 // 写入键（8字节，填充）
                 char keyChars[8] = {0};
-                std::string keyToWrite = entry.originalKey.empty() ? entry.key : entry.originalKey;
+                // GTA VC: 直接使用entry.key（已经是原始字符串）
+                std::string keyToWrite = entry.key;
                 if (keyToWrite.size() > 8) keyToWrite.resize(8);
                 keyToWrite.resize(8, '\0');
                 fwrite(keyToWrite.c_str(), 1, 8, outputFile);

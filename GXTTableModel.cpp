@@ -438,8 +438,16 @@ QVariant GXTTableModel::data(const QModelIndex& index, int role) const
                 const auto& entry = table.entries[row];
                 try {
                     if (col == KeyColumn) {
+                        // GTA III: 直接显示原始字符串键名
+                        if (m_tab->version == GXTVersion::GTA_III) {
+                            return QString::fromStdString(entry.key);
+                        }
+                        // GTA VC: 直接显示原始字符串键名
+                        else if (m_tab->version == GXTVersion::GTA_VC) {
+                            return QString::fromStdString(entry.key);
+                        }
                         // 如果是GTA_SA版本，尝试使用SATKEY替换
-                        if (m_tab->version == GXTVersion::GTA_SA && !s_satKeyMap.isEmpty()) {
+                        else if (m_tab->version == GXTVersion::GTA_SA && !s_satKeyMap.isEmpty()) {
                             // 将key（hex字符串）转换为uint32
                             bool ok;
                             uint32_t hash = QString::fromStdString(entry.key).toUInt(&ok, 16);
@@ -688,7 +696,15 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                         QString processedKey = inputKey;
                         
                         // 根据版本进行不同的处理
-                        if (m_tab->version == GXTVersion::GTA_SA) {
+                        if (m_tab->version == GXTVersion::GTA_III) {
+                            // GTA III: 直接保存字符串键名，不进行hash计算
+                            processedKey = inputKey;
+                            qDebug() << "[Hash转换] III版本: 输入=" << inputKey << " -> 保持原样=" << processedKey;
+                        } else if (m_tab->version == GXTVersion::GTA_VC) {
+                            // GTA VC: 直接保存字符串键名，不进行hash计算
+                            processedKey = inputKey;
+                            qDebug() << "[Hash转换] VC版本: 输入=" << inputKey << " -> 保持原样=" << processedKey;
+                        } else if (m_tab->version == GXTVersion::GTA_SA) {
                             // GTA SA: 使用CKeyGen计算hash
                             std::string upperKey = inputKey.toUpper().toStdString();
                             uint32_t hash = CKeyGen::GetUppercaseKey(upperKey.c_str());
@@ -758,9 +774,15 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                             }
                         }
                         
-                        // 保存原始键值用于显示，但实际存储转换后的hash
+                        // 保存原始键值用于显示，但实际存储转换后的hash（GTA_III和GTA_VC除外）
                         entry.originalKey = newValue;  // 保存原始输入用于显示
-                        entry.key = processedKey.toStdString();  // 实际存储hash值
+                        if (m_tab->version == GXTVersion::GTA_III || m_tab->version == GXTVersion::GTA_VC) {
+                            // GTA III和VC: 实际存储字符串键名
+                            entry.key = processedKey.toStdString();  // 存储原始字符串
+                        } else {
+                            // 其他版本: 存储hash值
+                            entry.key = processedKey.toStdString();  // 实际存储hash值
+                        }
                         success = true;
                     } else if (col == ValueColumn && entry.value != newValue) {
                         entry.value = newValue;
