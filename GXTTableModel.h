@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QDebug>
 #include <cstdint>
+#include <QHash>
 
 // 前向声明
 struct FileTab;
@@ -17,6 +18,7 @@ enum class GXTVersion;
  * 支持 GXT/GXT2、WHM、DAT 三种文件格式的数据展示和编辑
  * 特点：
  * - 缓存行数计算，减少重复遍历
+ * - 缓存显示数据，避免重复格式化
  * - 支持 SATKEY/IVTKEY 映射查找
  * - 支持 GTA SA/IV/GXT2 版本的哈希计算
  */
@@ -56,6 +58,9 @@ public:
     // 强制数据重置 - 用于表格切换时确保无残留
     void forceDataReset();
     
+    // 清除显示缓存
+    void invalidateDisplayCache();
+    
     // 检查映射是否为空（静态方法）
     static bool isSATKeyMapEmpty();
     static bool isIVTKeyMapEmpty();
@@ -72,12 +77,33 @@ signals:
     void dataModified();
     
 private:
+    // 【性能优化】行缓存结构
+    struct RowCache {
+        QString key;      // 格式化后的键
+        QString value;    // 格式化后的值
+        bool valid;       // 缓存是否有效
+    };
+    
+    // 【性能优化】构建显示缓存
+    void buildDisplayCache() const;
+    
+    // 【性能优化】格式化键值
+    QString formatKey(const std::string& key, const std::string& originalKey, GXTVersion version) const;
+    QString formatHashKey(uint32_t hash) const;
+    
     FileTab* m_tab;
     bool m_editable;
     
     // 性能优化缓存
     mutable int m_cachedRowCount;
     int m_currentTableIndex;
+    
+    // 【性能优化】显示数据缓存
+    mutable QVector<RowCache> m_displayCache;
+    mutable bool m_displayCacheValid;
+    
+    // 缓存的版本信息，避免每次调用都从tab获取
+    mutable int m_cachedVersion;
     
     // SATKEY映射（静态，全局共享）
     static QMap<uint32_t, QString> s_satKeyMap;

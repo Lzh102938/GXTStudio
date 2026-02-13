@@ -16,6 +16,8 @@
 #include <QMouseEvent>
 #include <QPoint>
 #include <QByteArray>
+#include <QHash>
+#include <QPixmap>
 
 // 文本渲染窗格 - 用于仿真游戏字母的实际效果
 class TextRenderWidget : public QWidget
@@ -139,6 +141,47 @@ private:
     double m_cachedFontScale;                    // 缓存的字体缩放比例
     bool m_parseCacheValid;                      // 解析缓存是否有效
 
+    // 控制备用字体信息只打印一次
+    static bool s_fallbackLogged;
+
     // 【性能优化】延迟PNG更新定时器
     QTimer* m_pngCacheUpdateTimer;  // PNG缓存更新定时器
+
+    // 【性能优化】字符渲染缓存
+    struct CharCacheKey {
+        QChar ch;
+        QColor color;
+        bool outline;
+        int fontSize;
+        
+        bool operator==(const CharCacheKey& other) const {
+            return ch == other.ch && color == other.color && 
+                   outline == other.outline && fontSize == other.fontSize;
+        }
+    };
+    
+    struct CharCacheValue {
+        QPixmap pixmap;
+        int width;
+        int ascent;
+    };
+    
+    // 哈希函数
+    friend uint qHash(const CharCacheKey& key, uint seed = 0) {
+        return qHash(key.ch.unicode(), seed) ^ 
+               qHash(key.color.name(), seed) ^ 
+               qHash(key.outline, seed) ^ 
+               qHash(key.fontSize, seed);
+    }
+    
+    // 字符缓存（最多缓存500个字符）
+    QHash<CharCacheKey, CharCacheValue> m_charCache;
+    static const int MAX_CHAR_CACHE_SIZE = 500;
+    
+    // 【性能优化】预渲染字符到位图缓存
+    CharCacheValue renderCharToCache(const QChar& ch, const QFont& font, 
+                                      const QColor& color, bool outline);
+    
+    // 【性能优化】快速文本分割（状态机替代正则）
+    QStringList splitTextAndTokensFast(const QString& input);
 };

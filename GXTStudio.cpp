@@ -39,6 +39,7 @@
 #include <QRegularExpression>
 #include <QItemSelection>
 #include <QStringConverter>
+#include <algorithm>
 #include <windows.h>
 #include <fstream>
 
@@ -2781,11 +2782,9 @@ void GXTStudio::performSearch(const QString& searchText)
         return;
     }
 
-    // 【性能优化1】检查搜索结果缓存
-    QString cacheKey = searchText + "|" + QString::number(caseSensitive) + "|" + QString::number(useRegex);
+    // 【优化1】检查搜索结果缓存
     for (int i = 0; i < MAX_SEARCH_CACHE; ++i) {
         if (m_searchResultCache[i].isValid(searchText, caseSensitive, useRegex)) {
-            // 【缓存命中】直接使用缓存结果
             m_searchState.searchText = searchText;
             m_searchState.currentTableIndex = 0;
             m_searchState.currentEntryIndex = -1;
@@ -2795,10 +2794,7 @@ void GXTStudio::performSearch(const QString& searchText)
             m_searchState.isValid = !m_searchState.allMatches.empty();
 
             if (m_searchState.isValid) {
-                QString modeText = useRegex ? " (正则表达式)" : "";
-                if (caseSensitive && !useRegex) {
-                    modeText = " (区分大小写)";
-                }
+                QString modeText = useRegex ? " (正则表达式)" : (caseSensitive ? " (区分大小写)" : "");
                 showLogMessage(QString("找到 %1 个匹配项%2 (缓存)").arg(m_searchState.allMatches.size()).arg(modeText));
                 jumpToMatch(0);
             } else {
@@ -2808,13 +2804,12 @@ void GXTStudio::performSearch(const QString& searchText)
         }
     }
 
-    // 【性能优化2】编译正则表达式（如果需要）
+    // 【优化2】编译正则表达式（如果需要）
     QRegularExpression regex;
     if (useRegex) {
-        QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
-        if (!caseSensitive) {
-            options |= QRegularExpression::CaseInsensitiveOption;
-        }
+        QRegularExpression::PatternOptions options = caseSensitive 
+            ? QRegularExpression::NoPatternOption 
+            : QRegularExpression::CaseInsensitiveOption;
         regex.setPattern(searchText);
         regex.setPatternOptions(options);
 
@@ -2833,14 +2828,70 @@ void GXTStudio::performSearch(const QString& searchText)
     m_searchState.caseSensitive = caseSensitive;
     m_searchState.useRegex = useRegex;
 
-    Qt::CaseSensitivity cs = caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+    // 【优化3】预分配更大内存，减少重新分配次数
+    m_searchState.allMatches.reserve(500);
 
-    // 【性能优化3】预分配内存，避免多次重新分配
-    m_searchState.allMatches.reserve(100);  // 预分配100个结果
-
-    // 【性能优化4】搜索文本的快速长度检查
     const int searchTextLen = searchText.length();
-    bool useQuickMatch = !useRegex && searchTextLen >= 3;  // 至少3个字符才使用快速匹配
+    const Qt::CaseSensitivity cs = caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+    
+    // 【优化4】检查是否可以优化为纯ASCII搜索
+    bool isAsciiSearch = !useRegex && !caseSensitive;
+    for (int i = 0; i < searchTextLen && isAsciiSearch; ++i) {
+        if (searchText[i].unicode() > 127) {
+            isAsciiSearch = false;
+        }
+    }
+    
+    // 【优化5】准备搜索用的字节数据（用于ASCII快速搜索）
+    QByteArray searchBytes;
+    if (isAsciiSearch) {
+        searchBytes = searchText.toUtf8();
+    }
+
+    // 【优化6】通用搜索lambda - 减少代码重复
+    auto matchText = [&](const QString& text) -> bool {
+        if (useRegex) {
+            return regex.match(text).hasMatch();
+        }
+        // 快速长度检查
+        if (text.length() < searchTextLen) {
+            return false;
+        }
+        return text.contains(searchText, cs);
+    };
+    
+    // 【优化7】用于std::string的快速搜索（避免QString转换）
+    auto matchStdString = [&](const std::string& key, const std::string& value) -> bool {
+        if (useRegex) {
+            // 正则必须用QString
+            QString text = QString::fromStdString(key) + QLatin1Char(' ') + QString::fromStdString(value);
+            return regex.match(text).hasMatch();
+        }
+        
+        // 【优化8】ASCII快速搜索：直接在UTF-8字节上搜索，避免QString转换
+        if (isAsciiSearch && searchBytes.size() > 0) {
+            // 先在key中搜索
+            if (key.size() >= static_cast<size_t>(searchBytes.size())) {
+                auto pos = std::search(key.begin(), key.end(), 
+                    searchBytes.constBegin(), searchBytes.constEnd());
+                if (pos != key.end()) return true;
+            }
+            // 再在value中搜索
+            if (value.size() >= static_cast<size_t>(searchBytes.size())) {
+                auto pos = std::search(value.begin(), value.end(),
+                    searchBytes.constBegin(), searchBytes.constEnd());
+                if (pos != value.end()) return true;
+            }
+            return false;
+        }
+        
+        // 回退到QString搜索
+        const int totalLen = static_cast<int>(key.size() + value.size() + 1);
+        if (totalLen < searchTextLen) return false;
+        
+        QString text = QString::fromStdString(key) + QLatin1Char(' ') + QString::fromStdString(value);
+        return text.contains(searchText, cs);
+    };
 
     // 在所有表中搜索匹配项
     if (tab->isWHM) {
@@ -2848,21 +2899,37 @@ void GXTStudio::performSearch(const QString& searchText)
         const size_t whmSize = tab->whmEntries.size();
         for (size_t i = 0; i < whmSize; ++i) {
             const auto& entry = tab->whmEntries[i];
-            QString hashStr = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0');
-            QString text = hashStr + " " + QString::fromStdString(entry.text);
-
+            // 【优化9】直接匹配std::string，避免QString转换
             bool matched = false;
             if (useRegex) {
+                QString text = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') + 
+                               " " + QString::fromStdString(entry.text);
                 matched = regex.match(text).hasMatch();
-            } else {
-                // 【性能优化5】快速长度检查
-                if (useQuickMatch && text.length() < searchTextLen) {
-                    matched = false;
-                } else {
-                    matched = text.contains(searchText, cs);
+            } else if (isAsciiSearch && searchBytes.size() > 0) {
+                // ASCII快速搜索：直接在原始数据上搜索
+                std::string hashStr = "0x" + [&]() {
+                    char buf[9];
+                    snprintf(buf, sizeof(buf), "%08X", entry.hash);
+                    return std::string(buf);
+                }();
+                const std::string& text = entry.text;
+                // 在hash中搜索
+                if (hashStr.size() >= static_cast<size_t>(searchBytes.size())) {
+                    auto pos = std::search(hashStr.begin(), hashStr.end(),
+                        searchBytes.constBegin(), searchBytes.constEnd());
+                    if (pos != hashStr.end()) matched = true;
                 }
+                // 在text中搜索
+                if (!matched && text.size() >= static_cast<size_t>(searchBytes.size())) {
+                    auto pos = std::search(text.begin(), text.end(),
+                        searchBytes.constBegin(), searchBytes.constEnd());
+                    if (pos != text.end()) matched = true;
+                }
+            } else {
+                QString text = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') + 
+                               " " + QString::fromStdString(entry.text);
+                matched = text.contains(searchText, cs);
             }
-
             if (matched) {
                 m_searchState.allMatches.emplace_back(0, static_cast<int>(i));
             }
@@ -2872,68 +2939,79 @@ void GXTStudio::performSearch(const QString& searchText)
         const size_t datSize = tab->datEntries.size();
         for (size_t i = 0; i < datSize; ++i) {
             const auto& entry = tab->datEntries[i];
-            QString hashStr = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0');
-            QString text = hashStr + " " + QString::fromStdString(entry.text);
-
             bool matched = false;
             if (useRegex) {
+                QString text = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') + 
+                               " " + QString::fromStdString(entry.text);
                 matched = regex.match(text).hasMatch();
-            } else {
-                // 【性能优化5】快速长度检查
-                if (useQuickMatch && text.length() < searchTextLen) {
-                    matched = false;
-                } else {
-                    matched = text.contains(searchText, cs);
+            } else if (isAsciiSearch && searchBytes.size() > 0) {
+                std::string hashStr = "0x" + [&]() {
+                    char buf[9];
+                    snprintf(buf, sizeof(buf), "%08X", entry.hash);
+                    return std::string(buf);
+                }();
+                const std::string& text = entry.text;
+                if (hashStr.size() >= static_cast<size_t>(searchBytes.size())) {
+                    auto pos = std::search(hashStr.begin(), hashStr.end(),
+                        searchBytes.constBegin(), searchBytes.constEnd());
+                    if (pos != hashStr.end()) matched = true;
                 }
+                if (!matched && text.size() >= static_cast<size_t>(searchBytes.size())) {
+                    auto pos = std::search(text.begin(), text.end(),
+                        searchBytes.constBegin(), searchBytes.constEnd());
+                    if (pos != text.end()) matched = true;
+                }
+            } else {
+                QString text = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') + 
+                               " " + QString::fromStdString(entry.text);
+                matched = text.contains(searchText, cs);
             }
-
             if (matched) {
                 m_searchState.allMatches.emplace_back(0, static_cast<int>(i));
             }
         }
     } else if (tab->isCharTable) {
-        // CharTable文件搜索 - 在字符表内容中搜索
+        // CharTable文件搜索
         if (tab->charTableWidget) {
             QString charTableText = tab->charTableWidget->toPlainText();
-            QStringList lines = charTableText.split('\n');
-            for (int lineIdx = 0; lineIdx < lines.size(); ++lineIdx) {
-                const QString& line = lines[lineIdx];
+            int lineStart = 0;
+            int lineEnd = charTableText.indexOf(QLatin1Char('\n'));
+            int lineIdx = 0;
+            const int textLen = charTableText.length();
+            
+            while (lineStart >= 0 && lineStart < textLen) {
+                int lineLen = (lineEnd >= 0) ? (lineEnd - lineStart) : (textLen - lineStart);
+                
+                // 【优化10】使用QStringView避免字符串拷贝（Qt 6推荐）
+                QStringView lineView(QStringView(charTableText).mid(lineStart, lineLen));
+                
                 bool matched = false;
                 if (useRegex) {
-                    matched = regex.match(line).hasMatch();
-                } else {
-                    if (useQuickMatch && line.length() < searchTextLen) {
-                        matched = false;
-                    } else {
-                        matched = line.contains(searchText, cs);
-                    }
+                    matched = regex.match(lineView).hasMatch();
+                } else if (lineLen >= searchTextLen) {
+                    matched = lineView.contains(searchText, cs);
                 }
+                
                 if (matched) {
                     m_searchState.allMatches.emplace_back(0, lineIdx);
                 }
+                
+                lineStart = (lineEnd >= 0) ? lineEnd + 1 : -1;
+                if (lineStart >= 0 && lineStart < textLen) {
+                    lineEnd = charTableText.indexOf(QLatin1Char('\n'), lineStart);
+                }
+                ++lineIdx;
             }
         }
     } else {
         // GXT文件搜索
-        for (size_t tableIdx = 0; tableIdx < tab->tables.size(); ++tableIdx) {
+        const size_t tableCount = tab->tables.size();
+        for (size_t tableIdx = 0; tableIdx < tableCount; ++tableIdx) {
             const auto& table = tab->tables[tableIdx];
-            for (size_t entryIdx = 0; entryIdx < table.entries.size(); ++entryIdx) {
+            const size_t entryCount = table.entries.size();
+            for (size_t entryIdx = 0; entryIdx < entryCount; ++entryIdx) {
                 const auto& entry = table.entries[entryIdx];
-                QString text = QString::fromStdString(entry.key) + " " + QString::fromStdString(entry.value);
-
-                bool matched = false;
-                if (useRegex) {
-                    matched = regex.match(text).hasMatch();
-                } else {
-                    // 【性能优化5】快速长度检查
-                    if (useQuickMatch && text.length() < searchTextLen) {
-                        matched = false;
-                    } else {
-                        matched = text.contains(searchText, cs);
-                    }
-                }
-
-                if (matched) {
+                if (matchStdString(entry.key, entry.value)) {
                     m_searchState.allMatches.emplace_back(static_cast<int>(tableIdx), static_cast<int>(entryIdx));
                 }
             }
@@ -2942,9 +3020,8 @@ void GXTStudio::performSearch(const QString& searchText)
 
     m_searchState.isValid = !m_searchState.allMatches.empty();
 
-    // 【性能优化6】存储搜索结果到缓存
-    if (m_searchResultCache && !m_searchState.allMatches.empty()) {
-        // 使用轮换策略存储到缓存
+    // 【优化11】存储搜索结果到缓存
+    if (m_searchResultCache) {
         int cacheIdx = m_cacheIndex;
         m_searchResultCache[cacheIdx].searchText = searchText;
         m_searchResultCache[cacheIdx].caseSensitive = caseSensitive;
@@ -2954,12 +3031,8 @@ void GXTStudio::performSearch(const QString& searchText)
     }
 
     if (m_searchState.isValid) {
-        QString modeText = useRegex ? " (正则表达式)" : "";
-        if (caseSensitive && !useRegex) {
-            modeText = " (区分大小写)";
-        }
+        QString modeText = useRegex ? " (正则表达式)" : (caseSensitive ? " (区分大小写)" : "");
         showLogMessage(QString("找到 %1 个匹配项%2").arg(m_searchState.allMatches.size()).arg(modeText));
-        // 跳转到第一个匹配项
         jumpToMatch(0);
     } else {
         showLogMessage("未找到匹配项");
@@ -10118,16 +10191,15 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     topRow->addWidget(nameLabel);
     topRow->addStretch();
 
-    // 搜索框容器
+    // 搜索框容器 - 设置固定宽度策略，防止窗口尺寸影响按钮间距
     QWidget* searchWrapper = new QWidget();
+    searchWrapper->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     QHBoxLayout* searchLayout = new QHBoxLayout(searchWrapper);
     searchLayout->setContentsMargins(0, 0, 0, 0);
     searchLayout->setSpacing(4);
     
-    // 获取搜索区域应该使用的颜色
-    QPoint searchPos = page->mapTo(this, QPoint(100, 20));
-    QColor searchTextColor = getTextColorForPosition(searchPos);
-    QString searchTextColorName = searchTextColor.name();
+    // CharTable标签页使用白色背景，直接使用深色文字
+    QString searchTextColorName = "#333333";
     
     // 搜索框
     QLineEdit* searchEdit = new QLineEdit();
@@ -10239,7 +10311,7 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     )").arg(searchTextColorName);
     
     QPushButton* prevButton = new QPushButton();
-    prevButton->setText(FA::QChevronUp);
+    prevButton->setText(FA::QChevronLeft);
     prevButton->setToolTip("上一个");
     prevButton->setFixedSize(btnSize, btnSize);
     prevButton->setStyleSheet(navButtonStyle);
@@ -10247,7 +10319,7 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     searchLayout->addWidget(prevButton);
     
     QPushButton* nextButton = new QPushButton();
-    nextButton->setText(FA::QChevronDown);
+    nextButton->setText(FA::QChevronRight);
     nextButton->setToolTip("下一个");
     nextButton->setFixedSize(btnSize, btnSize);
     nextButton->setStyleSheet(navButtonStyle);

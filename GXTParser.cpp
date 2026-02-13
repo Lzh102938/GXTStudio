@@ -307,7 +307,6 @@ bool GXTParser::parse(const std::string& filePath) {
     if (fread(head, 1, 8, f) == 8) {
         // 优先检测GTA5 GXT2格式（最独特的格式）
         if (head[0] == '2' && head[1] == 'T' && head[2] == 'X' && head[3] == 'G') {
-            addParseLog("检测到GTA5 GXT2格式");
             this->detectedVersion = GXTVersion::GXT2;
             bool ok = parseGXT2(f, tables);
             fclose(f);
@@ -326,7 +325,6 @@ bool GXTParser::parse(const std::string& filePath) {
         if (version == 4 && bits == 16) {
             isSA = true;
             bitsPerChar = bits;
-            addParseLog("检测到GTA IV格式，版本 " + std::to_string(version) + ", 字符位数: " + std::to_string(bits));
             this->detectedVersion = GXTVersion::GTA_IV;
         } 
         // 检查SA版本特征：前4字节为version和bits，后4字节为'TABL'
@@ -334,21 +332,15 @@ bool GXTParser::parse(const std::string& filePath) {
                  head[4] == 'T' && head[5] == 'A' && head[6] == 'B' && head[7] == 'L') {
             isSA = true;
             bitsPerChar = bits;
-            addParseLog("检测到GTA SA格式，版本 " + std::to_string(version) + ", 字符位数: " + std::to_string(bits));
             this->detectedVersion = GXTVersion::GTA_SA;
         }
         // 检查VC版本特征：直接以'TABL'开头
         else if (head[0] == 'T' && head[1] == 'A' && head[2] == 'B' && head[3] == 'L') {
-            addParseLog("检测到GTA VC格式");
             this->detectedVersion = GXTVersion::GTA_VC;
         }
         // 检查III版本特征：直接以'TKEY'开头
         else if (head[0] == 'T' && head[1] == 'K' && head[2] == 'E' && head[3] == 'Y') {
-            addParseLog("检测到GTA III格式");
             this->detectedVersion = GXTVersion::GTA_III;
-        }
-        else {
-            addParseLog("未识别的版本格式，版本 " + std::to_string(version) + ", 字符位数: " + std::to_string(bits));
         }
     }
     fseek(f, isSA ? 4 : 0, SEEK_SET);
@@ -361,23 +353,16 @@ bool GXTParser::parse(const std::string& filePath) {
         uint32_t size = read_u32(f);
         long blockStart = ftell(f);
         
-        addParseLog("发现 " + std::string(tag) + ", 大小: " + std::to_string(size));
-
         // === 检测无 TABL 格式（直接以 TKEY 开头） ===
         if (strncmp(tag, "TKEY", 4) == 0) {
             this->originalHasTABL = false;
-            addParseLog("检测到无TABL格式文件");
             
             // 改进版本识别逻辑：优先检查IV版本特征，避免误判
             bool isIV = (size % 8 == 0) && isSA && (bitsPerChar == 16);
             bool isIII = !isIV && (size % 12 == 0);
             
-            addParseLog("版本检测结果- IV: " + std::string(isIV ? "是" : "否") + 
-                       ", III: " + std::string(isIII ? "是" : "否"));
-
             if (isIII) {
                 this->detectedVersion = GXTVersion::GTA_III;
-                addParseLog("确定版本: " + getVersionName(GXTVersion::GTA_III));
                 struct IIIEntry { uint32_t offset; char key[8]; };
                 std::vector<IIIEntry> entries(size / 12);
                 fread(entries.data(), sizeof(IIIEntry), entries.size(), f);
@@ -407,8 +392,6 @@ bool GXTParser::parse(const std::string& filePath) {
                 }
 
                 GXTTabl tabl; tabl.name = "MAIN";
-                addParseLog("开始解析MAIN表，共 " + std::to_string(entries.size()) + " 个条目");
-                
                 for (auto& e : entries) {
                     std::string key(e.key, 8);
                     key.erase(std::find(key.begin(), key.end(), '\0'), key.end());
@@ -441,14 +424,12 @@ bool GXTParser::parse(const std::string& filePath) {
                     tabl.entries.push_back({key, val, key});
                 }
                 tables.push_back(std::move(tabl));
-                addParseLog("MAIN表解析完成，共 " + std::to_string(tabl.entries.size()) + " 个条目");
                 break;
             }
 
             // 重写IV版本解析逻辑，与Python版本保持一致
             if (isIV) {
                 this->detectedVersion = GXTVersion::GTA_IV;
-                addParseLog("确定版本: " + getVersionName(GXTVersion::GTA_IV));
                 // 读取TKEY数据
                 std::vector<uint32_t> tkeyData(size / sizeof(uint32_t));
                 fread(tkeyData.data(), sizeof(uint32_t), tkeyData.size(), f);
@@ -481,7 +462,6 @@ bool GXTParser::parse(const std::string& filePath) {
 
                 GXTTabl tabl;
                 tabl.name = "MAIN";
-                addParseLog("开始解析MAIN表，共 " + std::to_string(tkeyData.size()/2) + " 个条目");
 
                 // 每个TKEY条目包含offset和crc两个字节
                 size_t entry_count = tkeyData.size() / 2;
@@ -494,7 +474,6 @@ bool GXTParser::parse(const std::string& filePath) {
 
                     // 确保起始位置有效
                     if (start_idx >= data16_len) {
-                        addParseLog("警告: 条目偏移超出范围，跳过");
                         continue;
                     }
 
@@ -540,7 +519,6 @@ bool GXTParser::parse(const std::string& filePath) {
 
                             if (isFake16Bit) {
                                 // 解释为单字节序列并用 guess_decode 处理
-                                addParseLog("检测到Fake 16-bit编码，使用guess_decode解码条目 0x" + u32_to_hex(crc));
                                 std::string raw;
                                 raw.reserve(entry_len);
                                 for (size_t k = 0; k < entry_len; ++k) {
@@ -549,7 +527,6 @@ bool GXTParser::parse(const std::string& filePath) {
                                 text = this->guess_decode(raw);
                             } else {
                                 // 视为真正UTF-16LE 并转换为 UTF-8
-                                addParseLog("检测到UTF-16LE编码，直接转换条目0x" + u32_to_hex(crc));
                                 int utf8_size = WideCharToMultiByte(CP_UTF8, 0, 
                                                                   reinterpret_cast<LPCWCH>(entry_data),
                                                                   static_cast<int>(entry_len),
@@ -562,7 +539,6 @@ bool GXTParser::parse(const std::string& filePath) {
                                                       &text[0], utf8_size, nullptr, nullptr);
                                 } else {
                                     // 容错：如果UTF-16LE转换失败，回退到guess_decode
-                                    addParseLog("UTF-16LE转换失败，回退到guess_decode条目 0x" + u32_to_hex(crc));
                                     std::string raw(reinterpret_cast<const char*>(entry_data), entry_len * sizeof(uint16_t));
                                     text = this->guess_decode(raw);
                                 }
@@ -576,7 +552,6 @@ bool GXTParser::parse(const std::string& filePath) {
                 }
 
                 tables.push_back(std::move(tabl));
-                addParseLog("MAIN表解析完成，共 " + std::to_string(tabl.entries.size()) + " 个条目");
                 break;
             }
         }
@@ -584,17 +559,12 @@ bool GXTParser::parse(const std::string& filePath) {
         // 如果版本仍未确定，尝试根据块结构推断
         if (this->detectedVersion == GXTVersion::UNKNOWN) {
             if (strncmp(tag, "TABL", 4) == 0) {
-                // 有TABL块，可能是VC格式
                 this->detectedVersion = GXTVersion::GTA_VC;
-                addParseLog("未明确检测到版本，根据TABL块推断为GTA VC格式");
             } else if (strncmp(tag, "TKEY", 4) == 0) {
-                // 无TABL直接TKEY，根据大小判断
                 if (size % 12 == 0) {
                     this->detectedVersion = GXTVersion::GTA_III;
-                    addParseLog("未明确检测到版本，根据TKEY块大小推断为GTA III格式");
                 } else if (size % 8 == 0) {
                     this->detectedVersion = GXTVersion::GTA_IV;
-                    addParseLog("未明确检测到版本，根据TKEY块大小推断为GTA IV格式");
                 }
             }
         }
@@ -606,7 +576,6 @@ bool GXTParser::parse(const std::string& filePath) {
 
         // === TABL 格式 ===
         this->originalHasTABL = true;
-        addParseLog("检测到TABL格式文件");
         
         struct TblEntry { char name[8]; uint32_t offset; };
         std::vector<TblEntry> tabs;
@@ -619,8 +588,6 @@ bool GXTParser::parse(const std::string& filePath) {
             if (fread(&t, sizeof(t), 1, f) != 1) break;
             tabs.push_back(t);
         }
-        
-        addParseLog("发现 " + std::to_string(tabs.size()) + " 个表");
 
         for (auto& te : tabs) {
             tableCount++;
@@ -628,7 +595,7 @@ bool GXTParser::parse(const std::string& filePath) {
             name.erase(std::find(name.begin(), name.end(), '\0'), name.end());
             GXTTabl tabl; tabl.name = name;
             
-            addParseLog("开始解析表 #" + std::to_string(tableCount) + " (" + name + ")");
+
 
             // 定位到表的TKEY
             long absPos = (long)te.offset;
@@ -646,9 +613,7 @@ bool GXTParser::parse(const std::string& filePath) {
                 hasTableName = true;
             }
             
-            if (hasTableName) {
-                addParseLog("表包含字节表名");
-            }
+
 
             // === 读取 TKEY ===
             char tkeyTag[5] = {0};
@@ -661,7 +626,7 @@ bool GXTParser::parse(const std::string& filePath) {
             long tkeyStart = ftell(f);
             long tkeyEnd = tkeyStart + tkeySize;
             
-            addParseLog("TKEY块大小 " + std::to_string(tkeySize));
+
             
             // 通过TKEY条目大小判断是否为VC版本
             // VC版本条目大小为2字节（offset(4) + key(8)）
@@ -669,12 +634,8 @@ bool GXTParser::parse(const std::string& filePath) {
             bool isVC = ((tkeySize % 12) == 0) && (this->detectedVersion == GXTVersion::GTA_VC || this->detectedVersion == GXTVersion::UNKNOWN);
             bool isSAVersion = !isVC && ((tkeySize % 8) == 0) && (this->detectedVersion == GXTVersion::GTA_SA || this->detectedVersion == GXTVersion::UNKNOWN);
             
-            addParseLog("版本检测结果- VC: " + std::string(isVC ? "是" : "否") + 
-                       ", SA: " + std::string(isSAVersion ? "是" : "否"));
-
             if (isVC) {
                 this->detectedVersion = GXTVersion::GTA_VC;
-                addParseLog("确定版本: " + getVersionName(GXTVersion::GTA_VC));
                 // VC版本: offset(uint32) + key(8 bytes string)
                 struct VCEntry { uint32_t offset; char key[8]; };
                 std::vector<VCEntry> entries(tkeySize / 12);
@@ -703,8 +664,6 @@ bool GXTParser::parse(const std::string& filePath) {
                         zeroIdx.push_back(i);
                     }
                 }
-                
-                addParseLog("开始解码 " + std::to_string(entries.size()) + " 个条目");
                 
                 for (auto& e : entries) {
                     std::string key(e.key, 8);
@@ -765,7 +724,6 @@ bool GXTParser::parse(const std::string& filePath) {
                 // === 解析字符 ===
                 if (bitsPerChar == 16) {
                     this->detectedVersion = GXTVersion::GTA_IV;
-                    addParseLog("确定版本: " + getVersionName(GXTVersion::GTA_IV) + " (16位字符)");
                     // SA 16-bit 版本处理逻辑 (实际上对应IV版本)
                     const uint16_t* arr = reinterpret_cast<const uint16_t*>(TDat.get());
                     size_t arrLen = tdatSize / 2;
@@ -777,8 +735,6 @@ bool GXTParser::parse(const std::string& filePath) {
                             zeroIdx.push_back(i);
                         }
                     }
-                    
-                    addParseLog("开始解码 " + std::to_string(offsets.size()) + " 个条目");
                     
                     for (size_t i = 0; i < offsets.size(); ++i) {
                         size_t start = offsets[i] / 2;
@@ -810,7 +766,6 @@ bool GXTParser::parse(const std::string& filePath) {
 
                 } else {
                     this->detectedVersion = GXTVersion::GTA_SA;
-                    addParseLog("确定版本: " + getVersionName(GXTVersion::GTA_SA) + " (8位字符)");
                     // SA 8-bit 版本处理逻辑 - 完全重写，参考Python算法
                     
                     // 预先收集所有空终止符的位置，用于快速查找
@@ -820,8 +775,6 @@ bool GXTParser::parse(const std::string& filePath) {
                             zeroIdx.push_back(i);
                         }
                     }
-                    
-                    addParseLog("开始解码 " + std::to_string(offsets.size()) + " 个条目");
                     
                     // 使用更高效的终止符查找算法
                     for (size_t i = 0; i < offsets.size(); ++i) {
@@ -849,7 +802,6 @@ bool GXTParser::parse(const std::string& filePath) {
                                 // 首先尝试UTF-8严格解码
                                 if (is_valid_utf8(raw.data(), raw.size())) {
                                     val = raw;
-                                    addParseLog("使用UTF-8解码条目 0x" + u32_to_hex(crcs[i]));
                                 } else {
                                     throw std::runtime_error("Invalid UTF-8");
                                 }
@@ -859,11 +811,9 @@ bool GXTParser::parse(const std::string& filePath) {
                                     // 参考Python：gbk_bytes = raw.decode('gbk', errors='strict').encode('cp1252', errors='replace')
                                     // 这里简化：直接使用CP1252转换
                                     val = this->cp1252_to_utf8(raw);
-                                    addParseLog("使用CP1252解码条目 0x" + u32_to_hex(crcs[i]));
                                 } catch (...) {
                                     // 最后回退到guess_decode
                                     val = this->guess_decode(raw);
-                                    addParseLog("使用自动检测解码条目 0x" + u32_to_hex(crcs[i]));
                                 }
                             }
                             
@@ -875,7 +825,6 @@ bool GXTParser::parse(const std::string& filePath) {
                 }
             }
             tables.push_back(std::move(tabl));
-            addParseLog("表#" + std::to_string(tableCount) + " (" + name + ") 解析完成，共 " + std::to_string(tabl.entries.size()) + " 个条目");
         }
     }
 
@@ -884,32 +833,21 @@ bool GXTParser::parse(const std::string& filePath) {
     // 最终版本确定：如果版本仍为UNKNOWN，根据解析结果推断
     if (this->detectedVersion == GXTVersion::UNKNOWN && !tables.empty()) {
         if (this->originalHasTABL) {
-            // 有TABL块，默认为VC格式
             this->detectedVersion = GXTVersion::GTA_VC;
-            addParseLog("根据TABL块存在，最终推断为GTA VC格式");
         } else {
-            // 无TABL块，根据表结构推断
             if (tables.size() == 1 && tables[0].name == "MAIN") {
-                // 单表MAIN，可能是III或IV格式
                 if (!tables[0].entries.empty() && tables[0].entries[0].key.find("0x") == 0) {
-                    // 键以0x开头，可能是IV格式（哈希键）
                     this->detectedVersion = GXTVersion::GTA_IV;
-                    addParseLog("根据哈希键格式，最终推断为GTA IV格式");
                 } else {
-                    // 普通键，可能是III格式
                     this->detectedVersion = GXTVersion::GTA_III;
-                    addParseLog("根据普通键格式，最终推断为GTA III格式");
                 }
             } else {
-                // 多表结构，可能是SA格式
                 this->detectedVersion = GXTVersion::GTA_SA;
-                addParseLog("根据多表结构，最终推断为GTA SA格式");
             }
         }
     }
     
-    addParseLog("文件解析完成，共解析 " + std::to_string(tables.size()) + " 个表");
-    addParseLog("最终确定版本 " + getVersionName(this->detectedVersion));
+    addParseLog("文件解析完成，共解析 " + std::to_string(tables.size()) + " 个表，版本: " + getVersionName(this->detectedVersion));
     return !tables.empty();
 }
 

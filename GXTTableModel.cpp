@@ -20,6 +20,8 @@ GXTTableModel::GXTTableModel(QObject* parent)
     , m_editable(false)
     , m_cachedRowCount(-1)
     , m_currentTableIndex(-1)
+    , m_displayCacheValid(false)
+    , m_cachedVersion(-1)
 {
 }
 
@@ -28,12 +30,17 @@ void GXTTableModel::setTab(FileTab* tab)
     beginResetModel();
     m_tab = tab;
     m_cachedRowCount = -1;
+    m_displayCacheValid = false;
     // 总是从tab获取最新的currentTableIndex，确保与标签页状态同步
     m_currentTableIndex = tab ? tab->currentTableIndex : -1;
+    m_cachedVersion = tab ? static_cast<int>(tab->version) : -1;
     endResetModel();
-    
-    // 强制清除所有缓存，确保下次访问时重新计算
-    m_cachedRowCount = -1;
+}
+
+void GXTTableModel::invalidateDisplayCache()
+{
+    m_displayCacheValid = false;
+    m_displayCache.clear();
 }
 
 void GXTTableModel::setEditable(bool editable)
@@ -264,6 +271,7 @@ void GXTTableModel::resetModel()
     } else {
         m_cachedRowCount = 0;
     }
+    m_displayCacheValid = false;  // 【性能优化】清除显示缓存
     endResetModel();
 }
 
@@ -272,10 +280,12 @@ void GXTTableModel::forceDataReset()
     beginResetModel();
     // 清除所有缓存
     m_cachedRowCount = -1;
+    m_displayCacheValid = false;  // 【性能优化】清除显示缓存
     
     // 从tab重新获取currentTableIndex，确保状态同步
     if (m_tab) {
         m_currentTableIndex = m_tab->currentTableIndex;
+        m_cachedVersion = static_cast<int>(m_tab->version);
         
         // 根据最新的tab状态重新计算行数
         if (m_tab->isWHM) {
@@ -289,6 +299,7 @@ void GXTTableModel::forceDataReset()
         }
     } else {
         m_currentTableIndex = -1;
+        m_cachedVersion = -1;
     }
     endResetModel();
 }
@@ -328,7 +339,7 @@ int GXTTableModel::columnCount(const QModelIndex&) const
 
 QVariant GXTTableModel::data(const QModelIndex& index, int role) const
 {
-    // 基本验证
+    // 【性能优化】快速失败检查
     if (!index.isValid() || !m_tab) return QVariant();
     
     const int row = index.row();
@@ -337,282 +348,49 @@ QVariant GXTTableModel::data(const QModelIndex& index, int role) const
     // 列边界检查
     if (col < 0 || col >= ColumnCount) return QVariant();
     
-    // 行边界检查和数据获取
-    if (m_tab->isWHM) {
-        // WHM模式检查 - 增强安全性
-        if (m_tab->whmEntries.empty()) {
-            return QVariant();
+    // 【性能优化】显示和编辑角色 - 使用缓存
+    if (role == Qt::DisplayRole || role == Qt::EditRole) {
+        // 检查缓存是否需要重建
+        if (!m_displayCacheValid) {
+            buildDisplayCache();
         }
         
-        if (row < 0 || row >= static_cast<int>(m_tab->whmEntries.size())) {
-            return QVariant();
-        }
+        // 快速行边界检查
+        if (row < 0 || row >= m_displayCache.size()) return QVariant();
         
-        try {
-            // 显示和编辑角色
-            if (role == Qt::DisplayRole || role == Qt::EditRole) {
-                const auto& entry = m_tab->whmEntries[row];
-                if (col == KeyColumn) {
-                    // 缓存格式化结果
-                    static thread_local QString hashStr;
-                    hashStr = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0');
-                    return hashStr;
-                } else {
-                    // 安全地转换字符串，防止内存异常
-                    try {
-                        return QString::fromStdString(entry.text);
-                    } catch (const std::exception& e) {
-                        qWarning() << "String conversion failed:" << e.what();
-                        return QStringLiteral("[转换失败]");
-                    } catch (...) {
-                        qWarning() << "Unknown exception during string conversion";
-                        return QStringLiteral("[未知错误]");
-                    }
-                }
-            }
-        } catch (const std::exception& e) {
-            qWarning() << "Data access failed at row" << row << ":" << e.what();
-            return QVariant();
-        } catch (...) {
-            qWarning() << "Unknown exception during data access at row" << row;
-            return QVariant();
-        }
-    } else if (m_tab->isDAT) {
-        // DAT模式检查 - 与WHM完全独立处理
-        if (m_tab->datEntries.empty()) {
-            return QVariant();
-        }
-        
-        if (row < 0 || row >= static_cast<int>(m_tab->datEntries.size())) {
-            return QVariant();
-        }
-        
-        try {
-            // 显示和编辑角色
-            if (role == Qt::DisplayRole || role == Qt::EditRole) {
-                const auto& entry = m_tab->datEntries[row];
-                if (col == KeyColumn) {
-                    // 缓存格式化结果
-                    static thread_local QString hashStr;
-                    hashStr = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0');
-                    return hashStr;
-                } else {
-                    // 安全地转换字符串，防止内存异常
-                    try {
-                        return QString::fromStdString(entry.text);
-                    } catch (const std::exception& e) {
-                        qWarning() << "String conversion failed:" << e.what();
-                        return QStringLiteral("[转换失败]");
-                    } catch (...) {
-                        qWarning() << "Unknown exception during string conversion";
-                        return QStringLiteral("[未知错误]");
-                    }
-                }
-            }
-        } catch (const std::exception& e) {
-            qWarning() << "DAT data access failed at row" << row << ":" << e.what();
-            return QVariant();
-        } catch (...) {
-            qWarning() << "Unknown exception during DAT data access at row" << row;
-            return QVariant();
-        }
-    } else {
-        // GXT模式检查 - 增强安全性和异常处理
-        if (m_tab->tables.empty()) {
-            return QVariant();
-        }
-        
-        if (m_tab->currentTableIndex < 0 || 
-            m_tab->currentTableIndex >= static_cast<int>(m_tab->tables.size())) {
-            return QVariant();
-        }
-        
-        try {
-            const auto& table = m_tab->tables[m_tab->currentTableIndex];
-            if (table.entries.empty() || row < 0 || row >= static_cast<int>(table.entries.size())) {
-                return QVariant();
-            }
-            
-            // 显示和编辑角色
-            if (role == Qt::DisplayRole || role == Qt::EditRole) {
-                const auto& entry = table.entries[row];
-                try {
-                    if (col == KeyColumn) {
-                        // GTA III: 直接显示原始字符串键名
-                        if (m_tab->version == GXTVersion::GTA_III) {
-                            return QString::fromStdString(entry.key);
-                        }
-                        // GTA VC: 直接显示原始字符串键名
-                        else if (m_tab->version == GXTVersion::GTA_VC) {
-                            return QString::fromStdString(entry.key);
-                        }
-                        // 如果是GTA_SA版本，尝试使用SATKEY替换
-                        else if (m_tab->version == GXTVersion::GTA_SA && !s_satKeyMap.isEmpty()) {
-                            // 将key（hex字符串）转换为uint32
-                            bool ok;
-                            uint32_t hash = QString::fromStdString(entry.key).toUInt(&ok, 16);
-                            if (ok) {
-                                // 查找SATKEY映射
-                                auto it = s_satKeyMap.find(hash);
-                                if (it != s_satKeyMap.end()) {
-                                    // 找到匹配，返回SATKEY字符串
-                                    return it.value();
-                                }
-                            }
-                        }
-                        // 如果是GTA_IV版本，尝试使用IVTKEY替换
-                        else if (m_tab->version == GXTVersion::GTA_IV && !s_ivtKeyMap.isEmpty()) {
-                            // 将key（hex字符串）转换为uint32
-                            bool ok;
-                            uint32_t hash = QString::fromStdString(entry.key).toUInt(&ok, 16);
-                            if (ok) {
-                                // 查找IVTKEY映射
-                                auto it = s_ivtKeyMap.find(hash);
-                                if (it != s_ivtKeyMap.end()) {
-                                    // 找到匹配，返回IVTKEY字符串
-                                    return it.value();
-                                }
-                            }
-                        }
-                        // 优先显示原始键值（如果存在）
-                        if (!entry.originalKey.empty()) {
-                            return QString::fromStdString(entry.originalKey);
-                        }
-                        
-                        // 如果没有原始键值，检查是否是lst中的键
-                        QString keyStr = QString::fromStdString(entry.key);
-                        uint32_t hash = keyStr.toUInt(nullptr, 16);
-                        
-                        if (m_tab->version == GXTVersion::GTA_SA && !s_satKeyMap.isEmpty()) {
-                            auto it = s_satKeyMap.find(hash);
-                            if (it != s_satKeyMap.end()) {
-                                return it.value();
-                            }
-                        } else if (m_tab->version == GXTVersion::GTA_IV && !s_ivtKeyMap.isEmpty()) {
-                            auto it = s_ivtKeyMap.find(hash);
-                            if (it != s_ivtKeyMap.end()) {
-                                return it.value();
-                            }
-                        }
-                        
-                        // 最后，如果是8位hex字符，添加0x前缀
-                        if (keyStr.length() == 8) {
-                            bool allHex = true;
-                            for (const QChar& c : keyStr) {
-                                if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
-                                    allHex = false;
-                                    break;
-                                }
-                            }
-                            if (allHex) {
-                                keyStr = "0x" + keyStr;
-                            }
-                        }
-                        return keyStr;
-                    } else {
-                        return QString::fromStdString(entry.value);
-                    }
-                } catch (const std::exception& e) {
-                    qWarning() << "String conversion failed at row" << row << ":" << e.what();
-                    return QStringLiteral("[转换失败]");
-                } catch (...) {
-                    qWarning() << "Unknown exception during string conversion at row" << row;
-                    return QStringLiteral("[未知错误]");
-                }
-            }
-        } catch (const std::exception& e) {
-            qWarning() << "GXT data access failed at row" << row << ":" << e.what();
-            return QVariant();
-        } catch (...) {
-            qWarning() << "Unknown exception during GXT data access at row" << row;
-            return QVariant();
-        }
+        const RowCache& cache = m_displayCache[row];
+        return (col == KeyColumn) ? cache.key : cache.value;
     }
     
-    // 字体角色 - 键列使用等宽字体，值列使用微软雅黑
+    // 【性能优化】字体角色 - 使用静态字体避免重复创建
     if (role == Qt::FontRole) {
-        QFont font;
-        if (col == KeyColumn) {
-            // 键列：等宽字体
-            font.setFamily("Consolas, 'Courier New', monospace");
-            font.setStyleHint(QFont::Monospace);
-            font.setFixedPitch(true);
-        } else {
-            // 值列：微软雅黑
-            font.setFamily("Microsoft YaHei");
-        }
-        font.setPointSize(QApplication::font().pointSize());
-        return font;
+        static QFont keyFont = []() {
+            QFont f;
+            f.setFamily("Consolas, 'Courier New', monospace");
+            f.setStyleHint(QFont::Monospace);
+            f.setFixedPitch(true);
+            f.setPointSize(QApplication::font().pointSize());
+            return f;
+        }();
+        static QFont valueFont = []() {
+            QFont f;
+            f.setFamily("Microsoft YaHei");
+            f.setPointSize(QApplication::font().pointSize());
+            return f;
+        }();
+        return (col == KeyColumn) ? keyFont : valueFont;
     }
     
-    // 工具提示
+    // 工具提示 - 使用已构建的缓存
     if (role == Qt::ToolTipRole) {
-        QString tooltip;
-        if (m_tab->isWHM) {
-            if (row < static_cast<int>(m_tab->whmEntries.size())) {
-                const auto& entry = m_tab->whmEntries[row];
-                tooltip = col == KeyColumn ? 
-                          "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') :
-                          QString::fromStdString(entry.text);
-            }
-        } else if (m_tab->isDAT) {
-            if (row < static_cast<int>(m_tab->datEntries.size())) {
-                const auto& entry = m_tab->datEntries[row];
-                tooltip = col == KeyColumn ? 
-                          "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') :
-                          QString::fromStdString(entry.text);
-            }
-        } else if (m_tab->currentTableIndex >= 0 && 
-                  m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
-            const auto& table = m_tab->tables[m_tab->currentTableIndex];
-            if (row < static_cast<int>(table.entries.size())) {
-                const auto& entry = table.entries[row];
-                if (col == KeyColumn) {
-                    // 优先显示原始键值（如果存在）
-                    if (!entry.originalKey.empty()) {
-                        tooltip = QString::fromStdString(entry.originalKey);
-                    } else {
-                        // 如果没有原始键值，检查是否是lst中的键
-                        QString keyStr = QString::fromStdString(entry.key);
-                        uint32_t hash = keyStr.toUInt(nullptr, 16);
-                        
-                        bool foundInLst = false;
-                        if (m_tab->version == GXTVersion::GTA_SA && !s_satKeyMap.isEmpty()) {
-                            auto it = s_satKeyMap.find(hash);
-                            if (it != s_satKeyMap.end()) {
-                                tooltip = it.value();
-                                foundInLst = true;
-                            }
-                        } else if (m_tab->version == GXTVersion::GTA_IV && !s_ivtKeyMap.isEmpty()) {
-                            auto it = s_ivtKeyMap.find(hash);
-                            if (it != s_ivtKeyMap.end()) {
-                                tooltip = it.value();
-                                foundInLst = true;
-                            }
-                        }
-                        
-                        // 最后，如果是8位hex字符，添加0x前缀
-                        if (!foundInLst) {
-                            if (keyStr.length() == 8) {
-                                bool allHex = true;
-                                for (const QChar& c : keyStr) {
-                                    if (!c.isDigit() && (c.toLower() < 'a' || c.toLower() > 'f')) {
-                                        allHex = false;
-                                        break;
-                                    }
-                                }
-                                if (allHex) {
-                                    keyStr = "0x" + keyStr;
-                                }
-                            }
-                            tooltip = keyStr;
-                        }
-                    }
-                } else {
-                    tooltip = QString::fromStdString(entry.value);
-                }
-            }
+        if (!m_displayCacheValid) {
+            buildDisplayCache();
         }
+        
+        if (row < 0 || row >= m_displayCache.size()) return QVariant();
+        
+        const RowCache& cache = m_displayCache[row];
+        QString tooltip = (col == KeyColumn) ? cache.key : cache.value;
         
         if (tooltip.length() > 100) {
             return tooltip.left(97) + "...";
@@ -621,6 +399,128 @@ QVariant GXTTableModel::data(const QModelIndex& index, int role) const
     }
     
     return QVariant();
+}
+
+// 【性能优化】格式化哈希键
+QString GXTTableModel::formatHashKey(uint32_t hash) const
+{
+    return "0x" + QString::number(hash, 16).toUpper().rightJustified(8, '0');
+}
+
+// 【性能优化】格式化GXT键
+QString GXTTableModel::formatKey(const std::string& key, const std::string& originalKey, GXTVersion version) const
+{
+    // GTA III 和 VC: 直接返回原始键
+    if (version == GXTVersion::GTA_III || version == GXTVersion::GTA_VC) {
+        return QString::fromStdString(key);
+    }
+    
+    // 优先使用原始键值
+    if (!originalKey.empty()) {
+        return QString::fromStdString(originalKey);
+    }
+    
+    QString keyStr = QString::fromStdString(key);
+    
+    // GTA SA: 尝试SATKEY映射
+    if (version == GXTVersion::GTA_SA && !s_satKeyMap.isEmpty()) {
+        bool ok;
+        uint32_t hash = keyStr.toUInt(&ok, 16);
+        if (ok) {
+            auto it = s_satKeyMap.find(hash);
+            if (it != s_satKeyMap.end()) {
+                return it.value();
+            }
+        }
+    }
+    
+    // GTA IV: 尝试IVTKEY映射
+    if (version == GXTVersion::GTA_IV && !s_ivtKeyMap.isEmpty()) {
+        bool ok;
+        uint32_t hash = keyStr.toUInt(&ok, 16);
+        if (ok) {
+            auto it = s_ivtKeyMap.find(hash);
+            if (it != s_ivtKeyMap.end()) {
+                return it.value();
+            }
+        }
+    }
+    
+    // 添加0x前缀（如果是8位hex）
+    if (keyStr.length() == 8) {
+        bool allHex = true;
+        for (int i = 0; i < 8; ++i) {
+            QChar c = keyStr[i].toLower();
+            if (!c.isDigit() && (c < 'a' || c > 'f')) {
+                allHex = false;
+                break;
+            }
+        }
+        if (allHex) {
+            return "0x" + keyStr;
+        }
+    }
+    
+    return keyStr;
+}
+
+// 【性能优化】构建显示缓存
+void GXTTableModel::buildDisplayCache() const
+{
+    m_displayCache.clear();
+    
+    if (!m_tab) {
+        m_displayCacheValid = true;
+        return;
+    }
+    
+    int rowCount = 0;
+    
+    // 计算行数并预分配
+    if (m_tab->isWHM) {
+        rowCount = static_cast<int>(m_tab->whmEntries.size());
+    } else if (m_tab->isDAT) {
+        rowCount = static_cast<int>(m_tab->datEntries.size());
+    } else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
+        rowCount = static_cast<int>(m_tab->tables[m_tab->currentTableIndex].entries.size());
+    }
+    
+    m_displayCache.reserve(rowCount);
+    
+    // WHM 格式
+    if (m_tab->isWHM) {
+        for (const auto& entry : m_tab->whmEntries) {
+            RowCache cache;
+            cache.key = formatHashKey(entry.hash);
+            cache.value = QString::fromStdString(entry.text);
+            cache.valid = true;
+            m_displayCache.append(cache);
+        }
+    }
+    // DAT 格式
+    else if (m_tab->isDAT) {
+        for (const auto& entry : m_tab->datEntries) {
+            RowCache cache;
+            cache.key = formatHashKey(entry.hash);
+            cache.value = QString::fromStdString(entry.text);
+            cache.valid = true;
+            m_displayCache.append(cache);
+        }
+    }
+    // GXT 格式
+    else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
+        const auto& table = m_tab->tables[m_tab->currentTableIndex];
+        for (const auto& entry : table.entries) {
+            RowCache cache;
+            cache.key = formatKey(entry.key, entry.originalKey, m_tab->version);
+            cache.value = QString::fromStdString(entry.value);
+            cache.valid = true;
+            m_displayCache.append(cache);
+        }
+    }
+    
+    m_displayCacheValid = true;
+    m_cachedRowCount = rowCount;
 }
 
 QVariant GXTTableModel::headerData(int section, Qt::Orientation orientation, int role) const
