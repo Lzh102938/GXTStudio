@@ -6,6 +6,7 @@
 #include "ParseWorker.h"
 #include "SaveWorker.h"
 #include "ItemPool.h"
+#include "ReplaceWorker.h"
 
 #include <QFont>
 #include <QFontDatabase>
@@ -241,6 +242,7 @@ private:
 #include <QMenu>
 #include <functional>
 #include <map>
+#include "ReplaceDialog.h"
 
 // 前向声明
 class GXTTableModel;
@@ -583,6 +585,8 @@ public:
     
     // 格式化键值显示（添加0x前缀）
     static QString formatKeyForDisplay(const QString& key);
+    
+    // 提供给后台替换工作者的公共方法
 
 private slots:
     // 文件操作
@@ -596,7 +600,27 @@ private slots:
     // 编辑操作
     void findText();
     void replaceText();
+    void showReplaceDialog();
+    
+    // 替换对话框信号处理函数
+    void handleFindNext(const QString& findText, bool caseSensitive);
+    void handleReplace(const QString& findText, const QString& replaceText, bool caseSensitive, ReplaceDialog::ReplaceScope scope);
+    void handleReplaceAll(const QString& findText, const QString& replaceText, bool caseSensitive, ReplaceDialog::ReplaceScope scope);
+    void replaceInCurrentTable(const QString& findText, const QString& replaceText, bool caseSensitive);
+    void replaceInAllTables(const QString& findText, const QString& replaceText, bool caseSensitive);
+    void replaceInSelectedArea(const QString& findText, const QString& replaceText, bool caseSensitive);
+    void replaceEntry(FileTab* tab, int tableIndex, int entryIndex, const QString& replaceText, int position = -1);
+    
+    // 后台替换相关方法
+    void startBackgroundReplace(const QString& findText, const QString& replaceText, bool caseSensitive, ReplaceDialog::ReplaceScope scope);
+    void onReplaceProgressUpdated(int completed, int total, const QString& message);
+    void onReplaceFinished(int replacedEntries, const QString& message);
+    void onReplaceError(const QString& error);
+    void onEntryReplaced(int tableIndex, int entryIndex, int replaceCount);
     void toggleReadOnly(bool readOnly);
+    
+    // 后台替换功能
+    void replaceAllMatchesInEntry(FileTab* tab, int tableIndex, int entryIndex, const QString& findText, const QString& replaceText, bool caseSensitive);
     
     // 视图操作
     void increaseFont();
@@ -618,6 +642,7 @@ private slots:
     void onSearchTextChanged();
     void onSearchNext();
     void onSearchPrevious();
+    void onToggleLoopSearch(bool checked);
     void onCodeTableConvert(); // 已弃用
     void onVersionChanged(const QModelIndex& selectedIndex);
     void onSmartTranslate();
@@ -749,6 +774,8 @@ private:
     QAction* m_findAction;
     QAction* m_replaceAction;
     QAction* m_readOnlyAction;
+    QAction* m_loopSearchAction;  // 循环搜索动作
+    ReplaceDialog* m_replaceDialog;
     QAction* m_increaseFontAction;
     QAction* m_decreaseFontAction;
     QAction* m_aboutAction;
@@ -788,6 +815,16 @@ private:
     QThread* m_saveThread;
     SaveWorker* m_saveWorker;
     QProgressBar* m_saveProgressBar;  // 保存进度条（位于状态栏中间）
+    
+    // 异步替换相关
+    ReplaceWorker* m_replaceWorker;
+    QThread* m_replaceThread;
+    MultiThreadProgressDialog* m_replaceProgressDialog;
+    // 替换后恢复选择与搜索
+    int m_pendingReplaceTable;
+    int m_pendingReplaceRow;
+    QString m_lastReplaceFindText;
+    ReplaceDialog::ReplaceScope m_lastReplaceScope;
 
     // 自动保存相关
     QToolButton* m_autoSaveButton;  // 自动保存开关按钮
@@ -822,21 +859,25 @@ private:
         QString searchText;
         int currentTableIndex;
         int currentEntryIndex;
-        std::vector<std::pair<int, int>> allMatches; // (tableIndex, entryIndex) 对
+        int currentMatchPosition; // 当前匹配在该条目中的位置
+        std::vector<std::tuple<int, int, int>> allMatches; // (tableIndex, entryIndex, position) 三元组
         bool isValid;
         bool caseSensitive;  // 大小写敏感
         bool useRegex;       // 使用正则表达式
+        bool loopSearch;     // 是否循环搜索
 
-        SearchState() : currentTableIndex(-1), currentEntryIndex(-1), isValid(false),
-                        caseSensitive(false), useRegex(false) {}
+        SearchState() : currentTableIndex(-1), currentEntryIndex(-1), currentMatchPosition(-1), 
+                        isValid(false), caseSensitive(false), useRegex(false), loopSearch(false) {}
         void clear() {
             searchText.clear();
             currentTableIndex = -1;
             currentEntryIndex = -1;
+            currentMatchPosition = -1;
             allMatches.clear();
             isValid = false;
             caseSensitive = false;
             useRegex = false;
+            loopSearch = false;
         }
     };
     SearchState m_searchState;
@@ -846,7 +887,7 @@ private:
         QString searchText;           // 搜索文本
         bool caseSensitive;         // 大小写敏感
         bool useRegex;             // 使用正则表达式
-        std::vector<std::pair<int, int>> matches;  // 搜索结果
+        std::vector<std::tuple<int, int, int>> matches;  // 搜索结果 (tableIndex, entryIndex, position)
         QString cacheKey;          // 缓存键（用于快速查找）
 
         SearchResultCache() : caseSensitive(false), useRegex(false) {}
@@ -867,6 +908,9 @@ private:
     SearchResultCache* m_searchResultCache;
     int m_cacheIndex;
     static const int MAX_SEARCH_CACHE = 20;
+
+    // 控制搜索时是否跳转（用于替换操作重建搜索结果时保持焦点）
+    bool m_suppressSearchJump;
     
     // 初始化方法
     void setupUI();
@@ -887,6 +931,7 @@ private:
     void removeFileTab(int index);
     void cleanupDelegatesCache(); // 清理委托缓存
     void cleanupListCache(FileTab* tab); // 清理列表缓存
+    void clearSearchCache(); // 清除搜索缓存
     QString getVersionString(GXTVersion version) const;
     std::string getVersionName(GXTVersion version);
     GXTVersion selectVersionDialog(); // 版本选择对话框

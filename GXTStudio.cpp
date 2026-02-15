@@ -38,10 +38,14 @@
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QItemSelection>
+#include <QItemSelectionModel>
+#include <QSet>
 #include <QStringConverter>
 #include <algorithm>
+
 #include <windows.h>
 #include <fstream>
+
 
 // 简单的事件过滤器类，用于处理父容器resize事件
 class ResizeEventFilter : public QObject {
@@ -117,7 +121,10 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_exitAction(nullptr)
     , m_findAction(nullptr)
     , m_replaceAction(nullptr)
+    , m_suppressSearchJump(false)
+
     , m_readOnlyAction(nullptr)
+    , m_replaceDialog(nullptr)
     , m_increaseFontAction(nullptr)
     , m_decreaseFontAction(nullptr)
     , m_aboutAction(nullptr)
@@ -145,7 +152,15 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_saveThread(nullptr)
     , m_saveWorker(nullptr)
     , m_saveProgressBar(nullptr)
+    , m_replaceWorker(nullptr)
+    , m_replaceThread(nullptr)
+    , m_replaceProgressDialog(nullptr)
+    , m_pendingReplaceTable(-1)
+    , m_pendingReplaceRow(-1)
+    , m_lastReplaceScope(ReplaceDialog::CurrentTable)
     , m_autoSaveButton(nullptr)
+
+
     , m_autoSaveTimer(nullptr)
     , m_autoSaveEnabled(false)
     , m_autoSaveFutureWatcher(nullptr)
@@ -160,6 +175,8 @@ GXTStudio::GXTStudio(QWidget *parent)
 {
     ui.setupUi(this);
     
+    // 替换动作将在setupMenus中添加到编辑菜单
+        
     // 设置全局字体为微软雅黑，启用字体平滑
     QFont globalFont = this->font();
     globalFont.setFamily("Microsoft YaHei");
@@ -175,6 +192,9 @@ GXTStudio::GXTStudio(QWidget *parent)
     
     // 启用双缓冲防止闪烁
     setAttribute(Qt::WA_PaintOnScreen, false); // 不在屏幕上直接绘制
+    
+    // 连接替换动作信号
+    connect(m_replaceAction, &QAction::triggered, this, &GXTStudio::showReplaceDialog);
     setAttribute(Qt::WA_DontCreateNativeAncestors, true); // 防止本地祖先干扰
     setAttribute(Qt::WA_DeleteOnClose, false); // 防止删除时闪烁
     
@@ -324,6 +344,12 @@ GXTStudio::GXTStudio(QWidget *parent)
 GXTStudio::~GXTStudio()
 {
     // 停止所有定时器，防止在对象销毁后触发
+    
+    // 清理替换对话框
+    if (m_replaceDialog) {
+        delete m_replaceDialog;
+        m_replaceDialog = nullptr;
+    }
     if (m_cleanupTimer) {
         m_cleanupTimer->stop();
     }
@@ -384,6 +410,21 @@ GXTStudio::~GXTStudio()
         delete m_saveThread;
         m_saveThread = nullptr;
         m_saveWorker = nullptr;
+    }
+    
+    // 停止替换线程
+    if (m_replaceWorker) {
+        m_replaceWorker->requestCancel();
+        // 给一些时间让工作线程处理取消请求
+        QThread::msleep(100);
+        delete m_replaceWorker;
+        m_replaceWorker = nullptr;
+    }
+    
+    // 清理替换进度对话框
+    if (m_replaceProgressDialog) {
+        delete m_replaceProgressDialog;
+        m_replaceProgressDialog = nullptr;
     }
 
     // 清理资源
@@ -796,6 +837,19 @@ void GXTStudio::setupMenus()
 
     // 设置只读模式初始状态
     m_readOnlyAction->setChecked(m_isReadOnly);
+    
+    // 将替换动作添加到编辑菜单
+    if (ui.menuEdit) {
+        ui.menuEdit->addAction(m_replaceAction);
+        
+        // 添加循环搜索选项
+        m_loopSearchAction = new QAction("循环搜索(&L)", this);
+        m_loopSearchAction->setCheckable(true);
+        m_loopSearchAction->setChecked(false);
+        m_loopSearchAction->setToolTip("启用/禁用搜索结果循环");
+        connect(m_loopSearchAction, &QAction::triggered, this, &GXTStudio::onToggleLoopSearch);
+        ui.menuEdit->addAction(m_loopSearchAction);
+    }
 
     // 添加背景设置菜单到视图菜单
     if (ui.menuView) {
@@ -1089,7 +1143,7 @@ void GXTStudio::connectSignals()
     connect(m_exitAction, &QAction::triggered, this, &GXTStudio::exitApp);
     
     connect(m_findAction, &QAction::triggered, this, &GXTStudio::findText);
-    connect(m_replaceAction, &QAction::triggered, this, &GXTStudio::replaceText);
+    connect(m_replaceAction, &QAction::triggered, this, &GXTStudio::showReplaceDialog);
     connect(m_codeTableAction, &QAction::triggered, this, &GXTStudio::onCodeTableConvert);
     connect(m_smartTranslateAction, &QAction::triggered, this, &GXTStudio::onSmartTranslate);
     connect(m_readOnlyAction, &QAction::toggled, this, &GXTStudio::toggleReadOnly);
@@ -1191,6 +1245,23 @@ void GXTStudio::cleanupListCache(FileTab* tab)
     
     tab->listCache.lastTableCount = 0;
     tab->listCache.needsRebuild = true;
+}
+
+void GXTStudio::clearSearchCache()
+{
+    // 清除搜索结果缓存
+    if (m_searchResultCache) {
+        for (int i = 0; i < MAX_SEARCH_CACHE; ++i) {
+            m_searchResultCache[i].searchText.clear();
+            m_searchResultCache[i].matches.clear();
+            m_searchResultCache[i].cacheKey.clear();
+        }
+    }
+    
+    // 清除搜索状态
+    m_searchState.clear();
+    
+    showLogMessage("搜索缓存已清除");
 }
 
 // 缓存预热方法已删除
@@ -2218,10 +2289,223 @@ void GXTStudio::replaceText()
     QMessageBox::information(this, "替换", "替换功能正在开发中...");
 }
 
+void GXTStudio::showReplaceDialog()
+{
+    if (!m_replaceDialog) {
+        m_replaceDialog = new ReplaceDialog(this);
+        
+        // 连接替换对话框的信号
+        connect(m_replaceDialog, &ReplaceDialog::findNextClicked, 
+                this, &GXTStudio::handleFindNext);
+        connect(m_replaceDialog, &ReplaceDialog::replaceClicked,
+                this, &GXTStudio::handleReplace);
+        connect(m_replaceDialog, &ReplaceDialog::replaceAllClicked,
+                this, &GXTStudio::handleReplaceAll);
+    }
+    
+    // 设置当前搜索文本
+    FileTab* tab = getCurrentTab();
+    if (tab && tab->searchEdit) {
+        m_replaceDialog->findEdit()->setText(tab->searchEdit->text());
+    }
+    
+    // 同步循环搜索勾选状态
+    bool loopEnabled = m_loopSearchAction ? m_loopSearchAction->isChecked() : m_searchState.loopSearch;
+    m_replaceDialog->setLoopEnabled(loopEnabled);
+
+    // 显示对话框
+    m_replaceDialog->show();
+    m_replaceDialog->raise();
+    m_replaceDialog->activateWindow();
+}
+
+
+// 替换对话框信号处理函数
+void GXTStudio::handleFindNext(const QString& findText, bool caseSensitive)
+{
+    FileTab* tab = getCurrentTab();
+    if (!tab) return;
+    
+    // 设置搜索文本到搜索框
+    if (tab->searchEdit) {
+        tab->searchEdit->setText(findText);
+    }
+    
+    // 设置搜索选项
+    if (tab->caseSensitiveButton) {
+        tab->caseSensitiveButton->setChecked(caseSensitive);
+    }
+    
+    // 设置循环搜索选项（来自菜单或对话框）
+    bool loopEnabled = m_loopSearchAction ? m_loopSearchAction->isChecked() : false;
+    if (m_replaceDialog) loopEnabled = m_replaceDialog->isLoopEnabled();
+    m_searchState.loopSearch = loopEnabled;
+    if (m_loopSearchAction) m_loopSearchAction->setChecked(loopEnabled);
+    
+    // 检查是否需要重新搜索（搜索文本或选项改变时）
+
+    bool needRescan = !m_searchState.isValid || 
+                     m_searchState.searchText != findText || 
+                     m_searchState.caseSensitive != caseSensitive;
+    
+    if (needRescan) {
+        performSearch(findText);
+    } else {
+        // 直接跳转到下一个匹配项
+        onSearchNext();
+    }
+}
+
+void GXTStudio::handleReplace(const QString& findText, const QString& replaceText, bool caseSensitive, ReplaceDialog::ReplaceScope scope)
+{
+    FileTab* tab = getCurrentTab();
+    if (!tab) return;
+    
+    // 设置搜索文本到搜索框
+    if (tab->searchEdit) {
+        tab->searchEdit->setText(findText);
+    }
+    
+    // 设置搜索选项
+    if (tab->caseSensitiveButton) {
+        tab->caseSensitiveButton->setChecked(caseSensitive);
+    }
+    
+    // 设置循环搜索选项（来自对话框/菜单）
+    bool loopEnabled = m_loopSearchAction ? m_loopSearchAction->isChecked() : false;
+    if (m_replaceDialog) loopEnabled = m_replaceDialog->isLoopEnabled();
+    m_searchState.loopSearch = loopEnabled;
+    if (m_loopSearchAction) m_loopSearchAction->setChecked(loopEnabled);
+    
+    // 如果还没有有效的搜索状态，先执行搜索
+
+    if (!m_searchState.isValid || m_searchState.searchText != findText || 
+        m_searchState.caseSensitive != caseSensitive) {
+        performSearch(findText);
+        return; // 搜索后返回，等待用户下次点击
+    }
+    
+    if (m_searchState.allMatches.empty()) return;
+    
+    // 获取当前选中的表格项（这就是要替换的项）
+    QModelIndex currentIndex = tab->entryTableView->currentIndex();
+    if (!currentIndex.isValid()) {
+        showLogMessage("请先定位到要替换的匹配项");
+        return;
+    }
+    
+    int currentRow = currentIndex.row();
+    int currentTableIndex = tab->currentTableIndex;
+    int currentPosition = m_searchState.currentMatchPosition;
+    
+    // 检查用户是否手动点击了其他行
+    bool userClickedDifferentRow = false;
+    if (m_searchState.currentEntryIndex >= 0 && m_searchState.currentEntryIndex < static_cast<int>(m_searchState.allMatches.size())) {
+        const auto& currentMatch = m_searchState.allMatches[m_searchState.currentEntryIndex];
+        int lastTableRow = std::get<1>(currentMatch);
+        int lastTableIndex = std::get<0>(currentMatch);
+        
+        // 如果当前选中行与上次匹配项所在行不同，说明用户手动点击了其他行
+        if (currentTableIndex != lastTableIndex || currentRow != lastTableRow) {
+            userClickedDifferentRow = true;
+        }
+    }
+    
+    int matchIndex = -1;
+
+    // 优先使用当前搜索索引（保持顺序）
+    if (m_searchState.currentEntryIndex >= 0 && m_searchState.currentEntryIndex < static_cast<int>(m_searchState.allMatches.size())) {
+        matchIndex = m_searchState.currentEntryIndex;
+    }
+
+    // 如果用户点击了其他行，则以该行作为焦点，从该行往下寻找匹配（与“查找下一个”一致）
+    if (userClickedDifferentRow) {
+        matchIndex = -1;
+        for (int i = 0; i < static_cast<int>(m_searchState.allMatches.size()); ++i) {
+            const auto& match = m_searchState.allMatches[i];
+            if (std::get<0>(match) == currentTableIndex && std::get<1>(match) >= currentRow) {
+                matchIndex = i;
+                break;
+            }
+        }
+        if (matchIndex == -1 && !m_searchState.allMatches.empty()) {
+            matchIndex = 0; // 回到第一条匹配
+        }
+    }
+
+    // 若仍未定位，按当前精确匹配位置尝试
+    if (matchIndex == -1) {
+        for (int i = 0; i < static_cast<int>(m_searchState.allMatches.size()); ++i) {
+            const auto& match = m_searchState.allMatches[i];
+            if (std::get<0>(match) == currentTableIndex && 
+                std::get<1>(match) == currentRow && 
+                std::get<2>(match) == currentPosition) {
+                matchIndex = i;
+                break;
+            }
+        }
+    }
+    
+    if (matchIndex != -1) {
+        // 将焦点索引同步到搜索状态，并记录本次实际匹配键
+        const auto& matched = m_searchState.allMatches[matchIndex];
+        m_searchState.currentEntryIndex = matchIndex;
+        m_searchState.currentMatchPosition = std::get<2>(matched);
+        m_searchState.currentTableIndex = std::get<0>(matched);
+
+        // 替换当前匹配项
+        replaceEntry(tab, std::get<0>(matched), std::get<1>(matched), replaceText, std::get<2>(matched));
+        showLogMessage(QString("已替换单个匹配项"));
+        
+        // 由于replaceEntry会清除搜索缓存，需要重新执行搜索来重建匹配列表
+        int prevIndex = matchIndex; // 记录旧索引顺序，避免长度变化导致错过下一项
+        m_suppressSearchJump = true; // 替换后重建匹配列表，但不跳到首条
+        performSearch(findText);
+        
+        // 查找替换位置的后继并跳转高亮（按旧索引顺序推进一位）
+        if (!m_searchState.allMatches.empty()) {
+            int nextIndex = prevIndex;
+            if (nextIndex >= static_cast<int>(m_searchState.allMatches.size())) {
+                nextIndex = static_cast<int>(m_searchState.allMatches.size()) - 1; // 若已是最后，停在末尾
+            }
+            m_searchState.currentEntryIndex = nextIndex;
+            m_searchState.currentMatchPosition = std::get<2>(m_searchState.allMatches[nextIndex]);
+            m_searchState.currentTableIndex = std::get<0>(m_searchState.allMatches[nextIndex]);
+            jumpToMatch(nextIndex); // 保持向后跳转并高亮
+        } else {
+            m_searchState.currentEntryIndex = -1;
+            m_searchState.currentMatchPosition = -1;
+        }
+
+
+
+
+    } else {
+        showLogMessage("当前选中项不在搜索结果中");
+    }
+
+
+}
+
+void GXTStudio::handleReplaceAll(const QString& findText, const QString& replaceText, bool caseSensitive, ReplaceDialog::ReplaceScope scope)
+{
+    switch (scope) {
+    case ReplaceDialog::CurrentTable:
+        replaceInCurrentTable(findText, replaceText, caseSensitive);
+        break;
+    case ReplaceDialog::AllTables:
+        replaceInAllTables(findText, replaceText, caseSensitive);
+        break;
+    case ReplaceDialog::SelectedArea:
+        replaceInSelectedArea(findText, replaceText, caseSensitive);
+        break;
+    }
+}
+
 void GXTStudio::toggleReadOnly(bool readOnly)
 {
     m_isReadOnly = readOnly;
-
+    
     // 更新所有标签页中表格的编辑触发器和模型可编辑性
     for (auto& tab : m_fileTabs) {
         if (tab.tableList) {
@@ -2283,6 +2567,396 @@ void GXTStudio::toggleReadOnly(bool readOnly)
     
     // 使用showLogMessage显示状态变更，它会自动在一段时间后恢复状态栏
     showLogMessage(QString("模式已切换: %1").arg(m_isReadOnly ? "只读" : "编辑"));
+}
+
+void GXTStudio::replaceInCurrentTable(const QString& findText, const QString& replaceText, bool caseSensitive)
+{
+    startBackgroundReplace(findText, replaceText, caseSensitive, ReplaceDialog::CurrentTable);
+}
+
+void GXTStudio::replaceInAllTables(const QString& findText, const QString& replaceText, bool caseSensitive)
+{
+    startBackgroundReplace(findText, replaceText, caseSensitive, ReplaceDialog::AllTables);
+}
+
+void GXTStudio::replaceInSelectedArea(const QString& findText, const QString& replaceText, bool caseSensitive)
+{
+    startBackgroundReplace(findText, replaceText, caseSensitive, ReplaceDialog::SelectedArea);
+}
+
+void GXTStudio::startBackgroundReplace(const QString& findText, const QString& replaceText, bool caseSensitive, ReplaceDialog::ReplaceScope scope)
+{
+    FileTab* tab = getCurrentTab();
+    if (!tab) {
+        showLogMessage("错误：无法获取当前标签页");
+        return;
+    }
+    
+    // 预先收集选区，避免 performSearch 跳转清空用户选择
+    int currentTableIndex = tab->currentTableIndex;
+    QSet<int> selectedRows;
+    if (scope == ReplaceDialog::SelectedArea && tab->entryTableView && tab->entryTableView->selectionModel()) {
+        QItemSelectionModel* selectionModel = tab->entryTableView->selectionModel();
+        const QModelIndexList allSelected = selectionModel->selectedIndexes();
+        for (const auto& idx : allSelected) {
+            selectedRows.insert(idx.row());
+        }
+        if (selectedRows.isEmpty()) {
+            QModelIndex currentIndex = selectionModel->currentIndex();
+            if (currentIndex.isValid()) {
+                selectedRows.insert(currentIndex.row());
+            }
+        }
+    }
+
+    // 记录本次替换信息（用于结束后恢复焦点）
+    m_lastReplaceFindText = findText;
+    m_lastReplaceScope = scope;
+    m_pendingReplaceTable = currentTableIndex;
+    m_pendingReplaceRow = -1;
+    if (tab->entryTableView && tab->entryTableView->currentIndex().isValid()) {
+        m_pendingReplaceRow = tab->entryTableView->currentIndex().row();
+    }
+
+    // 执行搜索获取匹配项
+    performSearch(findText);
+    
+    if (m_searchState.allMatches.empty()) {
+        showLogMessage("未找到匹配项，无需替换");
+        return;
+    }
+    
+    // 准备替换任务
+    ReplaceWorker::ReplaceTask task;
+
+    task.findText = findText;
+    task.replaceText = replaceText;
+    task.caseSensitive = caseSensitive;
+    task.matches = m_searchState.allMatches;
+    task.currentTab = tab;
+    
+    // 构建需要处理的条目集合
+    for (const auto& match : m_searchState.allMatches) {
+        int tableIndex = std::get<0>(match);
+        int entryIndex = std::get<1>(match);
+        
+        bool shouldProcess = false;
+        
+        switch (scope) {
+        case ReplaceDialog::CurrentTable:
+            shouldProcess = (tableIndex == currentTableIndex);
+            break;
+        case ReplaceDialog::AllTables:
+            shouldProcess = true;
+            break;
+        case ReplaceDialog::SelectedArea:
+            // 仅处理当前表中选定的行
+            if (tableIndex == currentTableIndex) {
+                if (!selectedRows.isEmpty()) {
+                    shouldProcess = selectedRows.contains(entryIndex);
+                } else {
+                    QModelIndex currentIndex = tab->entryTableView->currentIndex();
+                    shouldProcess = (currentIndex.isValid() && currentIndex.row() == entryIndex);
+                }
+            }
+            break;
+        }
+        
+        if (shouldProcess) {
+            task.processedEntries.insert({tableIndex, entryIndex});
+        }
+    }
+
+
+    
+    if (task.processedEntries.empty()) {
+        showLogMessage("未找到需要处理的条目");
+        return;
+    }
+
+    // 创建并配置替换工作者（所有作用范围统一使用进度对话框 + 子线程）
+
+    if (!m_replaceWorker) {
+        m_replaceWorker = new ReplaceWorker(this, nullptr);
+    }
+    if (!m_replaceThread) {
+        m_replaceThread = new QThread(this);
+        m_replaceWorker->moveToThread(m_replaceThread);
+        connect(m_replaceThread, &QThread::finished, m_replaceWorker, &QObject::deleteLater);
+        connect(m_replaceThread, &QThread::finished, this, [this]() { m_replaceThread = nullptr; m_replaceWorker = nullptr; });
+        m_replaceThread->start();
+    }
+
+    
+    connect(m_replaceWorker, &ReplaceWorker::progressUpdated, 
+            this, &GXTStudio::onReplaceProgressUpdated, Qt::UniqueConnection);
+    connect(m_replaceWorker, &ReplaceWorker::replaceFinished, 
+            this, &GXTStudio::onReplaceFinished, Qt::UniqueConnection);
+    connect(m_replaceWorker, &ReplaceWorker::errorOccurred, 
+            this, &GXTStudio::onReplaceError, Qt::UniqueConnection);
+    connect(m_replaceWorker, &ReplaceWorker::entryReplaced, 
+            this, &GXTStudio::onEntryReplaced, Qt::UniqueConnection);
+
+    
+    // 创建进度对话框（应用级模态，防止主界面操作）
+    if (!m_replaceProgressDialog) {
+        m_replaceProgressDialog = new MultiThreadProgressDialog(this);
+        m_replaceProgressDialog->setWindowTitle("替换进度");
+        m_replaceProgressDialog->setWindowModality(Qt::ApplicationModal);
+        m_replaceProgressDialog->setModal(true);
+        connect(m_replaceProgressDialog, &MultiThreadProgressDialog::cancelTranslationRequested,
+                [this](MultiThreadProgressDialog::CancelOption option) {
+                    if (m_replaceWorker) {
+                        m_replaceWorker->requestCancel();
+                    }
+                });
+    }
+    
+    // 设置任务并启动
+
+    m_replaceWorker->setReplaceTask(task);
+    m_replaceProgressDialog->setTotalThreads(1);
+    m_replaceProgressDialog->reset();
+    m_replaceProgressDialog->show();
+    
+    QMetaObject::invokeMethod(m_replaceWorker, "startReplace", Qt::QueuedConnection);
+    
+    showLogMessage(QString("开始后台替换操作，共 %1 个条目...").arg(task.processedEntries.size()));
+}
+
+
+
+void GXTStudio::onReplaceProgressUpdated(int completed, int total, const QString& message)
+{
+    if (m_replaceProgressDialog) {
+        m_replaceProgressDialog->updateThreadProgress(0, completed, total, message);
+        m_replaceProgressDialog->updateOverallProgress(completed, total);
+    }
+}
+
+void GXTStudio::onReplaceFinished(int replacedEntries, const QString& message)
+{
+    if (m_replaceProgressDialog) {
+        m_replaceProgressDialog->translationCompleted();
+        m_replaceProgressDialog->hide();
+    }
+    
+    showLogMessage(message);
+    
+    // 保存当前替换上下文
+    int targetTable = m_pendingReplaceTable;
+    int targetRow = m_pendingReplaceRow;
+    QString lastFind = m_lastReplaceFindText;
+    
+    // 清理ReplaceWorker对象
+
+    if (m_replaceWorker) {
+        m_replaceWorker->requestCancel();
+    }
+    if (m_replaceThread) {
+        m_replaceThread->quit();
+        m_replaceThread->wait(200);
+        delete m_replaceThread;
+        m_replaceThread = nullptr;
+        m_replaceWorker = nullptr;
+    }
+
+    
+    // 刷新界面
+    FileTab* tab = getCurrentTab();
+    if (tab && tab->entryTableModel) {
+        tab->entryTableModel->invalidateDisplayCache();
+        if (tab->entryTableView) {
+            tab->entryTableView->viewport()->update();
+        }
+    }
+
+    // 恢复选中行并重新搜索，防止跳回首行
+    if (tab && tab->entryTableView && tab->entryTableModel && targetRow >= 0 && targetTable == tab->currentTableIndex) {
+        QModelIndex idx = tab->entryTableModel->index(targetRow, 0);
+        if (idx.isValid()) {
+            tab->entryTableView->setCurrentIndex(idx);
+            tab->entryTableView->selectionModel()->select(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        }
+        if (!lastFind.isEmpty()) {
+            m_suppressSearchJump = true;
+            performSearch(lastFind);
+            if (m_searchState.isValid && !m_searchState.allMatches.empty()) {
+                int nextIndex = -1;
+                for (int i = 0; i < static_cast<int>(m_searchState.allMatches.size()); ++i) {
+                    const auto& m = m_searchState.allMatches[i];
+                    if (std::get<0>(m) == targetTable && std::get<1>(m) >= targetRow) {
+                        nextIndex = i;
+                        break;
+                    }
+                }
+                if (nextIndex == -1) {
+                    nextIndex = 0;
+                }
+                m_searchState.currentEntryIndex = nextIndex;
+                jumpToMatch(nextIndex);
+            }
+        }
+    }
+}
+
+
+void GXTStudio::onReplaceError(const QString& error)
+{
+    if (m_replaceProgressDialog) {
+        m_replaceProgressDialog->hide();
+    }
+    
+    showLogMessage(QString("替换错误: %1").arg(error));
+    QMessageBox::warning(this, "替换错误", error);
+}
+
+void GXTStudio::onEntryReplaced(int tableIndex, int entryIndex, int replaceCount)
+{
+    // 这里可以添加单个条目替换完成后的处理逻辑
+    // 比如更新UI或发送通知
+    Q_UNUSED(tableIndex)
+    Q_UNUSED(entryIndex)
+    Q_UNUSED(replaceCount)
+}
+
+void GXTStudio::replaceAllMatchesInEntry(FileTab* tab, int tableIndex, int entryIndex, const QString& findText, const QString& replaceText, bool caseSensitive)
+{
+    showLogMessage(QString("开始替换: 表%1 条目%2 查找'%3' 替换为'%4'").arg(tableIndex).arg(entryIndex).arg(findText).arg(replaceText));
+    
+    if (!tab || tableIndex < 0 || entryIndex < 0) {
+        showLogMessage("替换失败: 无效参数");
+        return;
+    }
+    
+    // 确保表格索引有效
+    if (tableIndex >= static_cast<int>(tab->tables.size())) return;
+    
+    // 确保条目索引有效
+    if (entryIndex >= static_cast<int>(tab->tables[tableIndex].entries.size())) return;
+    
+    // 获取原始值
+    QString oldValue = QString::fromStdString(tab->tables[tableIndex].entries[entryIndex].value);
+    QString newValue = oldValue;
+    
+    // 查找并替换所有匹配项
+    Qt::CaseSensitivity cs = caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+    int pos = 0;
+    int replacedCount = 0;
+    
+    // 循环查找并替换所有匹配项
+    while ((pos = newValue.indexOf(findText, pos, cs)) != -1) {
+        newValue.replace(pos, findText.length(), replaceText);
+        pos += replaceText.length(); // 移动到替换文本之后继续搜索
+        replacedCount++;
+    }
+    
+    // 如果没有找到匹配项，直接返回
+    if (replacedCount == 0) {
+        return;
+    }
+    
+    // 更新底层数据
+    tab->tables[tableIndex].entries[entryIndex].value = newValue.toStdString();
+    
+    // 关键：清除搜索缓存，确保下次搜索时重新计算匹配结果
+    clearSearchCache();
+    
+    // 更新模型
+    if (tab->entryTableModel) {
+        QModelIndex index = tab->entryTableModel->index(entryIndex, 1);
+        
+        // 关键：清除模型的显示缓存
+        tab->entryTableModel->invalidateDisplayCache();
+        
+        // 发送数据变更信号
+        tab->entryTableModel->dataChanged(index, index);
+        
+        // 强制刷新视图
+        if (tab->entryTableView) {
+            tab->entryTableView->viewport()->update();
+            tab->entryTableView->update(index);
+            tab->entryTableView->repaint();
+            
+            // 清除高亮缓存以确保显示更新
+            auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab->entryTableView->itemDelegate());
+            if (delegate) {
+                delegate->clearCache();
+            }
+        }
+    }
+    
+    showLogMessage(QString("条目 [%1] 中替换了 %2 处匹配项").arg(entryIndex).arg(replacedCount));
+}
+
+void GXTStudio::replaceEntry(FileTab* tab, int tableIndex, int entryIndex, const QString& replaceText, int position)
+{
+    if (!tab || tableIndex < 0 || entryIndex < 0) return;
+    
+    // 确保表格索引有效
+    if (tableIndex >= static_cast<int>(tab->tables.size())) return;
+    
+    // 确保条目索引有效
+    if (entryIndex >= static_cast<int>(tab->tables[tableIndex].entries.size())) return;
+    
+    // 获取原始值
+    QString oldValue = QString::fromStdString(tab->tables[tableIndex].entries[entryIndex].value);
+    
+    // 获取当前搜索文本
+    QString searchText = m_searchState.searchText;
+    bool caseSensitive = m_searchState.caseSensitive;
+    bool useRegex = m_searchState.useRegex;
+    
+    // 执行部分替换（只替换指定位置的匹配项）
+    QString newValue = oldValue;
+    
+    if (position >= 0) {
+        // 精确位置替换
+        if (position + searchText.length() <= newValue.length()) {
+            newValue.replace(position, searchText.length(), replaceText);
+        } else {
+            return; // 位置超出范围
+        }
+    } else {
+        // 默认行为：替换第一个匹配项
+        Qt::CaseSensitivity cs = caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+        int pos = newValue.indexOf(searchText, 0, cs);
+        if (pos != -1) {
+            newValue.replace(pos, searchText.length(), replaceText);
+        } else {
+            return; // 未找到匹配的文本
+        }
+    }
+    
+    // 更新底层数据
+    tab->tables[tableIndex].entries[entryIndex].value = newValue.toStdString();
+    
+    // 关键：清除搜索缓存，确保下次搜索时重新计算匹配结果
+    clearSearchCache();
+    
+    // 更新模型
+    if (tab->entryTableModel) {
+        QModelIndex index = tab->entryTableModel->index(entryIndex, 1);
+        
+        // 关键：清除模型的显示缓存
+        tab->entryTableModel->invalidateDisplayCache();
+        
+        // 发送数据变更信号
+        tab->entryTableModel->dataChanged(index, index);
+        
+        // 强制刷新视图
+        if (tab->entryTableView) {
+            tab->entryTableView->viewport()->update();
+            tab->entryTableView->update(index);
+            tab->entryTableView->repaint();
+            
+            // 清除高亮缓存以确保显示更新
+            auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab->entryTableView->itemDelegate());
+            if (delegate) {
+                delegate->clearCache();
+            }
+        }
+    }
 }
 
 // 视图操作槽函数
@@ -2786,8 +3460,9 @@ void GXTStudio::performSearch(const QString& searchText)
     for (int i = 0; i < MAX_SEARCH_CACHE; ++i) {
         if (m_searchResultCache[i].isValid(searchText, caseSensitive, useRegex)) {
             m_searchState.searchText = searchText;
-            m_searchState.currentTableIndex = 0;
+            m_searchState.currentTableIndex = tab->currentTableIndex;  // 使用当前实际的表索引
             m_searchState.currentEntryIndex = -1;
+            m_searchState.currentMatchPosition = -1;
             m_searchState.allMatches = m_searchResultCache[i].matches;
             m_searchState.caseSensitive = caseSensitive;
             m_searchState.useRegex = useRegex;
@@ -2822,11 +3497,13 @@ void GXTStudio::performSearch(const QString& searchText)
 
     // 更新搜索状态
     m_searchState.searchText = searchText;
-    m_searchState.currentTableIndex = 0;
+    m_searchState.currentTableIndex = tab->currentTableIndex;  // 使用当前实际的表索引
     m_searchState.currentEntryIndex = -1;
     m_searchState.allMatches.clear();
     m_searchState.caseSensitive = caseSensitive;
     m_searchState.useRegex = useRegex;
+    // 保持现有的循环搜索设置
+    // m_searchState.loopSearch = ... (保持不变)
 
     // 【优化3】预分配更大内存，减少重新分配次数
     m_searchState.allMatches.reserve(500);
@@ -2849,6 +3526,26 @@ void GXTStudio::performSearch(const QString& searchText)
     }
 
     // 【优化6】通用搜索lambda - 减少代码重复
+    // 返回所有匹配位置的列表
+    auto findAllMatches = [&](const QString& text) -> std::vector<int> {
+        std::vector<int> positions;
+        if (useRegex) {
+            QRegularExpressionMatchIterator matchIterator = regex.globalMatch(text);
+            while (matchIterator.hasNext()) {
+                QRegularExpressionMatch match = matchIterator.next();
+                positions.push_back(match.capturedStart());
+            }
+        } else {
+            // 普通字符串搜索，找出所有匹配位置
+            int pos = 0;
+            while ((pos = text.indexOf(searchText, pos, cs)) != -1) {
+                positions.push_back(pos);
+                pos += searchTextLen; // 移动到匹配项之后继续搜索
+            }
+        }
+        return positions;
+    };
+    
     auto matchText = [&](const QString& text) -> bool {
         if (useRegex) {
             return regex.match(text).hasMatch();
@@ -2861,22 +3558,17 @@ void GXTStudio::performSearch(const QString& searchText)
     };
     
     // 【优化7】用于std::string的快速搜索（避免QString转换）
+    // 只在value部分搜索，避免在key中找到已被替换的内容
     auto matchStdString = [&](const std::string& key, const std::string& value) -> bool {
         if (useRegex) {
-            // 正则必须用QString
-            QString text = QString::fromStdString(key) + QLatin1Char(' ') + QString::fromStdString(value);
-            return regex.match(text).hasMatch();
+            // 正则必须用QString，但仍只搜索value部分
+            QString valueStr = QString::fromStdString(value);
+            return regex.match(valueStr).hasMatch();
         }
         
-        // 【优化8】ASCII快速搜索：直接在UTF-8字节上搜索，避免QString转换
+        // 【优化8】ASCII快速搜索：只在value中搜索
         if (isAsciiSearch && searchBytes.size() > 0) {
-            // 先在key中搜索
-            if (key.size() >= static_cast<size_t>(searchBytes.size())) {
-                auto pos = std::search(key.begin(), key.end(), 
-                    searchBytes.constBegin(), searchBytes.constEnd());
-                if (pos != key.end()) return true;
-            }
-            // 再在value中搜索
+            // 只在value中搜索，不在key中搜索
             if (value.size() >= static_cast<size_t>(searchBytes.size())) {
                 auto pos = std::search(value.begin(), value.end(),
                     searchBytes.constBegin(), searchBytes.constEnd());
@@ -2885,12 +3577,11 @@ void GXTStudio::performSearch(const QString& searchText)
             return false;
         }
         
-        // 回退到QString搜索
-        const int totalLen = static_cast<int>(key.size() + value.size() + 1);
-        if (totalLen < searchTextLen) return false;
+        // 回退到QString搜索，只搜索value部分
+        QString valueStr = QString::fromStdString(value);
+        if (valueStr.length() < searchTextLen) return false;
         
-        QString text = QString::fromStdString(key) + QLatin1Char(' ') + QString::fromStdString(value);
-        return text.contains(searchText, cs);
+        return valueStr.contains(searchText, cs);
     };
 
     // 在所有表中搜索匹配项
@@ -2899,39 +3590,15 @@ void GXTStudio::performSearch(const QString& searchText)
         const size_t whmSize = tab->whmEntries.size();
         for (size_t i = 0; i < whmSize; ++i) {
             const auto& entry = tab->whmEntries[i];
-            // 【优化9】直接匹配std::string，避免QString转换
-            bool matched = false;
-            if (useRegex) {
-                QString text = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') + 
-                               " " + QString::fromStdString(entry.text);
-                matched = regex.match(text).hasMatch();
-            } else if (isAsciiSearch && searchBytes.size() > 0) {
-                // ASCII快速搜索：直接在原始数据上搜索
-                std::string hashStr = "0x" + [&]() {
-                    char buf[9];
-                    snprintf(buf, sizeof(buf), "%08X", entry.hash);
-                    return std::string(buf);
-                }();
-                const std::string& text = entry.text;
-                // 在hash中搜索
-                if (hashStr.size() >= static_cast<size_t>(searchBytes.size())) {
-                    auto pos = std::search(hashStr.begin(), hashStr.end(),
-                        searchBytes.constBegin(), searchBytes.constEnd());
-                    if (pos != hashStr.end()) matched = true;
-                }
-                // 在text中搜索
-                if (!matched && text.size() >= static_cast<size_t>(searchBytes.size())) {
-                    auto pos = std::search(text.begin(), text.end(),
-                        searchBytes.constBegin(), searchBytes.constEnd());
-                    if (pos != text.end()) matched = true;
-                }
-            } else {
-                QString text = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') + 
-                               " " + QString::fromStdString(entry.text);
-                matched = text.contains(searchText, cs);
-            }
-            if (matched) {
-                m_searchState.allMatches.emplace_back(0, static_cast<int>(i));
+            // 获取文本内容
+            QString textStr = QString::fromStdString(entry.text);
+            
+            // 查找所有匹配位置
+            std::vector<int> positions = findAllMatches(textStr);
+            
+            // 为每个匹配位置添加一条记录
+            for (int pos : positions) {
+                m_searchState.allMatches.emplace_back(0, static_cast<int>(i), pos);
             }
         }
     } else if (tab->isDAT) {
@@ -2939,35 +3606,15 @@ void GXTStudio::performSearch(const QString& searchText)
         const size_t datSize = tab->datEntries.size();
         for (size_t i = 0; i < datSize; ++i) {
             const auto& entry = tab->datEntries[i];
-            bool matched = false;
-            if (useRegex) {
-                QString text = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') + 
-                               " " + QString::fromStdString(entry.text);
-                matched = regex.match(text).hasMatch();
-            } else if (isAsciiSearch && searchBytes.size() > 0) {
-                std::string hashStr = "0x" + [&]() {
-                    char buf[9];
-                    snprintf(buf, sizeof(buf), "%08X", entry.hash);
-                    return std::string(buf);
-                }();
-                const std::string& text = entry.text;
-                if (hashStr.size() >= static_cast<size_t>(searchBytes.size())) {
-                    auto pos = std::search(hashStr.begin(), hashStr.end(),
-                        searchBytes.constBegin(), searchBytes.constEnd());
-                    if (pos != hashStr.end()) matched = true;
-                }
-                if (!matched && text.size() >= static_cast<size_t>(searchBytes.size())) {
-                    auto pos = std::search(text.begin(), text.end(),
-                        searchBytes.constBegin(), searchBytes.constEnd());
-                    if (pos != text.end()) matched = true;
-                }
-            } else {
-                QString text = "0x" + QString::number(entry.hash, 16).toUpper().rightJustified(8, '0') + 
-                               " " + QString::fromStdString(entry.text);
-                matched = text.contains(searchText, cs);
-            }
-            if (matched) {
-                m_searchState.allMatches.emplace_back(0, static_cast<int>(i));
+            // 获取文本内容
+            QString textStr = QString::fromStdString(entry.text);
+            
+            // 查找所有匹配位置
+            std::vector<int> positions = findAllMatches(textStr);
+            
+            // 为每个匹配位置添加一条记录
+            for (int pos : positions) {
+                m_searchState.allMatches.emplace_back(0, static_cast<int>(i), pos);
             }
         }
     } else if (tab->isCharTable) {
@@ -2993,7 +3640,8 @@ void GXTStudio::performSearch(const QString& searchText)
                 }
                 
                 if (matched) {
-                    m_searchState.allMatches.emplace_back(0, lineIdx);
+                    // 对于CharTable，我们仍然按照行来记录，但可以扩展为更精确的位置
+                    m_searchState.allMatches.emplace_back(0, lineIdx, 0); // 第三个参数暂时设为0
                 }
                 
                 lineStart = (lineEnd >= 0) ? lineEnd + 1 : -1;
@@ -3011,12 +3659,34 @@ void GXTStudio::performSearch(const QString& searchText)
             const size_t entryCount = table.entries.size();
             for (size_t entryIdx = 0; entryIdx < entryCount; ++entryIdx) {
                 const auto& entry = table.entries[entryIdx];
-                if (matchStdString(entry.key, entry.value)) {
-                    m_searchState.allMatches.emplace_back(static_cast<int>(tableIdx), static_cast<int>(entryIdx));
+                // 获取文本内容（只在value中搜索）
+                QString textStr = QString::fromStdString(entry.value);
+                
+                // 查找所有匹配位置
+                std::vector<int> positions = findAllMatches(textStr);
+                
+                // 为每个匹配位置添加一条记录
+                for (int pos : positions) {
+                    m_searchState.allMatches.emplace_back(static_cast<int>(tableIdx), static_cast<int>(entryIdx), pos);
                 }
             }
         }
     }
+    
+    // 【关键修复】确保搜索结果按表索引和条目索引排序，避免跨表跳转混乱
+    std::sort(m_searchState.allMatches.begin(), m_searchState.allMatches.end(),
+              [](const std::tuple<int, int, int>& a, const std::tuple<int, int, int>& b) {
+                  // 首先按表索引排序
+                  if (std::get<0>(a) != std::get<0>(b)) {
+                      return std::get<0>(a) < std::get<0>(b);
+                  }
+                  // 然后按条目索引排序
+                  if (std::get<1>(a) != std::get<1>(b)) {
+                      return std::get<1>(a) < std::get<1>(b);
+                  }
+                  // 最后按位置排序
+                  return std::get<2>(a) < std::get<2>(b);
+              });
 
     m_searchState.isValid = !m_searchState.allMatches.empty();
 
@@ -3033,10 +3703,15 @@ void GXTStudio::performSearch(const QString& searchText)
     if (m_searchState.isValid) {
         QString modeText = useRegex ? " (正则表达式)" : (caseSensitive ? " (区分大小写)" : "");
         showLogMessage(QString("找到 %1 个匹配项%2").arg(m_searchState.allMatches.size()).arg(modeText));
-        jumpToMatch(0);
+        if (!m_suppressSearchJump) {
+            jumpToMatch(0);
+        } else {
+            m_suppressSearchJump = false;
+        }
     } else {
         showLogMessage("未找到匹配项");
     }
+
 }
 
 void GXTStudio::onSearchNext()
@@ -3055,50 +3730,84 @@ void GXTStudio::onSearchNext()
         return;
     }
     
-    // 获取当前选中单元格的位置
-    int currentTableRow = -1;
+    // 获取用户当前选中的行
+    QModelIndex currentIndex = tab->entryTableView->currentIndex();
+    if (!currentIndex.isValid()) {
+        // 如果没有选中行，则从第一个匹配项开始
+        jumpToMatch(0);
+        return;
+    }
+    
+    int currentRow = currentIndex.row();
     int currentTableIndex = tab->currentTableIndex;
     
-    if (tab->entryTableView && tab->entryTableView->selectionModel()) {
-        QModelIndex currentIndex = tab->entryTableView->selectionModel()->currentIndex();
-        if (currentIndex.isValid()) {
-            currentTableRow = currentIndex.row();
+    // 检查用户是否手动点击了其他行
+    bool userClickedDifferentRow = false;
+    if (m_searchState.currentEntryIndex >= 0 && m_searchState.currentEntryIndex < static_cast<int>(m_searchState.allMatches.size())) {
+        const auto& currentMatch = m_searchState.allMatches[m_searchState.currentEntryIndex];
+        int lastTableRow = std::get<1>(currentMatch);
+        int lastTableIndex = std::get<0>(currentMatch);
+        
+        // 如果当前选中行与上次匹配项所在行不同，说明用户手动点击了其他行
+        if (currentTableIndex != lastTableIndex || currentRow != lastTableRow) {
+            userClickedDifferentRow = true;
         }
     }
     
-    // 从当前选中位置开始查找下一个匹配项
-    int startIndex = m_searchState.currentEntryIndex;
-    
-    // 如果有当前选中的行，尝试从该行附近开始搜索
-    if (currentTableRow >= 0) {
-        // 在当前表中查找从currentTableRow开始的匹配项
+    if (userClickedDifferentRow) {
+        // 用户手动点击了其他行：基于当前选中行的第一个匹配结果重新查找
+        // 先查找当前行的匹配项
         for (int i = 0; i < static_cast<int>(m_searchState.allMatches.size()); ++i) {
-            int searchIndex = (startIndex + 1 + i) % m_searchState.allMatches.size();
-            const auto& match = m_searchState.allMatches[searchIndex];
-            
-            // 如果匹配项在当前表中且行号大于当前行，这就是下一个
-            if (match.first == currentTableIndex && match.second > currentTableRow) {
-                jumpToMatch(searchIndex);
+            const auto& match = m_searchState.allMatches[i];
+            if (std::get<0>(match) == currentTableIndex && std::get<1>(match) == currentRow) {
+                jumpToMatch(i);
                 return;
             }
         }
         
-        // 如果当前表中没有找到更大的行号，从当前表中下一行开始循环搜索
+        // 如果当前行没有匹配项，查找下一个包含匹配项的行
         for (int i = 0; i < static_cast<int>(m_searchState.allMatches.size()); ++i) {
-            int searchIndex = (startIndex + 1 + i) % m_searchState.allMatches.size();
-            const auto& match = m_searchState.allMatches[searchIndex];
-            
-            // 找到第一个匹配项（包括当前表中行号小于当前行的）
-            jumpToMatch(searchIndex);
-            return;
+            const auto& match = m_searchState.allMatches[i];
+            if (std::get<0>(match) == currentTableIndex && std::get<1>(match) > currentRow) {
+                jumpToMatch(i);
+                return;
+            }
         }
+        
+        // 如果没找到后面的行，从头开始
+        jumpToMatch(0);
+        return;
     } else {
-        // 没有选中行，使用原来的逻辑
+        // 用户没有点击其他行：保持现有逻辑，基于当前精确匹配位置继续查找
         int nextIndex = m_searchState.currentEntryIndex + 1;
+        
+        // 【调试】显示当前搜索状态
+        showLogMessage(QString("当前索引: %1, 总匹配数: %2, 循环模式: %3")
+                      .arg(m_searchState.currentEntryIndex)
+                      .arg(m_searchState.allMatches.size())
+                      .arg(m_searchState.loopSearch ? "开启" : "关闭"));
+        
         if (nextIndex >= static_cast<int>(m_searchState.allMatches.size())) {
-            nextIndex = 0; // 循环到第一个
-            showLogMessage("已搜索到末尾，从第一个匹配项重新开始");
+            if (m_searchState.loopSearch) {
+                // 循环搜索：回到第一个匹配项
+                nextIndex = 0;
+                showLogMessage("已搜索到末尾，从第一个匹配项重新开始");
+            } else {
+                // 不循环：停止搜索
+                showLogMessage("已搜索到末尾");
+                return;
+            }
         }
+        
+        // 【调试】显示即将跳转的目标
+        if (nextIndex < static_cast<int>(m_searchState.allMatches.size())) {
+            const auto& nextMatch = m_searchState.allMatches[nextIndex];
+            showLogMessage(QString("即将跳转到: 表%1 条目%2 位置%3")
+                          .arg(std::get<0>(nextMatch))
+                          .arg(std::get<1>(nextMatch))
+                          .arg(std::get<2>(nextMatch)));
+        }
+        
         jumpToMatch(nextIndex);
     }
 }
@@ -3123,52 +3832,93 @@ void GXTStudio::onSearchPrevious()
         return;
     }
     
-    // 获取当前选中单元格的位置
-    int currentTableRow = -1;
+    // 获取用户当前选中的行
+    QModelIndex currentIndex = tab->entryTableView->currentIndex();
+    if (!currentIndex.isValid()) {
+        // 如果没有选中行，则跳转到最后一个匹配项
+        jumpToMatch(static_cast<int>(m_searchState.allMatches.size()) - 1);
+        return;
+    }
+    
+    int currentRow = currentIndex.row();
     int currentTableIndex = tab->currentTableIndex;
     
-    if (tab->entryTableView && tab->entryTableView->selectionModel()) {
-        QModelIndex currentIndex = tab->entryTableView->selectionModel()->currentIndex();
-        if (currentIndex.isValid()) {
-            currentTableRow = currentIndex.row();
+    // 检查用户是否手动点击了其他行
+    bool userClickedDifferentRow = false;
+    if (m_searchState.currentEntryIndex >= 0 && m_searchState.currentEntryIndex < static_cast<int>(m_searchState.allMatches.size())) {
+        const auto& currentMatch = m_searchState.allMatches[m_searchState.currentEntryIndex];
+        int lastTableRow = std::get<1>(currentMatch);
+        int lastTableIndex = std::get<0>(currentMatch);
+        
+        // 如果当前选中行与上次匹配项所在行不同，说明用户手动点击了其他行
+        if (currentTableIndex != lastTableIndex || currentRow != lastTableRow) {
+            userClickedDifferentRow = true;
         }
     }
     
-    // 从当前选中位置开始查找上一个匹配项
-    int startIndex = m_searchState.currentEntryIndex;
-    
-    // 如果有当前选中的行，尝试从该行附近开始搜索
-    if (currentTableRow >= 0) {
-        // 在当前表中查找从currentTableRow开始向上的匹配项
-        for (int i = 0; i < static_cast<int>(m_searchState.allMatches.size()); ++i) {
-            int searchIndex = (startIndex - 1 - i + m_searchState.allMatches.size()) % m_searchState.allMatches.size();
-            const auto& match = m_searchState.allMatches[searchIndex];
-            
-            // 如果匹配项在当前表中且行号小于当前行，这就是上一个
-            if (match.first == currentTableIndex && match.second < currentTableRow) {
-                jumpToMatch(searchIndex);
+    if (userClickedDifferentRow) {
+        // 用户手动点击了其他行：基于当前选中行的第一个匹配结果重新查找
+        // 先查找当前行的匹配项
+        for (int i = static_cast<int>(m_searchState.allMatches.size()) - 1; i >= 0; --i) {
+            const auto& match = m_searchState.allMatches[i];
+            if (std::get<0>(match) == currentTableIndex && std::get<1>(match) == currentRow) {
+                jumpToMatch(i);
                 return;
             }
         }
         
-        // 如果当前表中没有找到更小的行号，从当前表中上一行开始循环搜索
-        for (int i = 0; i < static_cast<int>(m_searchState.allMatches.size()); ++i) {
-            int searchIndex = (startIndex - 1 - i + m_searchState.allMatches.size()) % m_searchState.allMatches.size();
-            const auto& match = m_searchState.allMatches[searchIndex];
-            
-            // 找到最后一个匹配项（包括当前表中行号大于当前行的）
-            jumpToMatch(searchIndex);
-            return;
+        // 如果当前行没有匹配项，查找上一个包含匹配项的行
+        for (int i = static_cast<int>(m_searchState.allMatches.size()) - 1; i >= 0; --i) {
+            const auto& match = m_searchState.allMatches[i];
+            if (std::get<0>(match) == currentTableIndex && std::get<1>(match) < currentRow) {
+                jumpToMatch(i);
+                return;
+            }
         }
+        
+        // 如果没找到前面的行，跳转到最后一个
+        jumpToMatch(static_cast<int>(m_searchState.allMatches.size()) - 1);
+        return;
     } else {
-        // 没有选中行，使用原来的逻辑
+        // 用户没有点击其他行：保持现有逻辑，基于当前精确匹配位置继续查找
         int prevIndex = m_searchState.currentEntryIndex - 1;
+        
+        // 【调试】显示当前搜索状态
+        showLogMessage(QString("当前索引: %1, 总匹配数: %2, 循环模式: %3")
+                      .arg(m_searchState.currentEntryIndex)
+                      .arg(m_searchState.allMatches.size())
+                      .arg(m_searchState.loopSearch ? "开启" : "关闭"));
+        
         if (prevIndex < 0) {
-            prevIndex = static_cast<int>(m_searchState.allMatches.size()) - 1; // 循环到最后一个
-            showLogMessage("已搜索到开头，从最后一个匹配项重新开始");
+            if (m_searchState.loopSearch) {
+                // 循环搜索：回到最后一个匹配项
+                prevIndex = static_cast<int>(m_searchState.allMatches.size()) - 1;
+                showLogMessage("已搜索到开头，从最后一个匹配项重新开始");
+            } else {
+                // 不循环：停止搜索
+                showLogMessage("已搜索到开头");
+                return;
+            }
         }
+        
+        // 【调试】显示即将跳转的目标
+        if (prevIndex >= 0 && prevIndex < static_cast<int>(m_searchState.allMatches.size())) {
+            const auto& prevMatch = m_searchState.allMatches[prevIndex];
+            showLogMessage(QString("即将跳转到: 表%1 条目%2 位置%3")
+                          .arg(std::get<0>(prevMatch))
+                          .arg(std::get<1>(prevMatch))
+                          .arg(std::get<2>(prevMatch)));
+        }
+        
         jumpToMatch(prevIndex);
     }
+}
+
+void GXTStudio::onToggleLoopSearch(bool checked)
+{
+    m_searchState.loopSearch = checked;
+    QString status = checked ? "启用" : "禁用";
+    showLogMessage(QString("循环搜索已%1").arg(status));
 }
 
 void GXTStudio::jumpToMatch(int matchIndex)
@@ -3179,19 +3929,28 @@ void GXTStudio::jumpToMatch(int matchIndex)
     }
     
     const auto& match = m_searchState.allMatches[matchIndex];
-    int targetTableIndex = match.first;
-    int targetEntryIndex = match.second;
+    int targetTableIndex = std::get<0>(match);
+    int targetEntryIndex = std::get<1>(match);
+    int targetPosition = std::get<2>(match);
     
     // 如果需要切换表（仅GXT文件）
     if (!tab->isWHM && !tab->isDAT && !tab->isCharTable && targetTableIndex != tab->currentTableIndex) {
+        // 【关键修复】等待表切换完成后再进行高亮
         switchToTable(targetTableIndex);
+        
+        // 使用定时器确保表切换完成后再高亮
+        QTimer::singleShot(50, this, [this, targetEntryIndex]() {
+            highlightMatch(targetEntryIndex);
+        });
+    } else {
+        // 不需要切换表，直接高亮
+        highlightMatch(targetEntryIndex);
     }
-    
-    // 高亮显示匹配的条目
-    highlightMatch(targetEntryIndex);
     
     // 更新当前匹配位置
     m_searchState.currentEntryIndex = matchIndex;
+    m_searchState.currentMatchPosition = targetPosition;
+    m_searchState.currentTableIndex = targetTableIndex;  // 确保表索引也同步更新
     
     // 显示当前匹配信息
     QString tableName;
