@@ -2301,9 +2301,29 @@ void GXTStudio::showReplaceDialog()
                 this, &GXTStudio::handleReplace);
         connect(m_replaceDialog, &ReplaceDialog::replaceAllClicked,
                 this, &GXTStudio::handleReplaceAll);
+        connect(m_replaceDialog, &ReplaceDialog::loopToggled, this, [this](bool enabled) {
+            m_searchState.loopSearch = enabled;
+            if (m_loopSearchAction) {
+                m_loopSearchAction->setChecked(enabled);
+            }
+        });
+        connect(m_replaceDialog, &ReplaceDialog::caseSensitiveToggled, this, [this](bool enabled) {
+            FileTab* tab = getCurrentTab();
+            if (tab && tab->caseSensitiveButton) {
+                tab->caseSensitiveButton->setChecked(enabled);
+            }
+        });
+        connect(m_replaceDialog, &ReplaceDialog::regexToggled, this, [this](bool enabled) {
+            FileTab* tab = getCurrentTab();
+            if (tab && tab->regexButton) {
+                tab->regexButton->setChecked(enabled);
+            }
+        });
     }
     
     // 设置当前搜索文本
+
+
     FileTab* tab = getCurrentTab();
     if (tab && tab->searchEdit) {
         m_replaceDialog->findEdit()->setText(tab->searchEdit->text());
@@ -2313,8 +2333,26 @@ void GXTStudio::showReplaceDialog()
     bool loopEnabled = m_loopSearchAction ? m_loopSearchAction->isChecked() : m_searchState.loopSearch;
     m_replaceDialog->setLoopEnabled(loopEnabled);
 
+    bool caseSensitive = false;
+    if (tab && tab->caseSensitiveButton) {
+        caseSensitive = tab->caseSensitiveButton->isChecked();
+    } else {
+        caseSensitive = m_searchState.caseSensitive;
+    }
+    m_replaceDialog->setCaseSensitive(caseSensitive);
+
+    bool useRegex = false;
+    if (tab && tab->regexButton) {
+        useRegex = tab->regexButton->isChecked();
+    } else {
+        useRegex = m_searchState.useRegex;
+    }
+    m_replaceDialog->setRegexEnabled(useRegex);
+
     // 显示对话框
+
     m_replaceDialog->show();
+
     m_replaceDialog->raise();
     m_replaceDialog->activateWindow();
 }
@@ -3426,9 +3464,18 @@ void GXTStudio::onSearchTextChanged()
 {
     FileTab* tab = getCurrentTab();
     if (!tab || !tab->searchEdit) return;
+
+    if (m_replaceDialog) {
+        bool caseSensitive = tab->caseSensitiveButton ? tab->caseSensitiveButton->isChecked() : false;
+        m_replaceDialog->setCaseSensitive(caseSensitive);
+        bool useRegex = tab->regexButton ? tab->regexButton->isChecked() : false;
+        m_replaceDialog->setRegexEnabled(useRegex);
+    }
     
     QString searchText = tab->searchEdit->text();
     if (searchText != m_searchState.searchText) {
+
+
         // 使用简单的防抖搜索
         QTimer::singleShot(300, this, [this, searchText]() {
             if (searchText == getCurrentTab()->searchEdit->text()) {
@@ -3917,9 +3964,13 @@ void GXTStudio::onSearchPrevious()
 void GXTStudio::onToggleLoopSearch(bool checked)
 {
     m_searchState.loopSearch = checked;
+    if (m_replaceDialog) {
+        m_replaceDialog->setLoopEnabled(checked);
+    }
     QString status = checked ? "启用" : "禁用";
     showLogMessage(QString("循环搜索已%1").arg(status));
 }
+
 
 void GXTStudio::jumpToMatch(int matchIndex)
 {

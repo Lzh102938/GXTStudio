@@ -77,11 +77,14 @@ ReplaceDialog::ReplaceDialog(QWidget *parent)
     
     // 选项区域
     m_caseSensitiveCheck = new QCheckBox("区分大小写(&C)");
+    m_regexCheck = new QCheckBox("正则表达式(&R)");
     m_loopCheck = new QCheckBox("循环(&L)");
     
     QHBoxLayout* optionsLayout = new QHBoxLayout();
     optionsLayout->addWidget(m_caseSensitiveCheck);
+    optionsLayout->addWidget(m_regexCheck);
     optionsLayout->addWidget(m_loopCheck);
+
     optionsLayout->addStretch();
     optionsLayout->setSpacing(10);
     
@@ -114,8 +117,14 @@ ReplaceDialog::ReplaceDialog(QWidget *parent)
     connect(m_replaceButton, &QPushButton::clicked, this, &ReplaceDialog::onReplace);
     connect(m_replaceAllButton, &QPushButton::clicked, this, &ReplaceDialog::onReplaceAll);
     connect(m_cancelButton, &QPushButton::clicked, this, &ReplaceDialog::reject);
+
+    connect(m_caseSensitiveCheck, &QCheckBox::toggled, this, &ReplaceDialog::caseSensitiveToggled);
+    connect(m_regexCheck, &QCheckBox::toggled, this, &ReplaceDialog::regexToggled);
+    connect(m_loopCheck, &QCheckBox::toggled, this, &ReplaceDialog::loopToggled);
     
     // 设置按钮快捷键
+
+
     m_findNextButton->setShortcut(QKeySequence("F3"));
     m_replaceButton->setShortcut(QKeySequence("Ctrl+H"));
     m_replaceAllButton->setShortcut(QKeySequence("Ctrl+Alt+H"));
@@ -155,11 +164,28 @@ void ReplaceDialog::setLoopEnabled(bool enabled)
     m_loopCheck->setChecked(enabled);
 }
 
+bool ReplaceDialog::isRegexEnabled() const
+{
+    return m_regexCheck->isChecked();
+}
+
+void ReplaceDialog::setRegexEnabled(bool enabled)
+{
+    m_regexCheck->setChecked(enabled);
+}
+
+void ReplaceDialog::setCaseSensitive(bool enabled)
+{
+    m_caseSensitiveCheck->setChecked(enabled);
+}
+
+
 QString ReplaceDialog::findText() const
 
 {
     return m_findEdit->text().trimmed();
 }
+
 
 QString ReplaceDialog::replaceText() const
 {

@@ -40,14 +40,24 @@ public:
     bool isCaseSensitive() const;
     bool isLoopEnabled() const;
     void setLoopEnabled(bool enabled);
+    bool isRegexEnabled() const;
+    void setRegexEnabled(bool enabled);
+    void setCaseSensitive(bool enabled);
     QString findText() const;
     QString replaceText() const;
+
+
 
 
 signals:
     void findNextClicked(const QString& findText, bool caseSensitive);
     void replaceClicked(const QString& findText, const QString& replaceText, bool caseSensitive, ReplaceScope scope);
     void replaceAllClicked(const QString& findText, const QString& replaceText, bool caseSensitive, ReplaceScope scope);
+    void caseSensitiveToggled(bool enabled);
+    void regexToggled(bool enabled);
+    void loopToggled(bool enabled);
+
+
 
 private slots:
     void onFindNext();
@@ -70,9 +80,11 @@ private:
     Operation m_operation;
     
     QCheckBox* m_caseSensitiveCheck;
+    QCheckBox* m_regexCheck;
     QCheckBox* m_loopCheck;
     
     QPushButton* m_findNextButton;
+
     QPushButton* m_replaceButton;
     QPushButton* m_replaceAllButton;
     QPushButton* m_cancelButton;
