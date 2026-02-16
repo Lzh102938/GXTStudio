@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "FontAwesome.h"
 #include "MultiThreadProgressDialog.h"
