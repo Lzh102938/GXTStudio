@@ -87,7 +87,12 @@ void SaveWorker::saveFile(const SaveTask& task)
                 success = false;
             } else {
                 std::string stdPath = task.filePath.toStdString();
-                success = editor.saveToFile(stdPath);
+                // 如果用户选择保存为 .txt，则使用文本导出，保持内容为纯文本
+                if (task.filePath.endsWith(".txt", Qt::CaseInsensitive)) {
+                    success = editor.saveAsText(stdPath);
+                } else {
+                    success = editor.saveToFile(stdPath);
+                }
                 qfile.close();
                 if (!success) {
                     result.errorMessage = "GXT文件保存失败";

@@ -591,6 +591,8 @@ public:
 private slots:
     // 文件操作
     void openFile();
+    // 从文本文件导入（自动判断键值对或字符表）
+    void importTxtFile(const QString& filePath);
     void saveFile();
     void saveAsFile();
     void exportFile();

@@ -1052,13 +1052,291 @@ void GXTStudio::openFile()
 {
     QStringList fileNames = QFileDialog::getOpenFileNames(this,
         "打开GXT文件", "", 
-        "GXT文件 (*.gxt *.gxt2 *.dat *.whm);;所有文件 (*.*)");
+        "GXT文件 (*.gxt *.gxt2 *.dat *.whm *.txt);;所有文件 (*.*)");
     
     if (!fileNames.isEmpty()) {
         for (const QString& fileName : fileNames) {
-            startAsyncParse(fileName);
+            QFileInfo fi(fileName);
+            if (fi.suffix().toLower() == "txt") {
+                importTxtFile(fileName);
+            } else {
+                startAsyncParse(fileName);
+            }
         }
     }
+}
+
+void GXTStudio::importTxtFile(const QString& filePath)
+{
+    showLogMessage(QString("导入TXT文件: %1").arg(filePath));
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        showLogMessage("无法打开TXT文件");
+        QMessageBox::critical(this, "错误", QString("无法打开文件: %1").arg(file.errorString()));
+        return;
+    }
+
+    QByteArray raw = file.readAll();
+    file.close();
+
+    QString text;
+    // 编码检测：支持 UTF-8 (带或不带 BOM)、UTF-16LE/BE（带 BOM）和本地 ANSI
+    if (raw.size() >= 3 && (uint8_t)raw[0] == 0xEF && (uint8_t)raw[1] == 0xBB && (uint8_t)raw[2] == 0xBF) {
+        // UTF-8 BOM
+        text = QString::fromUtf8(raw.mid(3));
+    } else if (raw.size() >= 2 && (uint8_t)raw[0] == 0xFF && (uint8_t)raw[1] == 0xFE) {
+        // UTF-16 LE BOM
+        const char* dataPtr = raw.constData() + 2;
+        int u16len = (raw.size() - 2) / 2;
+        const ushort* u16 = reinterpret_cast<const ushort*>(dataPtr);
+        text = QString::fromUtf16(u16, u16len);
+    } else if (raw.size() >= 2 && (uint8_t)raw[0] == 0xFE && (uint8_t)raw[1] == 0xFF) {
+        // UTF-16 BE BOM - 需要字节交换
+        int u16len = (raw.size() - 2) / 2;
+        QVector<ushort> buf;
+        buf.reserve(u16len);
+        const char* dataPtr = raw.constData() + 2;
+        for (int i = 0; i < u16len; ++i) {
+            uint8_t high = static_cast<uint8_t>(dataPtr[i*2]);
+            uint8_t low = static_cast<uint8_t>(dataPtr[i*2 + 1]);
+            ushort val = (ushort)((low << 8) | high); // swap to little-endian
+            buf.append(val);
+        }
+        text = QString::fromUtf16(buf.constData(), buf.size());
+    } else {
+        // 先尝试 UTF-8，无 BOM 的情况
+        text = QString::fromUtf8(raw);
+        // 如果包含大量替换字符，回退到本地编码
+        int replacementCount = text.count(QChar::ReplacementCharacter);
+        if (replacementCount > text.size() / 10) {
+            text = QString::fromLocal8Bit(raw);
+        }
+    }
+
+    QStringList lines = text.split(QRegularExpression("[\r\n]+"), Qt::SkipEmptyParts);
+    // 检测是否为字符表：每行64个字符且行内字符不重复
+    bool maybeCharTable = true;
+    int nonEmptyLines = 0;
+    for (const QString& ln : lines) {
+        QString s = ln.trimmed();
+        if (s.isEmpty()) continue;
+        nonEmptyLines++;
+        if (s.size() != 64) { maybeCharTable = false; break; }
+        QSet<QChar> set;
+        for (QChar ch : s) set.insert(ch);
+        if (set.size() != 64) { maybeCharTable = false; break; }
+    }
+
+    if (maybeCharTable && nonEmptyLines > 0) {
+        // 让用户选择是GTA_VC还是GTA_IV
+        QStringList opts;
+        opts << "GTA_VC" << "GTA_IV";
+        bool ok = false;
+        QString choice = QInputDialog::getItem(this, "选择字符表类型", "字符表类型:", opts, 0, false, &ok);
+        if (!ok) return;
+
+        CharTableData data;
+        data.type = (choice == "GTA_VC") ? CharTableData::GTA_VC : CharTableData::GTA_IV;
+        data.cols = 64;
+        data.rows = nonEmptyLines;
+        data.cells.clear();
+        data.cells.reserve(data.cols * data.rows);
+
+        for (const QString& ln : lines) {
+            QString s = ln.trimmed();
+            if (s.isEmpty()) continue;
+            for (int i = 0; i < s.size(); ++i) {
+                data.cells.append((uint16_t)s.at(i).unicode());
+            }
+        }
+        data.sourceFile = filePath;
+
+        // 创建CharTable标签页并插入
+        CharTableWidget* charWidget = createCharTableTab(QFileInfo(filePath).fileName(), data);
+        if (!charWidget) {
+            showLogMessage("创建字符表控件失败");
+            QMessageBox::critical(this, "错误", "创建字符表界面失败");
+            return;
+        }
+
+        // 添加FileTab
+        FileTab newTab;
+        newTab.filePath = filePath;
+        newTab.fileName = QFileInfo(filePath).fileName();
+        newTab.isCharTable = true;
+        newTab.isWHM = false;
+        newTab.isDAT = true; // char tables treated as DAT-like
+        newTab.isModified = true;
+        newTab.charTableData = data;
+        newTab.charTableWidget = charWidget;
+
+        int tabIndex = m_fileTabs.size();
+        m_fileTabs.push_back(newTab);
+
+        QWidget* parentPage = charWidget->property("parentPage").value<QWidget*>();
+        if (!parentPage) parentPage = charWidget->parentWidget();
+        m_tabWidget->insertTab(tabIndex, parentPage, newTab.fileName);
+
+        // 连接修改信号
+        connect(charWidget, &CharTableWidget::textModified, [this, tabIndex]() {
+            if (tabIndex >= 0 && tabIndex < static_cast<int>(m_fileTabs.size())) {
+                FileTab& tab = m_fileTabs[tabIndex];
+                if (!tab.isModified) {
+                    tab.isModified = true;
+                    updateWindowTitle();
+                }
+                if (m_autoSaveEnabled && m_autoSaveTimer) {
+                    m_autoSaveTimer->stop();
+                    m_autoSaveTimer->start();
+                }
+            }
+        });
+
+        m_currentTabIndex = tabIndex;
+        m_tabWidget->setCurrentIndex(tabIndex);
+        QCoreApplication::processEvents();
+        showLogMessage(QString("已导入字符表: %1 (%2 x %3)").arg(newTab.fileName).arg(data.cols).arg(data.rows));
+        updateActions();
+        updateStatusBar();
+        updateWindowTitle();
+        return;
+    }
+
+    // 检测是否为键值对格式（多数非空行包含 '='）
+    int kvCount = 0;
+    int totalCount = 0;
+    bool hasTableHeader = false;
+    for (const QString& ln : lines) {
+        QString s = ln.trimmed();
+        if (s.isEmpty()) continue;
+        totalCount++;
+        if (s.contains('=')) kvCount++;
+        if (s.startsWith('[') && s.endsWith(']')) hasTableHeader = true;
+    }
+
+    if (totalCount > 0 && kvCount * 1.0 / totalCount >= 0.4) {
+        // 视为键值对，要求用户选择目标版本
+        QStringList verOpts;
+        verOpts << "GTA_III" << "GTA_VC" << "GTA_SA" << "GTA_IV" << "GXT2";
+        bool ok = false;
+        QString verChoice = QInputDialog::getItem(this, "选择导入目标版本", "版本:", verOpts, 1, false, &ok);
+        if (!ok) return;
+
+        GXTVersion version = GXTVersion::UNKNOWN;
+        if (verChoice == "GTA_III") version = GXTVersion::GTA_III;
+        else if (verChoice == "GTA_VC") version = GXTVersion::GTA_VC;
+        else if (verChoice == "GTA_SA") version = GXTVersion::GTA_SA;
+        else if (verChoice == "GTA_IV") version = GXTVersion::GTA_IV;
+        else if (verChoice == "GXT2") version = GXTVersion::GXT2;
+
+        // 解析为表格（支持可选的 [TableName] 分节）
+        std::vector<GXTTabl> tables;
+        GXTTabl currentTable;
+        if (!hasTableHeader) {
+            currentTable.name = "Imported";
+        }
+
+        for (const QString& ln : lines) {
+            QString s = ln.trimmed();
+            if (s.isEmpty()) continue;
+            if (s.startsWith('[') && s.endsWith(']')) {
+                // 新表头
+                if (!currentTable.name.empty() || !currentTable.entries.empty()) {
+                    tables.push_back(currentTable);
+                    currentTable = GXTTabl();
+                }
+                QString name = s.mid(1, s.size() - 2).trimmed();
+                currentTable.name = name.toUtf8().toStdString();
+                continue;
+            }
+            int idx = s.indexOf('=');
+            if (idx > 0) {
+                QString key = s.left(idx).trimmed();
+                QString val = s.mid(idx + 1).trimmed();
+                GXTEntry entry;
+                entry.key = key.toUtf8().toStdString();
+                entry.value = val.toUtf8().toStdString();
+                entry.originalKey = entry.key;
+                currentTable.entries.push_back(entry);
+            }
+        }
+        if (!currentTable.name.empty() || !currentTable.entries.empty()) {
+            // 如果表名为空，设置默认名
+            if (currentTable.name.empty()) currentTable.name = "Imported";
+            tables.push_back(currentTable);
+        }
+
+        // 构建解析结果并复用现有 UI 创建流程
+        ParseResult result;
+        result.success = true;
+        result.filePath = filePath;
+        result.fileName = QFileInfo(filePath).fileName();
+        result.isWHM = false;
+        result.isWHMRSC = false;
+        result.isDAT = false;
+        result.tables = tables;
+        result.tabIndex = static_cast<int>(m_fileTabs.size());
+        result.version = version;
+
+        // 使用 onParseCompleted 处理（复用现有创建标签页逻辑）
+        onParseCompleted(result);
+        showLogMessage(QString("已导入键值对TXT: %1 (表数: %2)").arg(result.fileName).arg(result.tables.size()));
+        return;
+    }
+
+    // 未能自动识别，询问用户如何处理
+    QStringList actions;
+    actions << "键值对导入" << "字符表导入";
+    bool ok2 = false;
+    QString userChoice = QInputDialog::getItem(this, "无法自动识别 TXT 格式", "请选择导入类型:", actions, 0, false, &ok2);
+    if (!ok2) return;
+
+    if (userChoice == "键值对导入") {
+        // 递归使用本函数：将文本强制当作键值对，简单调用同一逻辑
+        // 这里直接再次调用 but with lines unchanged -> reuse above logic by forcing kvCount threshold
+        // 为简洁，直接保存为单表
+        std::vector<GXTTabl> tables;
+        GXTTabl tbl; tbl.name = "Imported";
+        for (const QString& ln : lines) {
+            QString s = ln.trimmed();
+            if (s.isEmpty()) continue;
+            int idx = s.indexOf('=');
+            if (idx > 0) {
+                QString key = s.left(idx).trimmed();
+                QString val = s.mid(idx + 1).trimmed();
+                GXTEntry entry; entry.key = key.toUtf8().toStdString(); entry.value = val.toUtf8().toStdString(); entry.originalKey = entry.key;
+                tbl.entries.push_back(entry);
+            }
+        }
+        if (!tbl.entries.empty()) tables.push_back(tbl);
+        ParseResult result; result.success = true; result.filePath = filePath; result.fileName = QFileInfo(filePath).fileName(); result.tables = tables; result.tabIndex = static_cast<int>(m_fileTabs.size()); result.version = GXTVersion::UNKNOWN;
+        onParseCompleted(result);
+        return;
+    } else if (userChoice == "字符表导入") {
+        // 询问类型
+        QStringList opts2; opts2 << "GTA_VC" << "GTA_IV";
+        bool ok3 = false;
+        QString choice2 = QInputDialog::getItem(this, "选择字符表类型", "字符表类型:", opts2, 0, false, &ok3);
+        if (!ok3) return;
+        CharTableData data; data.type = (choice2 == "GTA_VC") ? CharTableData::GTA_VC : CharTableData::GTA_IV; data.cols = 64;
+        data.rows = lines.size(); data.cells.clear();
+        for (const QString& ln : lines) {
+            QString s = ln.trimmed();
+            if (s.isEmpty()) continue;
+            for (int i = 0; i < s.size(); ++i) data.cells.append((uint16_t)s.at(i).unicode());
+        }
+        data.sourceFile = filePath;
+        CharTableWidget* widget = createCharTableTab(QFileInfo(filePath).fileName(), data);
+        if (!widget) return;
+        FileTab newTab; newTab.filePath = filePath; newTab.fileName = QFileInfo(filePath).fileName(); newTab.isCharTable = true; newTab.isDAT = true; newTab.charTableWidget = widget; newTab.charTableData = data; newTab.isModified = true;
+        int idx = m_fileTabs.size(); m_fileTabs.push_back(newTab);
+        QWidget* parentPage = widget->property("parentPage").value<QWidget*>(); if (!parentPage) parentPage = widget->parentWidget(); m_tabWidget->insertTab(idx, parentPage, newTab.fileName);
+        connect(widget, &CharTableWidget::textModified, [this, idx]() { if (idx>=0 && idx < (int)m_fileTabs.size()) { m_fileTabs[idx].isModified = true; updateWindowTitle(); } });
+        m_currentTabIndex = idx; m_tabWidget->setCurrentIndex(idx); updateActions(); updateStatusBar(); updateWindowTitle();
+        return;
+    }
+
 }
 
 void GXTStudio::saveFile()
@@ -1232,7 +1510,16 @@ void GXTStudio::saveFile()
                     }
                     editor.addEntriesBatch(tableIndex, entriesBatch);
                 }
-                success = editor.saveToFile(saveData.filePath.toStdString());
+                    // 如果目标为 .txt，使用文本导出以保持纯文本格式
+                    if (saveData.filePath.endsWith(".txt", Qt::CaseInsensitive)) {
+                        success = editor.saveAsText(saveData.filePath.toStdString());
+                    } else {
+                        if (saveData.filePath.endsWith(".txt", Qt::CaseInsensitive)) {
+                            success = editor.saveAsText(saveData.filePath.toStdString());
+                        } else {
+                            success = editor.saveToFile(saveData.filePath.toStdString());
+                        }
+                    }
             }
         } catch (...) {
             success = false;
@@ -7463,7 +7750,7 @@ void GXTStudio::dragEnterEvent(QDragEnterEvent* event)
                 
                 // 检查文件扩展名是否为支持的格式
                 QString suffix = fileInfo.suffix().toLower();
-                if (suffix == "gxt" || suffix == "gxt2" || suffix == "whm" || suffix == "dat") {
+                if (suffix == "gxt" || suffix == "gxt2" || suffix == "whm" || suffix == "dat" || suffix == "txt") {
                     hasValidFiles = true;
                     break;
                 }
@@ -7490,31 +7777,47 @@ void GXTStudio::dropEvent(QDropEvent* event)
     if (event->mimeData()->hasUrls()) {
         const QList<QUrl> urls = event->mimeData()->urls();
         QStringList validFiles;
-        
+        QStringList txtFiles;
+
         for (const QUrl& url : urls) {
             if (url.isLocalFile()) {
                 QString filePath = url.toLocalFile();
                 QFileInfo fileInfo(filePath);
-                
+
                 // 检查文件扩展名是否为支持的格式
                 QString suffix = fileInfo.suffix().toLower();
                 if (suffix == "gxt" || suffix == "gxt2" || suffix == "whm" || suffix == "dat") {
                     validFiles << filePath;
+                } else if (suffix == "txt") {
+                    // 文本文件单独处理，交给 importTxtFile
+                    txtFiles << filePath;
                 }
             }
         }
-        
+
+        // 先处理 GXT/DAT/WHM 等二进制格式
         if (!validFiles.isEmpty()) {
-            // 异步解析所有有效文件
             for (const QString& filePath : validFiles) {
                 startAsyncParse(filePath);
             }
-            
-            QString message = validFiles.size() == 1 
+            QString message = validFiles.size() == 1
                 ? QString("已添加文件: %1").arg(QFileInfo(validFiles.first()).fileName())
                 : QString("已添加 %1 个文件").arg(validFiles.size());
-            
             showLogMessage(message);
+        }
+
+        // 单独处理 TXT 文件（调用 importTxtFile 而不是走解析线程）
+        if (!txtFiles.isEmpty()) {
+            for (const QString& filePath : txtFiles) {
+                importTxtFile(filePath);
+            }
+            QString message = txtFiles.size() == 1
+                ? QString("已导入文本文件: %1").arg(QFileInfo(txtFiles.first()).fileName())
+                : QString("已导入 %1 个文本文件").arg(txtFiles.size());
+            showLogMessage(message);
+        }
+
+        if (!validFiles.isEmpty() || !txtFiles.isEmpty()) {
             event->acceptProposedAction();
             return;
         }
@@ -7631,7 +7934,9 @@ QString DraggableTableList::createTempTableFile(int tableIndex, const QString& t
                             keyStr = GXTStudio::formatKeyForDisplay(entryKey);
                         }
                     }
-                    QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
+                    // 确保以 UTF-8 解码 entry.value（GXT 内部通常为 UTF-8 编码）
+                    QString valueStr = QString::fromUtf8(entry.value.c_str());
+                    QString line = QString("%1=%2").arg(keyStr, valueStr);
                     stream << line << Qt::endl;
                 }
                 
@@ -9356,7 +9661,11 @@ void GXTStudio::onAutoSaveTimer()
                     }
                     editor.addEntriesBatch(tableIndex, entriesBatch);
                 }
-                success = editor.saveToFile(saveData.filePath.toStdString());
+                if (saveData.filePath.endsWith(".txt", Qt::CaseInsensitive)) {
+                    success = editor.saveAsText(saveData.filePath.toStdString());
+                } else {
+                    success = editor.saveToFile(saveData.filePath.toStdString());
+                }
             }
         } catch (...) {
             success = false;

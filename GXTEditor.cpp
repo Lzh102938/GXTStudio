@@ -659,10 +659,7 @@ bool GXTEditor::saveAsText(const std::string& path) {
         std::string buffer;
         buffer.reserve(1024 * 1024); // 预分配1MB
         
-        // 写入文件头部
-        buffer += "\xEF\xBB\xBF";
-        buffer += "# GXT Text Format\n";
-        buffer += "# Version: " + getVersionString() + "\n\n";
+        // 写入文件内容（纯文本，不添加 BOM 或额外注释）
 
         // 按照MAIN表优先的顺序写入表
         std::vector<size_t> tableOrder;
@@ -687,7 +684,10 @@ bool GXTEditor::saveAsText(const std::string& path) {
 
             for (const auto& entry : tbl.entries) {
                 std::string outputKey = entry.originalKey;
-                
+                if (outputKey.empty()) {
+                    outputKey = entry.key;
+                }
+                // 如果是8位十六进制hash，自动加0x前缀
                 if (outputKey.length() == 8) {
                     bool allHex = true;
                     for (char c : outputKey) {
@@ -700,7 +700,6 @@ bool GXTEditor::saveAsText(const std::string& path) {
                         outputKey = "0x" + outputKey;
                     }
                 }
-                
                 buffer += outputKey + "=" + entry.value + "\n";
             }
 
