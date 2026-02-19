@@ -25,6 +25,8 @@ public:
     
     // 设置提示标签
     void setHintLabel(QLabel* label);
+    // 对当前文本按 Unicode 排序并重新格式化（按每行 COLS_PER_LINE）
+    void sortCharsInWidget();
 
 signals:
     // 光标位置变化信号
@@ -39,6 +41,8 @@ signals:
 protected:
     void keyPressEvent(QKeyEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void insertFromMimeData(const QMimeData* source) override;
+    void inputMethodEvent(QInputMethodEvent* event) override;
 
 private:
     CharTableData m_data;

@@ -8,6 +8,8 @@
 #include <QLabel>
 #include <QTimer>
 #include <algorithm>
+#include <QMimeData>
+#include <QInputMethodEvent>
 
 CharTableWidget::CharTableWidget(QWidget* parent)
     : QPlainTextEdit(parent)
@@ -183,6 +185,128 @@ void CharTableWidget::updateHint()
     }
 }
 
+void CharTableWidget::insertFromMimeData(const QMimeData* source)
+{
+    if (!source) return;
+    QString text = source->text();
+    if (text.isEmpty()) return;
+
+    QString filtered;
+    filtered.reserve(text.length());
+    bool asciiRemoved = false;
+
+    for (QChar ch : text) {
+        if (ch == '\r') continue;
+        if (ch == '\n') {
+            filtered.append('\n');
+            continue;
+        }
+        if (ch.unicode() < 128) {
+            asciiRemoved = true;
+            continue; // 跳过 ASCII
+        }
+        if (m_existingChars.contains(ch)) {
+            continue; // 跳过已存在字符，避免重复
+        }
+        filtered.append(ch);
+        m_existingChars.insert(ch);
+        if (m_existingChars.size() >= MAX_CHARS) break;
+    }
+
+    if (filtered.isEmpty()) {
+        if (asciiRemoved && m_hintLabel) {
+            m_hintLabel->setText("粘贴内容包含非法或重复字符");
+            m_hintLabel->setStyleSheet("color: red; font-size: 12px;");
+            QTimer::singleShot(2000, this, [this]() { updateHint(); });
+        }
+        return;
+    }
+
+    // 以纯文本方式插入，避免富文本干扰
+    QPlainTextEdit::insertPlainText(filtered);
+    m_textDirty = true;
+    m_reformatTimer->start();
+}
+
+void CharTableWidget::inputMethodEvent(QInputMethodEvent* event)
+{
+    if (!event) {
+        QPlainTextEdit::inputMethodEvent(event);
+        return;
+    }
+
+    QString commit = event->commitString();
+    if (!commit.isEmpty()) {
+        QString filtered;
+        filtered.reserve(commit.length());
+        for (QChar ch : commit) {
+            if (ch.unicode() < 128) continue;
+            if (m_existingChars.contains(ch)) continue;
+            filtered.append(ch);
+            m_existingChars.insert(ch);
+            if (m_existingChars.size() >= MAX_CHARS) break;
+        }
+
+        if (!filtered.isEmpty()) {
+            QPlainTextEdit::insertPlainText(filtered);
+            m_textDirty = true;
+            m_reformatTimer->start();
+        }
+        event->accept();
+        return;
+    }
+
+    // 没有提交字符串时，交给基类处理（例如预编辑）
+    QPlainTextEdit::inputMethodEvent(event);
+}
+
+void CharTableWidget::sortCharsInWidget()
+{
+    // 获取当前所有有效字符，去掉换行与 ASCII
+    QString text = toPlainText();
+    QVector<uint16_t> chars;
+    chars.reserve(text.length());
+    for (QChar ch : text) {
+        if (ch == '\n' || ch.unicode() == 0) continue;
+        if (ch.unicode() < 128) continue;
+        chars.append(ch.unicode());
+        if (chars.size() >= MAX_CHARS) break;
+    }
+
+    if (chars.empty()) return;
+
+    std::sort(chars.begin(), chars.end());
+
+    // 去重（保留一个）
+    int write = 0;
+    for (int i = 0; i < chars.size(); ++i) {
+        if (write == 0 || chars[i] != chars[write - 1]) {
+            chars[write++] = chars[i];
+        }
+    }
+    chars.resize(write);
+
+    // 构建格式化文本
+    int charCount = chars.size();
+    QString formatted;
+    formatted.reserve(charCount + (charCount / COLS_PER_LINE) + 2);
+    for (int i = 0; i < charCount; ++i) {
+        formatted.append(QChar(chars[i]));
+        if ((i + 1) % COLS_PER_LINE == 0 && i < charCount - 1) formatted.append('\n');
+    }
+
+    // 直接更新文本并刷新缓存
+    setPlainText(formatted);
+    m_cachedText = formatted;
+    m_textDirty = false;
+
+    // 更新字符集合与提示
+    m_existingChars.clear();
+    m_existingChars.reserve(chars.size());
+    for (uint16_t ch : chars) m_existingChars.insert(QChar(ch));
+    updateHint();
+}
+
 void CharTableWidget::rebuildCharSet()
 {
     m_existingChars.clear();
@@ -195,9 +319,9 @@ void CharTableWidget::rebuildCharSet()
     
     // 使用迭代器而非索引，减少计算
     for (auto it = text.constBegin(); it != text.constEnd(); ++it) {
-        if (*it != '\n') {
-            m_existingChars.insert(*it);
-        }
+        if (*it == '\n') continue;
+        if (it->unicode() < 128) continue; // 跳过 ASCII
+        m_existingChars.insert(*it);
     }
     
     m_cachedText = text;
@@ -211,6 +335,22 @@ void CharTableWidget::reformatText()
     
     // 使用缓存文本，避免重复获取
     QString text = m_textDirty ? toPlainText() : m_cachedText;
+    // 过滤掉 ASCII 字符（包括粘贴或输入法泄露的 ASCII）
+    if (!text.isEmpty()) {
+        QString filtered;
+        filtered.reserve(text.length());
+        for (QChar ch : text) {
+            if (ch == '\n') {
+                filtered.append(ch);
+                continue;
+            }
+            if (ch.unicode() < 128) continue; // 跳过 ASCII
+            filtered.append(ch);
+        }
+        if (filtered != text) {
+            text = filtered;
+        }
+    }
     
     // 快速检查：如果文本为空或没有换行，直接返回
     if (text.isEmpty() || !text.contains('\n')) {
@@ -239,6 +379,8 @@ void CharTableWidget::reformatText()
     int processLimit = qMin(text.length(), MAX_CHARS);
     for (int i = 0; i < processLimit; ++i) {
         const QChar& ch = text[i];
+        // 再次过滤 ASCII（保险）
+        if (ch.unicode() < 128) continue;
         if (seen.contains(ch)) {
             hasDuplicate = true;
             dupChar = ch;
@@ -399,9 +541,9 @@ void CharTableWidget::updateDataFromText()
     
     // 提取所有非空字符（跳过换行符）
     for (QChar ch : text) {
-        if (ch != '\n' && ch.unicode() != 0) {
-            validChars.append(ch.unicode());
-        }
+        if (ch == '\n' || ch.unicode() == 0) continue;
+        if (ch.unicode() < 128) continue; // 跳过 ASCII
+        validChars.append(ch.unicode());
     }
     
     // 确保不超出最大字符数限制

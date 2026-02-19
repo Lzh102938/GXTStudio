@@ -1075,6 +1075,8 @@ void GXTStudio::saveFile()
     
     // 如果是字符表文件，使用异步保存（与GXT一致）
     if (currentTab->isCharTable && currentTab->charTableWidget) {
+        // 在保存前先将文本内字符按 Unicode 排序并格式化，确保保存顺序一致
+        currentTab->charTableWidget->sortCharsInWidget();
         // 从界面文本更新数据，确保保存的是用户编辑的内容
         currentTab->charTableWidget->updateDataFromText();
         
@@ -2275,6 +2277,10 @@ void GXTStudio::toggleReadOnly(bool readOnly)
         // 更新添加条目按钮状态
         if (tab.addEntryButton) {
             tab.addEntryButton->setEnabled(!m_isReadOnly);
+        }
+        // 如果是字符表，设置其只读状态
+        if (tab.charTableWidget) {
+            tab.charTableWidget->setReadOnly(m_isReadOnly);
         }
     }
     
@@ -10849,6 +10855,8 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     // CharTableWidget inside scroll area
     CharTableWidget* widget = new CharTableWidget(page);
     widget->setData(data);
+    // 确保初始创建时正确应用只读模式
+    widget->setReadOnly(m_isReadOnly);
 
     QScrollArea* scroll = new QScrollArea(page);
     scroll->setWidgetResizable(true);
