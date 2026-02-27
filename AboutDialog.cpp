@@ -10,15 +10,18 @@
 #include <QEasingCurve>
 #include <QPropertyAnimation>
 #include <QGraphicsOpacityEffect>
+#include <QCoreApplication>
+#include <QPixmap>
 
 // VersionCard 实现
 VersionCard::VersionCard(const QString& version, const QString& date, const QString& changes, QWidget* parent)
-    : QFrame(parent), m_version(version), m_date(date), m_changes(changes), m_expanded(false), m_animating(false)
+    : QFrame(parent), m_version(version), m_date(date), m_changes(changes), m_expanded(false)
 {
     // 优化绘制属性，减少闪烁
     setAttribute(Qt::WA_OpaquePaintEvent);
     setAttribute(Qt::WA_NoSystemBackground, false);
     setAttribute(Qt::WA_StyledBackground, true); // 使用样式表背景
+    
     setupUI();
 }
 
@@ -43,7 +46,7 @@ void VersionCard::setupUI()
     setStyleSheet(getVersionCardStyle());
     setCursor(Qt::PointingHandCursor);
     
-    // 固定宽度避免动画抖动
+    // 固定宽度避免抖动
     setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
     m_contentLayout = new QVBoxLayout(this);
@@ -106,80 +109,32 @@ void VersionCard::setupUI()
 
     // 鼠标悬停事件
     installEventFilter(this);
-    
-    // 创建动画对象
-    m_expandAnimation = new QPropertyAnimation(this, "cardHeight", this);
-    m_expandAnimation->setDuration(300); // 300ms动画时长
-    m_expandAnimation->setEasingCurve(QEasingCurve::InOutCubic); // 平滑的缓动曲线
 }
 
 void VersionCard::toggleExpand()
 {
-    if (m_animating) {
-        return; // 动画进行中，忽略重复点击
-    }
-    
     m_expanded = !m_expanded;
-    m_animating = true;
-    
-    // 获取展开和收起的目标高度
-    int collapsedHeight = 50;
-    int expandedHeight;
     
     if (m_expanded) {
-        // 展开：先显示内容，计算完整高度
+        // 展开：显示内容
         m_changesLabel->show();
-        // 强制布局更新以获取准确高度
-        m_changesLabel->updateGeometry();
-        expandedHeight = sizeHint().height();
-        // 确保宽度也固定
-        setFixedWidth(width());
-        startExpandAnimation(collapsedHeight, expandedHeight);
+        setFixedHeight(QWIDGETSIZE_MAX); // 自动调整高度
     } else {
-        // 收起：先获取当前高度，然后隐藏内容
-        expandedHeight = height();
-        startExpandAnimation(expandedHeight, collapsedHeight);
-    }
-}
-
-void VersionCard::startExpandAnimation(int startHeight, int endHeight)
-{
-    // 停止之前的动画
-    if (m_expandAnimation->state() == QPropertyAnimation::Running) {
-        m_expandAnimation->stop();
+        // 收起：隐藏内容
+        m_changesLabel->hide();
+        setFixedHeight(50); // 固定高度
     }
     
-    // 断开之前的连接
-    disconnect(m_expandAnimation, &QPropertyAnimation::finished, this, nullptr);
-    
-    // 配置动画
-    m_expandAnimation->setStartValue(startHeight);
-    m_expandAnimation->setEndValue(endHeight);
-    m_expandAnimation->setDuration(250); // 稍微加快动画速度
-    m_expandAnimation->setEasingCurve(QEasingCurve::OutCubic); // 使用更适合的缓动曲线
-    
-    // 连接动画结束信号
-    connect(m_expandAnimation, &QPropertyAnimation::finished, this, [this]() {
-        m_animating = false;
-        if (!m_expanded) {
-            // 动画结束且是收起状态，隐藏内容
-            m_changesLabel->hide();
-            // 恢复默认尺寸策略
-            setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        }
-    });
-    
-    // 开始动画
-    m_expandAnimation->start();
-    
-    // 立即更新箭头图标
     updateArrowIcon();
 }
+
+
 
 void VersionCard::updateArrowIcon()
 {
     m_arrowLabel->setText(m_expanded ? QString(FA::QChevronUp) : QString(FA::QChevronDown));
     // 箭头图标变化已经足够明显，不需要额外旋转动画
+    m_arrowLabel->update(); // 立即更新箭头图标
 }
 
 bool VersionCard::eventFilter(QObject* obj, QEvent* event)
@@ -276,6 +231,7 @@ void AboutDialog::setupUI()
     // 创建各个部分
     createHeaderSection();
     createInfoAndFileTypeSection();
+    createDonationSection();
     createChangelogSection();
     createTeamSection();
 
@@ -303,10 +259,19 @@ void AboutDialog::createHeaderSection()
     QHBoxLayout* iconTitleLayout = new QHBoxLayout();
     iconTitleLayout->setSpacing(14);
 
-    // 游戏手柄图标
-    QLabel* iconLabel = new QLabel(QString(FA::QGamepadModern), headerFrame);
-    iconLabel->setFont(FA::solidFont(42));
-    iconLabel->setStyleSheet("QLabel { color: #4a90e2; }");
+    // 应用程序图标
+    QString iconPath = QCoreApplication::applicationDirPath() + "/icon/favicon.png";
+    QPixmap pixmap(iconPath);
+    QLabel* iconLabel = new QLabel(headerFrame);
+    if (!pixmap.isNull()) {
+        pixmap = pixmap.scaled(56, 56, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        iconLabel->setPixmap(pixmap);
+    } else {
+        // 加载失败时使用默认图标
+        iconLabel->setText(QString(FA::QGamepadModern));
+        iconLabel->setFont(FA::solidFont(42));
+        iconLabel->setStyleSheet("QLabel { color: #4a90e2; }");
+    }
     iconLabel->setFixedSize(56, 56);
     iconLabel->setAlignment(Qt::AlignCenter);
 
@@ -390,7 +355,7 @@ void AboutDialog::createInfoAndFileTypeSection()
     QLabel* dateIcon = new QLabel(QString(FA::QCalendar), infoFrame);
     dateIcon->setFont(FA::solidFont(15));
     dateIcon->setStyleSheet("QLabel { color: #4a90e2; }");
-    QLabel* dateLabel = new QLabel("2024年1月25日", infoFrame);
+    QLabel* dateLabel = new QLabel("2026年3月？？日", infoFrame);
     dateLabel->setStyleSheet(
         "QLabel { "
         "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; "
@@ -409,7 +374,7 @@ void AboutDialog::createInfoAndFileTypeSection()
     QLabel* authorIcon = new QLabel(QString(FA::QUser), infoFrame);
     authorIcon->setFont(FA::solidFont(15));
     authorIcon->setStyleSheet("QLabel { color: #4a90e2; }");
-    QLabel* authorLabel = new QLabel("GTAmod中文组", infoFrame);
+    QLabel* authorLabel = new QLabel("Lzh10_慕黑", infoFrame);
     authorLabel->setStyleSheet(
         "QLabel { "
         "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; "
@@ -424,7 +389,7 @@ void AboutDialog::createInfoAndFileTypeSection()
 
     // 主页链接（带图标）
     QLabel* homeLink = new QLabel(
-        QString("<span style='font-family: %1; font-size: 14px; font-weight: bold; color: #4a90e2;'>%2</span> <a href='https://github.com' style='color: #4a90e2; text-decoration: none; font-size: 13px; font-weight: 500;'>访问主页</a>")
+        QString("<span style='font-family: %1; font-size: 14px; font-weight: bold; color: #4a90e2;'>%2</span> <a href='https://github.com/Lzh102938/GXTStudio' style='color: #4a90e2; text-decoration: none; font-size: 13px; font-weight: 500;'>访问项目仓库</a>")
         .arg(FA::solidFontFamily())
         .arg(QString(FA::QLink))
     , infoFrame);
@@ -502,6 +467,142 @@ QLabel* AboutDialog::createInfoLabel(const QString& title, const QString& value)
     return label;
 }
 
+void AboutDialog::createDonationSection()
+{
+    QVBoxLayout* layout = static_cast<QVBoxLayout*>(m_contentWidget->layout());
+
+    QFrame* donationFrame = new QFrame(m_contentWidget);
+    donationFrame->setStyleSheet(getCardStyle());
+
+    QHBoxLayout* donationLayout = new QHBoxLayout(donationFrame);
+    donationLayout->setContentsMargins(48, 48, 48, 48);
+    donationLayout->setSpacing(36);
+
+    // 左侧图片
+    QLabel* imageLabel = new QLabel(donationFrame);
+    QString imagePath = QCoreApplication::applicationDirPath() + "/icon/weixin.png";
+    QPixmap pixmap(imagePath);
+    if (!pixmap.isNull()) {
+        pixmap = pixmap.scaled(240, 240, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        imageLabel->setPixmap(pixmap);
+    } else {
+        // 尝试加载支付宝图片
+        QString alipayPath = QCoreApplication::applicationDirPath() + "/icon/alipay.png";
+        QPixmap alipayPixmap(alipayPath);
+        if (!alipayPixmap.isNull()) {
+            alipayPixmap = alipayPixmap.scaled(240, 240, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            imageLabel->setPixmap(alipayPixmap);
+        } else {
+            // 加载失败时使用默认图标
+            imageLabel->setText(QString(FA::QHeart));
+            imageLabel->setFont(FA::solidFont(140));
+            imageLabel->setStyleSheet("QLabel { color: #e74c3c; }");
+            imageLabel->setAlignment(Qt::AlignCenter);
+        }
+    }
+    imageLabel->setFixedSize(240, 240);
+    imageLabel->setAlignment(Qt::AlignCenter);
+    imageLabel->setProperty("donationImage", true);
+
+    // 右侧内容
+    QVBoxLayout* contentLayout = new QVBoxLayout();
+    contentLayout->setSpacing(16);
+
+    // 标题文字
+    QLabel* titleLabel = new QLabel("请作者喝杯奶茶叭~\n感谢您的支持！", donationFrame);
+    titleLabel->setStyleSheet(
+        "QLabel { "
+        "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; "
+        "font-size: 20px; "
+        "font-weight: 300; "
+        "color: #2c3e50; "
+        "line-height: 1.6; "
+        "}"
+    );
+    titleLabel->setWordWrap(true);
+
+    // 捐赠选项
+    QHBoxLayout* optionLayout = new QHBoxLayout();
+    optionLayout->setSpacing(20);
+
+    // 微信选项
+    QHBoxLayout* weixinLayout = new QHBoxLayout();
+    weixinLayout->setSpacing(6);
+    
+    QLabel* weixinIcon = new QLabel(QString(FA::QWeixin), donationFrame);
+    weixinIcon->setFont(FA::brandsFont(14));
+    weixinIcon->setStyleSheet("QLabel { color: #00d20d; }");
+    
+    QLabel* weixinText = new QLabel("微信", donationFrame);
+    weixinText->setStyleSheet(
+        "QLabel { "
+        "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; "
+        "font-size: 14px; "
+        "font-weight: 500; "
+        "color: #00d20d; "
+        "}"
+        "QLabel:hover { "
+        "color: #00b80b; "
+        "text-decoration: underline; "
+        "}"
+    );
+    
+    weixinLayout->addWidget(weixinIcon);
+    weixinLayout->addWidget(weixinText);
+
+    QWidget* weixinWidget = new QWidget(donationFrame);
+    weixinWidget->setLayout(weixinLayout);
+    weixinWidget->setCursor(Qt::PointingHandCursor);
+    weixinWidget->installEventFilter(this);
+    weixinWidget->setProperty("donationType", "weixin");
+    weixinWidget->setStyleSheet("QWidget { background-color: transparent; }");
+
+    // 支付宝选项
+    QHBoxLayout* alipayLayout = new QHBoxLayout();
+    alipayLayout->setSpacing(6);
+    
+    QLabel* alipayIcon = new QLabel(QString(FA::QAlipay), donationFrame);
+    alipayIcon->setFont(FA::brandsFont(14));
+    alipayIcon->setStyleSheet("QLabel { color: #1677ff; }");
+    
+    QLabel* alipayText = new QLabel("支付宝", donationFrame);
+    alipayText->setStyleSheet(
+        "QLabel { "
+        "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; "
+        "font-size: 14px; "
+        "font-weight: 500; "
+        "color: #1677ff; "
+        "}"
+        "QLabel:hover { "
+        "color: #0056d3; "
+        "text-decoration: underline; "
+        "}"
+    );
+    
+    alipayLayout->addWidget(alipayIcon);
+    alipayLayout->addWidget(alipayText);
+
+    QWidget* alipayWidget = new QWidget(donationFrame);
+    alipayWidget->setLayout(alipayLayout);
+    alipayWidget->setCursor(Qt::PointingHandCursor);
+    alipayWidget->installEventFilter(this);
+    alipayWidget->setProperty("donationType", "alipay");
+    alipayWidget->setStyleSheet("QWidget { background-color: transparent; }");
+
+    optionLayout->addWidget(weixinWidget);
+    optionLayout->addWidget(alipayWidget);
+    optionLayout->addStretch();
+
+    contentLayout->addWidget(titleLabel);
+    contentLayout->addLayout(optionLayout);
+    contentLayout->addStretch();
+
+    donationLayout->addWidget(imageLabel);
+    donationLayout->addLayout(contentLayout);
+
+    layout->addWidget(donationFrame);
+}
+
 void AboutDialog::createChangelogSection()
 {
     QVBoxLayout* layout = static_cast<QVBoxLayout*>(m_contentWidget->layout());
@@ -539,14 +640,15 @@ void AboutDialog::createChangelogSection()
     // 添加版本卡片
     VersionCard* v1_0_0 = new VersionCard(
         "v1.0.0",
-        "2024-01-25",
-        "• 初始版本发布\n"
-        "• 支持 GXT 文件编辑 (GTA III, VC, SA, IV)\n"
+        "2026-03-??",
+        "• 完全重写的编辑器发布\n"
+        "• 革新的操作逻辑，支持多标签页\n"
         "• 支持 GXT2 文件 (GTA V)\n"
-        "• 支持 WHM 文件格式\n"
-        "• 智能翻译功能\n"
-        "• 码表转换功能\n"
-        "• 字符表预览功能",
+        "• 支持 WHM 文件格式 (由于WHM文件是完整的网页档案，目前仅支持解析功能)\n"
+        "• 更自由的智能翻译，可自定义提示词、自定义翻译范围\n"
+        "• 添加人性化的文本预览器\n"
+        "• 实现DAT字符表编辑功能\n"
+        "• 支持自动保存，批量替换\n",
         cardsContainer
     );
     cardsLayout->addWidget(v1_0_0);
@@ -572,7 +674,7 @@ void AboutDialog::createTeamSection()
     QLabel* titleIcon = new QLabel(QString(FA::QBuilding), teamFrame);
     titleIcon->setFont(FA::solidFont(16));
     titleIcon->setStyleSheet("QLabel { color: #4a90e2; }");
-    QLabel* sectionTitle = new QLabel("参与人员和组织", teamFrame);
+    QLabel* sectionTitle = new QLabel("相关人员、组织与特别鸣谢", teamFrame);
     sectionTitle->setStyleSheet(getSectionTitleStyle());
     titleLayout->addWidget(titleIcon);
     titleLayout->addWidget(sectionTitle);
@@ -608,7 +710,7 @@ void AboutDialog::createTeamSection()
     teamInfoLayout->addLayout(teamNameLayout);
 
     // 团队描述
-    QLabel* teamDesc = new QLabel("致力于为中文玩家提供最好的GTA游戏模组开发工具和汉化资源", teamInfo);
+    QLabel* teamDesc = new QLabel("致力于为中文玩家提供最好的GTA汉化资源", teamInfo);
     teamDesc->setStyleSheet(
         "QLabel { "
         "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; "
@@ -620,7 +722,60 @@ void AboutDialog::createTeamSection()
     teamDesc->setWordWrap(true);
     teamInfoLayout->addWidget(teamDesc);
 
+    // 特别鸣谢
+    QFrame* thanksFrame = new QFrame(teamFrame);
+    thanksFrame->setStyleSheet("QFrame { background-color: transparent; border: none; }");
+    
+    QVBoxLayout* thanksLayout = new QVBoxLayout(thanksFrame);
+    thanksLayout->setContentsMargins(0, 12, 0, 0);
+    thanksLayout->setSpacing(8);
+    
+    // 鸣谢标题
+    QLabel* thanksTitle = new QLabel("特别鸣谢", teamFrame);
+    thanksTitle->setStyleSheet(
+        "QLabel { "
+        "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; "
+        "font-size: 13px; "
+        "font-weight: 600; "
+        "color: #34495e; "
+        "padding: 4px 0; "
+        "}"
+    );
+    thanksLayout->addWidget(thanksTitle);
+    
+    // 鸣谢列表
+    QStringList thanksList = {
+        "无名汉化组",
+        "罪吧汉化组",
+        "天道汉化组（GTAIV贴吧汉化组）",
+        "@倾城剑舞"
+    };
+    
+    for (const QString& name : thanksList) {
+        QHBoxLayout* itemLayout = new QHBoxLayout();
+        itemLayout->setSpacing(10);
+        
+        QLabel* icon = new QLabel(QString(FA::QHeart), thanksFrame);
+        icon->setFont(FA::solidFont(14));
+        icon->setStyleSheet("QLabel { color: #e74c3c; }");
+        
+        QLabel* label = new QLabel(name, thanksFrame);
+        label->setStyleSheet(
+            "QLabel { "
+            "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; "
+            "font-size: 13px; "
+            "color: #34495e; "
+            "}"
+        );
+        
+        itemLayout->addWidget(icon);
+        itemLayout->addWidget(label);
+        itemLayout->addStretch();
+        thanksLayout->addLayout(itemLayout);
+    }
+    
     teamLayout->addWidget(teamInfo);
+    teamLayout->addWidget(thanksFrame);
     layout->addWidget(teamFrame);
 }
 
@@ -662,6 +817,36 @@ void AboutDialog::createFooterSection()
 bool AboutDialog::eventFilter(QObject* obj, QEvent* event)
 {
     if (event->type() == QEvent::MouseButtonPress) {
+        QWidget* widget = qobject_cast<QWidget*>(obj);
+        if (widget && widget->property("donationType").isValid()) {
+            QString donationType = widget->property("donationType").toString();
+            QString imagePath;
+            
+            if (donationType == "weixin") {
+                imagePath = QCoreApplication::applicationDirPath() + "/icon/weixin.png";
+            } else if (donationType == "alipay") {
+                imagePath = QCoreApplication::applicationDirPath() + "/icon/alipay.png";
+            }
+            
+            if (!imagePath.isEmpty()) {
+                QPixmap pixmap(imagePath);
+                if (!pixmap.isNull()) {
+                    // 找到捐赠板块中的图片标签并更新
+                    QWidget* donationFrame = widget->parentWidget();
+                    if (donationFrame) {
+                        QList<QLabel*> labels = donationFrame->findChildren<QLabel*>();
+                        for (QLabel* imgLabel : labels) {
+                            if (imgLabel->property("donationImage").isValid()) {
+                                pixmap = pixmap.scaled(240, 240, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                                imgLabel->setPixmap(pixmap);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            return true;
+        }
         onCheckUpdateClicked();
         return true;
     }

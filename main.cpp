@@ -11,6 +11,7 @@
 
 // 全局变量保存字体ID - 供其他模块使用
 int g_fontAwesomeSolidId = -1;
+int g_fontAwesomeBrandsId = -1;
 
 // 加载 Font Awesome 图标字体
 static bool loadFontAwesome()
@@ -35,6 +36,19 @@ static bool loadFontAwesome()
         qDebug() << "  Test char f031:" << QChar(0xf031);
     } else {
         qDebug() << "Failed to load Font Awesome 7 Free-Solid from:" << solidFont;
+    }
+
+    // 加载 Brands 字体
+    QString brandsFont = fontPath + "Font Awesome 7 Brands-Regular-400.otf";
+    qDebug() << "Loading Brands font from:" << brandsFont;
+    g_fontAwesomeBrandsId = db.addApplicationFont(brandsFont);
+    if (g_fontAwesomeBrandsId != -1) {
+        loadedCount++;
+        QString familyName = db.applicationFontFamilies(g_fontAwesomeBrandsId).join(", ");
+        qDebug() << "Font Awesome 7 Brands loaded successfully.";
+        qDebug() << "  Family:" << familyName << "ID:" << g_fontAwesomeBrandsId;
+    } else {
+        qDebug() << "Failed to load Font Awesome 7 Brands from:" << brandsFont;
     }
 
     qDebug() << "Loaded" << loadedCount << "Font Awesome font(s)";
@@ -68,6 +82,16 @@ int main(int argc, char *argv[])
     
     // 加载 Font Awesome 图标字体
     loadFontAwesome();
+    
+    // 设置应用程序图标
+    QString iconPath = QCoreApplication::applicationDirPath() + "/icon/favicon.ico";
+    QIcon appIcon(iconPath);
+    if (!appIcon.isNull()) {
+        app.setWindowIcon(appIcon);
+        qDebug() << "Application icon loaded successfully:" << iconPath;
+    } else {
+        qDebug() << "Failed to load application icon:" << iconPath;
+    }
     
     // FreeType 字体渲染优化配置
     QFont appFont = app.font();

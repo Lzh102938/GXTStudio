@@ -161,3 +161,15 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMENT "Copying font files to build directory"
 )
 
+# 复制图标文件到构建输出目录
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/icon/favicon.ico"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/icon/favicon.png"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon/"
+    COMMENT "Copying icon files to build directory"
+)
+

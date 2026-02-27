@@ -17,7 +17,6 @@
 
 class VersionCard : public QFrame {
     Q_OBJECT
-    Q_PROPERTY(int cardHeight READ height WRITE setFixedHeight)
 
 public:
     explicit VersionCard(const QString& version, const QString& date, const QString& changes, QWidget* parent = nullptr);
@@ -32,19 +31,16 @@ private slots:
 private:
     void setupUI();
     void updateArrowIcon();
-    void startExpandAnimation(int startHeight, int endHeight);
     QString getVersionCardStyle() const;
 
     QString m_version;
     QString m_date;
     QString m_changes;
     bool m_expanded;
-    bool m_animating;
 
     QLabel* m_arrowLabel;
     QLabel* m_changesLabel;
     QVBoxLayout* m_contentLayout;
-    QPropertyAnimation* m_expandAnimation;
 };
 
 class AboutDialog : public QDialog {
@@ -68,6 +64,7 @@ private:
     void setupUI();
     void createHeaderSection();
     void createInfoAndFileTypeSection();
+    void createDonationSection();
     void createChangelogSection();
     void createTeamSection();
     void createFooterSection();

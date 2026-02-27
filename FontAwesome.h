@@ -8,6 +8,7 @@
 
 // 外部声明 Font Awesome 字体 ID（从 main.cpp 导出）
 extern int g_fontAwesomeSolidId;
+extern int g_fontAwesomeBrandsId;
 
 /**
  * @brief Font Awesome 图标工具类
@@ -66,8 +67,13 @@ namespace FA {
     constexpr QChar QFileCode = QChar(0xf1c9);                  // 代码文件图标 (Solid) - 格式
     constexpr QChar QCalendar = QChar(0xf133);               // 日历图标 (Solid) - 日期
     constexpr QChar QUser = QChar(0xf007);                     // 用户图标 (Solid) - 作者/开发者
-    constexpr QChar QLink = QChar(0xf0c1);                       // 链接图标 (Solid) - 外部链接
-    constexpr QChar QUserGroup = QChar(0xf0c0);              // 用户组图标 (Solid) - 团队组织
+    constexpr QChar QLink = QChar(0xf0c1);                     // 链接图标 (Solid) - 外部链接
+    constexpr QChar QUserGroup = QChar(0xf0c0);                // 用户组图标 (Solid) - 团队组织
+    constexpr QChar QHeart = QChar(0xf004);                    // 心形图标 (Solid) - 特别鸣谢
+    
+    // Font Awesome 7 Brands 图标 Unicode
+    constexpr QChar QWeixin = QChar(0xf1d7);                   // 微信图标 (Brands) - 捐赠
+    constexpr QChar QAlipay = QChar(0xf642);                   // 支付宝图标 (Brands) - 捐赠
 
     /**
      * @brief 获取 Font Awesome 7 Free Solid 字体族名称
@@ -93,6 +99,29 @@ namespace FA {
     }
 
     /**
+     * @brief 获取 Font Awesome 7 Brands 字体族名称
+     * @return 字体族名称，如果字体未加载则返回空字符串
+     */
+    inline QString brandsFontFamily() {
+        static QString cachedFamily;
+        if (!cachedFamily.isEmpty()) {
+            return cachedFamily;
+        }
+        
+        QFontDatabase db;
+        if (g_fontAwesomeBrandsId != -1) {
+            QStringList families = db.applicationFontFamilies(g_fontAwesomeBrandsId);
+            if (!families.isEmpty()) {
+                cachedFamily = families.first();
+                return cachedFamily;
+            }
+        }
+        
+        cachedFamily = QStringLiteral("Font Awesome 7 Brands");
+        return cachedFamily;
+    }
+
+    /**
      * @brief 获取 Font Awesome 7 Free Solid 字体
      * @param size 字体大小（点数），默认14
      * @return QFont 对象，如果 Font Awesome 未加载则返回默认字体
@@ -102,6 +131,19 @@ namespace FA {
         QFont font(family);
         font.setPointSize(size);
         font.setBold(true);
+        font.setStyleStrategy(QFont::PreferAntialias);
+        return font;
+    }
+
+    /**
+     * @brief 获取 Font Awesome 7 Brands 字体
+     * @param size 字体大小（点数），默认14
+     * @return QFont 对象，如果 Font Awesome 未加载则返回默认字体
+     */
+    inline QFont brandsFont(int size = 14) {
+        QString family = brandsFontFamily();
+        QFont font(family);
+        font.setPointSize(size);
         font.setStyleStrategy(QFont::PreferAntialias);
         return font;
     }

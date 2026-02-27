@@ -135,7 +135,7 @@ TextRenderWidget::TextRenderWidget(QWidget* parent)
     setAttribute(Qt::WA_NoSystemBackground); // 禁用系统背景，手动绘制
     setAttribute(Qt::WA_NativeWindow); // 使用原生窗口，启用GPU硬件加速
     setMinimumHeight(40);  // 降低最小高度
-    setMaximumHeight(40);  // 降低最大高度
+    setMaximumHeight(100);  // 增加最大高度，支持更大字号
     setMinimumWidth(400);
     setAutoFillBackground(false);
 
@@ -269,7 +269,7 @@ void TextRenderWidget::showContextMenu(const QPoint& pos)
     sizeLabel->setStyleSheet("font-family: 'Microsoft YaHei', 'Segoe UI'; font-size: 12px; color: #495057;");
     
     QSpinBox* sizeSpinBox = new QSpinBox();
-    sizeSpinBox->setRange(8, 32);  // 减小字体范围
+    sizeSpinBox->setRange(8, 48);  // 扩大字体范围
     sizeSpinBox->setValue(m_fontSize);
     sizeSpinBox->setMinimumWidth(50);
     connect(sizeSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, &TextRenderWidget::onFontSizeChanged);
@@ -669,7 +669,7 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
 
                     // 【修复】使用基线对齐：y = baseline - cached.ascent
                     int drawY = baseline - cached.ascent;
-                    painter->drawPixmap(shadowXPos - 4, drawY, cached.pixmap);
+                    painter->drawPixmap(shadowXPos, drawY, cached.pixmap);
                     shadowXPos += cached.width;
                 }
             }
@@ -713,7 +713,7 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
 
                     // 【修复】使用基线对齐：y = baseline - cached.ascent
                     int drawY = baseline - cached.ascent;
-                    painter->drawPixmap(xPos - 4, drawY, cached.pixmap);
+                    painter->drawPixmap(xPos, drawY, cached.pixmap);
                     xPos += cached.width;
                 }
             }
@@ -834,8 +834,8 @@ TextRenderWidget::CharCacheValue TextRenderWidget::renderCharToCache(
     int charHeight = fm.height();
     int ascent = fm.ascent();
     
-    // 计算位图大小（包含描边空间）
-    int padding = outline ? 4 : 0;
+    // 统一使用相同的位图大小和位置，无论是否描边
+    int padding = 4; // 始终保留4像素padding用于描边
     int pixmapWidth = charWidth + padding * 2;
     int pixmapHeight = charHeight + padding;
     
@@ -843,22 +843,36 @@ TextRenderWidget::CharCacheValue TextRenderWidget::renderCharToCache(
     pixmap.fill(Qt::transparent);
     
     QPainter painter(&pixmap);
+    
+    // 启用Freetype引擎优化渲染质量
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setRenderHint(QPainter::TextAntialiasing, true);
-    painter.setFont(font);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     
+    // 设置字体渲染策略
+    QFont ft = font;
+    ft.setStyleStrategy(static_cast<QFont::StyleStrategy>(QFont::PreferAntialias | QFont::PreferQuality));
+    painter.setFont(ft);
+    
+    // 先绘制描边（如果启用）
     if (outline) {
-        // 绘制描边
-        painter.setPen(QPen(QColor(0, 0, 0, 255), 3.5));
+        // 使用QPainterPath绘制描边，确保与文本完全对齐
         QPainterPath path;
-        path.addText(padding, ascent + padding / 2, font, ch);
-        painter.setBrush(QColor(0, 0, 0, 255));
-        painter.drawPath(path);
+        path.addText(padding, padding + ascent, ft, ch);
+        
+        // 单层简单清晰描边
+        QPen outlinePen(QColor(0, 0, 0, 255), 3.0);
+        outlinePen.setJoinStyle(Qt::RoundJoin);
+        outlinePen.setCapStyle(Qt::RoundCap);
+        outlinePen.setMiterLimit(2.0); // 限制斜接长度，避免尖锐角
+        
+        // 绘制清晰的黑色描边
+        painter.strokePath(path, outlinePen);
     }
     
-    // 绘制字符
+    // 绘制主文本
     painter.setPen(color);
-    painter.drawText(padding, ascent + padding / 2, ch);
+    painter.drawText(padding, padding + ascent, ch);
     painter.end();
     
     CharCacheValue value{pixmap, charWidth, ascent};
