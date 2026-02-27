@@ -181,6 +181,9 @@ void WelcomeWidget::initializeUI() {
     btnLayout->addWidget(helpBtn);
     btnLayout->addStretch();
     
+    connect(openBtn, &QPushButton::clicked, this, &WelcomeWidget::openFileRequested);
+    connect(helpBtn, &QPushButton::clicked, this, &WelcomeWidget::helpRequested);
+    
     actionLayout->addLayout(btnLayout);
     contentLayout->addWidget(actionWidget);
     

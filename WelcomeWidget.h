@@ -9,6 +9,10 @@ public:
     explicit WelcomeWidget(QWidget* parent = nullptr);
     ~WelcomeWidget();
 
+signals:
+    void openFileRequested();
+    void helpRequested();
+
 protected:
     void paintEvent(QPaintEvent* event) override;
 

@@ -501,7 +501,10 @@ QString GXTStudio::getButtonStyle(const QString& color, bool darker) const
 
 QWidget* GXTStudio::createWelcomeTab()
 {
-    return new WelcomeWidget(this);
+    WelcomeWidget* welcome = new WelcomeWidget(this);
+    connect(welcome, &WelcomeWidget::openFileRequested, this, &GXTStudio::openFile);
+    connect(welcome, &WelcomeWidget::helpRequested, this, &GXTStudio::showAbout);
+    return welcome;
 }
 
 void GXTStudio::setupUI()
