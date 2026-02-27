@@ -424,7 +424,7 @@ void AboutDialog::createInfoAndFileTypeSection()
 
     // 主页链接（带图标）
     QLabel* homeLink = new QLabel(
-        QString("<span style='font-family: %1; font-size: 14px; color: #4a90e2;'>%2</span> <a href='https://github.com' style='color: #4a90e2; text-decoration: none; font-size: 13px; font-weight: 500;'>访问主页</a>")
+        QString("<span style='font-family: %1; font-size: 14px; font-weight: bold; color: #4a90e2;'>%2</span> <a href='https://github.com' style='color: #4a90e2; text-decoration: none; font-size: 13px; font-weight: 500;'>访问主页</a>")
         .arg(FA::solidFontFamily())
         .arg(QString(FA::QLink))
     , infoFrame);

@@ -51,6 +51,13 @@ static bool loadFontAwesome()
 
 int main(int argc, char *argv[])
 {
+    // 强制使用 FreeType 字体引擎
+    qputenv("QT_QPA_PLATFORM", QByteArray("windows:fontengine=freetype"));
+    
+    // FreeType 字体渲染优化参数
+    qputenv("QT_FONT_DPI", QByteArray("96"));
+    qputenv("QT_ENABLE_HIGHDPI_SCALING", QByteArray("0"));
+    
     // 极致性能优化设置
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
@@ -62,13 +69,15 @@ int main(int argc, char *argv[])
     // 加载 Font Awesome 图标字体
     loadFontAwesome();
     
-    // 极致字体渲染优化
+    // FreeType 字体渲染优化配置
     QFont appFont = app.font();
     appFont.setFamily("Microsoft YaHei");
-    appFont.setPointSize(9); // 减小字体大小
-    appFont.setHintingPreference(QFont::PreferFullHinting);
-    appFont.setStyleStrategy(QFont::PreferAntialias);
-    appFont.setKerning(false); // 禁用字距调整提升性能
+    appFont.setPointSize(9);
+    // FreeType 最佳渲染设置
+    appFont.setHintingPreference(QFont::PreferFullHinting);  // 完整微调，FreeType最佳效果
+    appFont.setStyleStrategy(QFont::PreferAntialias);        // 优先抗锯齿
+    appFont.setStyleStrategy(QFont::PreferMatch);            // 精确匹配
+    appFont.setKerning(true);  // 启用字距调整，FreeType支持良好
     appFont.setFixedPitch(false);
     app.setFont(appFont);
     
@@ -94,7 +103,6 @@ int main(int argc, char *argv[])
     qputenv("QT_OPENGL", QByteArray("desktop")); // 强制桌面OpenGL
     qputenv("QT_LOGGING_RULES", QByteArray("qt.qpa.*=false")); // 禁用日志
     qputenv("QT_DEBUG_PLUGINS", QByteArray("0")); // 禁用插件调试
-    qputenv("QT_FONT_DPI", QByteArray("96")); // 固定DPI
     // 移除可能导致闪烁的设置
     // qputenv("QT_QUICK_BACKEND", QByteArray("software"));
     // qputenv("QT_WIDGETS_RHI", QByteArray("1"));

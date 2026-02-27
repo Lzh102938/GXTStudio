@@ -79,7 +79,7 @@ namespace FA {
             return cachedFamily;
         }
         
-        static QFontDatabase db;
+        QFontDatabase db;
         if (g_fontAwesomeSolidId != -1) {
             QStringList families = db.applicationFontFamilies(g_fontAwesomeSolidId);
             if (!families.isEmpty()) {
@@ -88,8 +88,7 @@ namespace FA {
             }
         }
         
-        // 如果字体加载失败，返回空字符串
-        cachedFamily = QString();
+        cachedFamily = QStringLiteral("Font Awesome 7 Free");
         return cachedFamily;
     }
 
@@ -99,17 +98,11 @@ namespace FA {
      * @return QFont 对象，如果 Font Awesome 未加载则返回默认字体
      */
     inline QFont solidFont(int size = 14) {
-        QFont font;
         QString family = solidFontFamily();
-        if (!family.isEmpty()) {
-            font = QFont(family);
-            font.setPointSize(size);
-            return font;
-        }
-        
-        // 如果字体加载失败，使用默认字体
-        font = QFont();
+        QFont font(family);
         font.setPointSize(size);
+        font.setBold(true);
+        font.setStyleStrategy(QFont::PreferAntialias);
         return font;
     }
 }

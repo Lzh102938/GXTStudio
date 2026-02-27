@@ -25,7 +25,8 @@ static QFont getFontWithAwesome(int size = 11, bool bold = false) {
     if (fontFamily.isEmpty()) {
         fontFamily = "Microsoft YaHei";
     }
-    QFont font(fontFamily, size, bold ? QFont::Bold : QFont::Normal);
+    QFont font(fontFamily, size);
+    font.setBold(true);
     font.setStyleStrategy(QFont::PreferAntialias);
     return font;
 }

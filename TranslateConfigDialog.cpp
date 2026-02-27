@@ -630,7 +630,7 @@ void TranslateConfigDialog::setupUI()
             "● 响应时间自适应调整并发").arg(QString(FA::QCheck));
     } else {
         // 如果字体加载成功，使用富文本格式
-        rateControlText = QString("<span style=\"font-family:'%1'; font-size:12px;\">%2</span> 智能频率控制（自动启用）<br>"
+        rateControlText = QString("<span style=\"font-family:'%1'; font-size:12px; font-weight: bold;\">%2</span> 智能频率控制（自动启用）<br>"
             "● 自适应请求间隔 (50-2000ms)<br>"
             "● 连续错误保护机制<br>"
             "● 根据成功率动态调速<br>"

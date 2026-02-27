@@ -156,12 +156,6 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         "${CMAKE_CURRENT_SOURCE_DIR}/font/Font Awesome 7 Free-Solid-900.otf"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/font/"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/font/Font Awesome 7 Free-Regular-400.otf"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/font/"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/font/Font Awesome 7 Brands-Regular-400.otf"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/font/"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/font/ViceCitySans.otf"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/font/"
     COMMENT "Copying font files to build directory"

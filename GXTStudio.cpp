@@ -3056,9 +3056,7 @@ void GXTStudio::showSaveSuccessDialog(const SaveResult& result)
 
     QString iconText = QString(FA::QCheck);
     QLabel* iconLabel = new QLabel(iconText);
-    QFont iconFont(FA::solidFontFamily());
-    iconFont.setPointSize(16);
-    iconLabel->setFont(iconFont);
+    iconLabel->setFont(FA::solidFont(16));
     iconLabel->setStyleSheet("color: #3498db;");
     titleLayout->addWidget(iconLabel);
 
@@ -3138,9 +3136,7 @@ void GXTStudio::showSaveSuccessDialog(const SaveResult& result)
     copyPathBtn->setFixedSize(55, 22);
     copyPathBtn->setToolTip("复制路径");
     copyPathBtn->setText(QString("%1").arg(FA::QClipboardList));
-    QFont copyFont(FA::solidFontFamily());
-    copyFont.setPointSize(9);
-    copyPathBtn->setFont(copyFont);
+    copyPathBtn->setFont(FA::solidFont(9));
     connect(copyPathBtn, &QPushButton::clicked, [result]() {
         QApplication::clipboard()->setText(result.filePath);
     });
@@ -3151,7 +3147,7 @@ void GXTStudio::showSaveSuccessDialog(const SaveResult& result)
     openFolderBtn->setFixedSize(65, 22);
     openFolderBtn->setToolTip("打开文件夹");
     openFolderBtn->setText(QString("%1").arg(FA::QFolder));
-    openFolderBtn->setFont(copyFont);
+    openFolderBtn->setFont(FA::solidFont(9));
     connect(openFolderBtn, &QPushButton::clicked, [result]() {
         QFileInfo fi(result.filePath);
         QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absolutePath()));
@@ -3163,7 +3159,7 @@ void GXTStudio::showSaveSuccessDialog(const SaveResult& result)
     copyNameBtn->setFixedSize(65, 22);
     copyNameBtn->setToolTip("复制文件名");
     copyNameBtn->setText(QString("%1").arg(FA::QFileAlt));
-    copyNameBtn->setFont(copyFont);
+    copyNameBtn->setFont(FA::solidFont(9));
     connect(copyNameBtn, &QPushButton::clicked, [result]() {
         QFileInfo fi(result.filePath);
         QApplication::clipboard()->setText(fi.fileName());
@@ -6901,7 +6897,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         tableListText = QString("%1 表格列表").arg(QString(FA::QClipboardList));
     } else {
         // 如果字体加载成功，使用富文本格式
-        tableListText = QString("<span style=\"font-family:'%1'; font-size:%2px;\">%3</span> <span style=\"font-size:14px;\">表格列表</span>")
+        tableListText = QString("<span style=\"font-family:'%1'; font-size:%2px; font-weight: bold;\">%3</span> <span style=\"font-size:14px;\">表格列表</span>")
             .arg(tableFontFamily)
             .arg(14)
             .arg(QString(FA::QClipboardList));
@@ -7163,7 +7159,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         entryTableText = QString("%1 文本条目").arg(QString(FA::QEdit));
     } else {
         // 如果字体加载成功，使用富文本格式
-        entryTableText = QString("<span style=\"font-family:'%1'; font-size:%2px;\">%3</span> <span style=\"font-size:14px;\">文本条目</span>")
+        entryTableText = QString("<span style=\"font-family:'%1'; font-size:%2px; font-weight: bold;\">%3</span> <span style=\"font-size:14px;\">文本条目</span>")
             .arg(entryFontFamily)
             .arg(14)
             .arg(QString(FA::QEdit));
@@ -9273,9 +9269,7 @@ void GXTStudio::onSaveCompleted(const SaveResult& result)
         titleText += " 文件保存失败";
         QLabel* titleLabel = new QLabel(titleText);
         titleLabel->setObjectName("titleLabel");
-        QFont faFont(FA::solidFontFamily());
-        faFont.setPointSize(11);
-        titleLabel->setFont(faFont);
+        titleLabel->setFont(FA::solidFont(11));
         mainLayout->addWidget(titleLabel);
         
         // 详情框
@@ -9324,9 +9318,7 @@ void GXTStudio::onSaveCompleted(const SaveResult& result)
         QString folderIconText;
         folderIconText += FA::QFolder;
         openFolderBtn->setText(folderIconText);
-        QFont faFont1(FA::solidFontFamily());
-        faFont1.setPointSize(11);
-        openFolderBtn->setFont(faFont1);
+        openFolderBtn->setFont(FA::solidFont(11));
         connect(openFolderBtn, &QPushButton::clicked, [result]() {
             QFileInfo fileInfo(result.filePath);
             QString folderPath = fileInfo.absolutePath();
@@ -9342,9 +9334,7 @@ void GXTStudio::onSaveCompleted(const SaveResult& result)
         QString copyIconText;
         copyIconText += FA::QClipboardList;
         copyBtn->setText(copyIconText);
-        QFont faFont2(FA::solidFontFamily());
-        faFont2.setPointSize(11);
-        copyBtn->setFont(faFont2);
+        copyBtn->setFont(FA::solidFont(11));
         connect(copyBtn, &QPushButton::clicked, [result]() {
             QApplication::clipboard()->setText(result.filePath);
         });
@@ -9377,9 +9367,7 @@ void GXTStudio::onSaveCompleted(const SaveResult& result)
         tipIconText += FA::QLightbulb;
         tipIconText += " 提示: 请检查文件路径、磁盘空间和文件权限。查看日志了解详细错误信息。";
         QLabel* tipLabel = new QLabel(tipIconText);
-        QFont tipFont(FA::solidFontFamily());
-        tipFont.setPointSize(9);
-        tipLabel->setFont(tipFont);
+        tipLabel->setFont(FA::solidFont(9));
         tipLabel->setWordWrap(true);
         tipLabel->setStyleSheet("color: #7f8c8d; font-size: 11px; margin-top: 8px; line-height: 1.4;");
         mainLayout->addWidget(tipLabel);
@@ -10678,11 +10666,11 @@ void GXTStudio::onTranslationCompleted(const QList<TranslateResult>& results)
     } else {
         // 如果字体加载成功，使用富文本格式
         if (successRate >= 95.0) {
-            suggestionText = QString("<span style=\"font-family:'%1'; font-size:13px;\">%2</span> 翻译质量优秀！所有条目都已成功翻译。").arg(suggestionFontFamily).arg(QString(FA::QGift));
+            suggestionText = QString("<span style=\"font-family:'%1'; font-size:13px; font-weight: bold;\">%2</span> 翻译质量优秀！所有条目都已成功翻译。").arg(suggestionFontFamily).arg(QString(FA::QGift));
         } else if (successRate >= 80.0) {
-            suggestionText = QString("<span style=\"font-family:'%1'; font-size:13px;\">%2</span> 翻译基本完成，少量失败条目可以手动编辑或稍后重试。").arg(suggestionFontFamily).arg(QString(FA::QEdit));
+            suggestionText = QString("<span style=\"font-family:'%1'; font-size:13px; font-weight: bold;\">%2</span> 翻译基本完成，少量失败条目可以手动编辑或稍后重试。").arg(suggestionFontFamily).arg(QString(FA::QEdit));
         } else if (failureCount > 0) {
-            suggestionText = QString("<span style=\"font-family:'%1'; font-size:13px;\">%2</span> 建议检查网络连接、API密钥配置，或调整翻译设置后重试。").arg(suggestionFontFamily).arg(QString(FA::QExclamationTriangle));
+            suggestionText = QString("<span style=\"font-family:'%1'; font-size:13px; font-weight: bold;\">%2</span> 建议检查网络连接、API密钥配置，或调整翻译设置后重试。").arg(suggestionFontFamily).arg(QString(FA::QExclamationTriangle));
         }
     }
 
