@@ -749,7 +749,7 @@ void GXTStudio::setupStatusBar()
     QHBoxLayout* leftLayout = new QHBoxLayout(leftContainer);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     leftLayout->setSpacing(0);
-    m_statusLabel->setStyleSheet("color: #000000; font-size: 12px; padding: 0;");
+    m_statusLabel->setStyleSheet("color: #000000; font-family: 'Microsoft YaHei', 'SimSun', 'Arial'; font-size: 12px; padding: 0;");
     leftLayout->addWidget(m_statusLabel);
     leftLayout->addStretch();
     

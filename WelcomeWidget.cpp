@@ -19,17 +19,7 @@ WelcomeWidget::WelcomeWidget(QWidget* parent)
 WelcomeWidget::~WelcomeWidget() {
 }
 
-// 设置包含 FA 图标的文本字体
-static QFont getFontWithAwesome(int size = 11, bool bold = false) {
-    QString fontFamily = FA::solidFontFamily();
-    if (fontFamily.isEmpty()) {
-        fontFamily = "Microsoft YaHei";
-    }
-    QFont font(fontFamily, size);
-    font.setBold(true);
-    font.setStyleStrategy(QFont::PreferAntialias);
-    return font;
-}
+
 
 void WelcomeWidget::initializeUI() {
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
@@ -69,10 +59,9 @@ void WelcomeWidget::initializeUI() {
     contentLayout->setSpacing(15);
     
     // ============ 标题区域 ============
-    // 用 FA 图标包裹 GXTStudio，提升设计感
-    QString faTitle = QString("%1  GXTStudio  %2").arg(QString(FA::QGamepadModern), QString(FA::QGamepadModern));
+    QString faTitle = QString("GXTStudio");
     QLabel* titleLabel = new QLabel(faTitle);
-    QFont titleFont = getFontWithAwesome(52, true);
+    QFont titleFont("Microsoft YaHei", 52, QFont::Bold);
     titleFont.setLetterSpacing(QFont::AbsoluteSpacing, 2);
     titleLabel->setFont(titleFont);
     titleLabel->setStyleSheet(
@@ -135,7 +124,7 @@ void WelcomeWidget::initializeUI() {
     
     // 打开文件按钮 - 主按钮
     QPushButton* openBtn = new QPushButton(QString("%1  打开文件").arg(QString(FA::QFolderOpen)));
-    openBtn->setFont(getFontWithAwesome(11, true));
+    openBtn->setFont(FA::solidFont(11));
     openBtn->setMinimumHeight(48);
     openBtn->setMinimumWidth(140);
     openBtn->setCursor(Qt::PointingHandCursor);
@@ -163,7 +152,7 @@ void WelcomeWidget::initializeUI() {
     
     // 帮助按钮 - 次按钮
     QPushButton* helpBtn = new QPushButton(QString("%1  帮助").arg(QString(FA::QInfoCircle)));
-    helpBtn->setFont(getFontWithAwesome(11, true));
+    helpBtn->setFont(FA::solidFont(11));
     helpBtn->setMinimumHeight(48);
     helpBtn->setMinimumWidth(140);
     helpBtn->setCursor(Qt::PointingHandCursor);
@@ -203,14 +192,14 @@ void WelcomeWidget::initializeUI() {
     tipsLayout->setSpacing(8);
     
     QLabel* tipsLabel = new QLabel(QString("%1  拖拽文件到窗口也可以打开").arg(QString(FA::QUpload)));
-    tipsLabel->setFont(getFontWithAwesome(10));
+    tipsLabel->setFont(FA::solidFont(10));
     tipsLabel->setStyleSheet("color: #bbb;");
     tipsLabel->setAlignment(Qt::AlignCenter);
     tipsLabel->setWordWrap(true);
     tipsLayout->addWidget(tipsLabel);
     
     QLabel* versionLabel = new QLabel(QString("%1  版本 v3.0").arg(QString(FA::QTag)));
-    versionLabel->setFont(getFontWithAwesome(10));
+    versionLabel->setFont(FA::solidFont(10));
     versionLabel->setStyleSheet("color: #ddd;");
     versionLabel->setAlignment(Qt::AlignCenter);
     tipsLayout->addWidget(versionLabel);
