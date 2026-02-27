@@ -275,6 +275,14 @@ void GXTTableModel::resetModel()
     endResetModel();
 }
 
+// 【关键修复】清除所有缓存，避免切换表时残留
+void GXTTableModel::clearAllCache()
+{
+    m_displayCache.clear();
+    m_displayCacheValid = false;
+    m_cachedRowCount = -1;
+}
+
 void GXTTableModel::forceDataReset()
 {
     beginResetModel();
@@ -301,6 +309,8 @@ void GXTTableModel::forceDataReset()
         m_currentTableIndex = -1;
         m_cachedVersion = -1;
     }
+    m_displayCache.clear();
+    m_displayCacheValid = false;
     endResetModel();
 }
 
@@ -350,16 +360,23 @@ QVariant GXTTableModel::data(const QModelIndex& index, int role) const
     
     // 【性能优化】显示和编辑角色 - 使用缓存
     if (role == Qt::DisplayRole || role == Qt::EditRole) {
-        // 检查缓存是否需要重建
-        if (!m_displayCacheValid) {
+        // 检查缓存是否有效
+        if (m_displayCacheValid) {
+            // 快速行边界检查
+            if (row < 0 || row >= m_displayCache.size()) return QVariant();
+            
+            const RowCache& cache = m_displayCache[row];
+            return (col == KeyColumn) ? cache.key : cache.value;
+        } else {
+            // 构建完整的显示缓存
             buildDisplayCache();
+            
+            // 快速行边界检查
+            if (row < 0 || row >= m_displayCache.size()) return QVariant();
+            
+            const RowCache& cache = m_displayCache[row];
+            return (col == KeyColumn) ? cache.key : cache.value;
         }
-        
-        // 快速行边界检查
-        if (row < 0 || row >= m_displayCache.size()) return QVariant();
-        
-        const RowCache& cache = m_displayCache[row];
-        return (col == KeyColumn) ? cache.key : cache.value;
     }
     
     // 【性能优化】字体角色 - 使用静态字体避免重复创建
@@ -521,6 +538,58 @@ void GXTTableModel::buildDisplayCache() const
     
     m_displayCacheValid = true;
     m_cachedRowCount = rowCount;
+}
+
+// 【极致优化】按需构建显示缓存 - 只构建可见区域的数据
+void GXTTableModel::buildPartialDisplayCache(int firstRow, int lastRow) const
+{
+    if (!m_tab) {
+        m_displayCacheValid = true;
+        return;
+    }
+    
+    // 只在需要时扩展缓存
+    if (m_displayCache.size() < lastRow + 1) {
+        m_displayCache.resize(lastRow + 1);
+    }
+    
+    // WHM 格式
+    if (m_tab->isWHM) {
+        for (int row = firstRow; row <= lastRow && row < static_cast<int>(m_tab->whmEntries.size()); ++row) {
+            const auto& entry = m_tab->whmEntries[row];
+            RowCache cache;
+            cache.key = formatHashKey(entry.hash);
+            cache.value = QString::fromStdString(entry.text);
+            cache.valid = true;
+            m_displayCache[row] = cache;
+        }
+    }
+    // DAT 格式
+    else if (m_tab->isDAT) {
+        for (int row = firstRow; row <= lastRow && row < static_cast<int>(m_tab->datEntries.size()); ++row) {
+            const auto& entry = m_tab->datEntries[row];
+            RowCache cache;
+            cache.key = formatHashKey(entry.hash);
+            cache.value = QString::fromStdString(entry.text);
+            cache.valid = true;
+            m_displayCache[row] = cache;
+        }
+    }
+    // GXT 格式
+    else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
+        const auto& table = m_tab->tables[m_tab->currentTableIndex];
+        for (int row = firstRow; row <= lastRow && row < static_cast<int>(table.entries.size()); ++row) {
+            const auto& entry = table.entries[row];
+            RowCache cache;
+            cache.key = formatKey(entry.key, entry.originalKey, m_tab->version);
+            cache.value = QString::fromStdString(entry.value);
+            cache.valid = true;
+            m_displayCache[row] = cache;
+        }
+    }
+    
+    // 保持缓存有效状态
+    m_displayCacheValid = true;
 }
 
 QVariant GXTTableModel::headerData(int section, Qt::Orientation orientation, int role) const

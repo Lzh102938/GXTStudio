@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <QAbstractTableModel>
 #include <QMap>
@@ -61,6 +61,9 @@ public:
     // 清除显示缓存
     void invalidateDisplayCache();
     
+    // 【关键修复】清除所有缓存，避免切换表时残留
+    void clearAllCache();
+    
     // 检查映射是否为空（静态方法）
     static bool isSATKeyMapEmpty();
     static bool isIVTKeyMapEmpty();
@@ -76,7 +79,7 @@ public:
 signals:
     void dataModified();
     
-private:
+public:
     // 【性能优化】行缓存结构
     struct RowCache {
         QString key;      // 格式化后的键
@@ -87,6 +90,13 @@ private:
     // 【性能优化】构建显示缓存
     void buildDisplayCache() const;
     
+    // 【极致优化】按需构建显示缓存 - 只构建可见区域的数据
+    void buildPartialDisplayCache(int firstRow, int lastRow) const;
+    
+    // 公共接口：获取缓存大小
+    int getCacheSize() const { return m_displayCache.size(); }
+    
+private:
     // 【性能优化】格式化键值
     QString formatKey(const std::string& key, const std::string& originalKey, GXTVersion version) const;
     QString formatHashKey(uint32_t hash) const;

@@ -6088,7 +6088,10 @@ void GXTStudio::updateEntryTable()
 
     // 【关键修复】强制刷新模型以确保数据同步
     tab->entryTableModel->forceDataReset();
-
+    
+    // 【关键修复】清除所有缓存，避免切换表时残留
+    tab->entryTableModel->clearAllCache();
+    
     // 清除委托缓存以确保正确的渲染
     auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab->entryTableView->itemDelegate());
     if (delegate) {
@@ -7614,9 +7617,16 @@ void GXTStudio::setupTableOptimizations(QTableView* table)
     table->viewport()->setAutoFillBackground(true);                    // 启用自动填充背景
     table->viewport()->setAttribute(Qt::WA_PaintOnScreen, false);       // 禁用直接屏幕绘制
     
+    // 【极致优化】启用虚拟滚动和懒加载 - 支持上万行数据
+    table->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    table->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+    table->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    
     // 表头优化
     table->verticalHeader()->setVisible(false);
     table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);
+    table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed); // 固定行高
     
     auto* header = table->horizontalHeader();
     header->setFixedHeight(28);
@@ -7629,20 +7639,11 @@ void GXTStudio::setupTableOptimizations(QTableView* table)
     header->setStretchLastSection(false);
     header->setHighlightSections(false);
     
-    // 滚动条优化 - 始终显示避免布局抖动
-    table->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
-    table->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    table->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-    
     // 禁用拖拽
     table->setDragEnabled(false);
     table->setDragDropMode(QAbstractItemView::NoDragDrop);
     table->setDropIndicatorShown(false);
     table->setAcceptDrops(false);
-    
-    // 批处理模式优化
-    table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);
     
     // 编辑触发器
     table->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
@@ -7656,8 +7657,36 @@ void GXTStudio::setupTableOptimizations(QTableView* table)
     // 【关键优化】移除selectionChanged和valueChanged连接，减少不必要的重绘
     // 这些连接会导致频繁的视口更新，严重影响性能
     
-    // 启用统一的行高，优化布局计算
-    table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);
+    // 【极致优化】启用批量数据处理模式
+    table->setAutoScrollMargin(100); // 滚动边距
+    
+    // 【极致优化】禁用平滑滚动以提升性能
+    table->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    
+    // 【Win10记事本风格】启用懒加载机制
+    connect(table->verticalScrollBar(), &QScrollBar::valueChanged, this, [=](int value) {
+        // 只在滚动时渲染可见区域
+        FileTab* tab = getCurrentTab();
+        if (tab && tab->entryTableModel) {
+            // 计算可见区域的行范围
+            const QRect visibleRect = table->viewport()->rect();
+            const QModelIndex topLeft = table->indexAt(visibleRect.topLeft());
+            const QModelIndex bottomRight = table->indexAt(visibleRect.bottomRight());
+            
+            if (topLeft.isValid() && bottomRight.isValid()) {
+                int firstRow = topLeft.row();
+                int lastRow = bottomRight.row();
+                
+                // 预加载前后各10行，减少滚动时的延迟
+                firstRow = qMax(0, firstRow - 10);
+                lastRow = qMin(tab->entryTableModel->rowCount() - 1, lastRow + 10);
+                
+                // 使用部分缓存构建代替全量构建
+                tab->entryTableModel->buildPartialDisplayCache(firstRow, lastRow);
+            }
+        }
+    });
 }
 
 int GXTStudio::calculateKeyColumnWidth()
