@@ -97,10 +97,6 @@ public:
     int getCacheSize() const { return m_displayCache.size(); }
     
 private:
-    // 【性能优化】格式化键值
-    QString formatKey(const std::string& key, const std::string& originalKey, GXTVersion version) const;
-    QString formatHashKey(uint32_t hash) const;
-    
     FileTab* m_tab;
     bool m_editable;
     
@@ -117,7 +113,9 @@ private:
     
     // SATKEY映射（静态，全局共享）
     static QMap<uint32_t, QString> s_satKeyMap;
+    static QMap<QString, uint32_t> s_satKeyReverseMap;  // 反向映射：key -> hash
     
     // IVTKEY映射（静态，全局共享）
     static QMap<uint32_t, QString> s_ivtKeyMap;
+    static QMap<QString, uint32_t> s_ivtKeyReverseMap;  // 反向映射：key -> hash (小写)
 };

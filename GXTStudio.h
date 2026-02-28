@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "FontAwesome.h"
 #include "MultiThreadProgressDialog.h"
@@ -748,6 +748,8 @@ private:
 
     // 自定义背景相关
     QPixmap m_backgroundPixmap;  // 背景图片
+    QPixmap m_cachedBackgroundPixmap;  // 【关键优化】缓存的缩放背景图片
+    QSize m_cachedBackgroundSize;  // 【关键优化】缓存时的尺寸
     qreal m_backgroundOpacity;   // 背景透明度 (0.0 - 1.0)
     bool m_backgroundEnabled;    // 是否启用背景
     Qt::AspectRatioMode m_backgroundAspectRatioMode;  // 图片缩放模式
@@ -795,9 +797,7 @@ private:
     QAction* m_unmountCodeTableAction; // 卸载码表
     
     // 窗口大小调整优化
-    QTimer* m_resizeDebouncer;
     QSize m_lastWindowSize;
-    static const int RESIZE_DEBOUNCE_DELAY = 400; // 增加到400ms以大幅减少触发频率
     
     // 布局优化相关
     QTimer* m_cleanupTimer;
@@ -970,9 +970,7 @@ private:
     void setupTableOptimizations(QTableView* table);
     void precomputeTableMetrics();
     void setupResizeOptimizations();
-    void performDelayedResize();
     void preloadVisibleArea(FileTab* tab);
-    // isHashKeyColumn函数已移除，因为现在统一处理GXT和WHM的键列宽度
     
     // 搜索相关辅助方法
     void performSearch(const QString& searchText);
@@ -1018,14 +1016,27 @@ public:
     }
     
     void setSearchText(const QString& text, bool useRegex = false, bool caseSensitive = false) {
-        // 如果搜索文本发生变化，清理高亮缓存
         if (text != m_searchText || m_caseSensitive != caseSensitive || m_useRegex != useRegex) {
             m_highlightCache.clear();
+            m_regexValid = false;
         }
         m_searchText = text;
         m_useRegex = useRegex;
         m_caseSensitive = caseSensitive;
-        // 更新字体大小
+        
+        // 【关键优化】预编译正则表达式
+        if (m_useRegex && !m_searchText.isEmpty()) {
+            QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
+            if (!m_caseSensitive) {
+                options |= QRegularExpression::CaseInsensitiveOption;
+            }
+            m_cachedRegex.setPattern(m_searchText);
+            m_cachedRegex.setPatternOptions(options);
+            m_regexValid = m_cachedRegex.isValid();
+        } else {
+            m_regexValid = false;
+        }
+        
         updateFontSizes();
     }
     
@@ -1041,45 +1052,24 @@ public:
             return;
         }
 
-        // 【关键优化】每次绘制都清除背景，消除残留问题
         const bool isSelected = (option.state & QStyle::State_Selected);
 
-        // 【关键修复】强制绘制背景，确保清除任何残留内容
         if (isSelected) {
             painter->fillRect(option.rect, option.palette.highlight());
-        } else if (index.row() & 1) { // 使用位运算代替取模，更快速
+        } else if (index.row() & 1) {
             painter->fillRect(option.rect, m_zebraColor);
-        } else {
-            // 偶数行也绘制透明背景，清除残留
-            painter->fillRect(option.rect, Qt::transparent);
         }
 
-        // 【性能优化】预计算文本颜色，减少条件判断
-        if (isSelected) {
-            painter->setPen(option.palette.highlightedText().color());
-        } else {
-            painter->setPen(option.palette.text().color());
-        }
-
-        // 【性能优化】按列设置字体 - 减少不必要的设置
+        painter->setPen(isSelected ? option.palette.highlightedText().color() : option.palette.text().color());
         painter->setFont(index.column() == 0 ? m_monospaceFont : m_yaheiFont);
 
-        // 预计算文本区域
         const QRect textRect = option.rect.adjusted(4, 2, -4, -2);
 
-        // 【性能优化】搜索高亮优化 - 使用缓存
         if (!m_searchText.isEmpty()) {
             bool shouldHighlight = false;
-            if (m_useRegex) {
-                // 正则表达式模式：编译并匹配
-                QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
-                if (!m_caseSensitive) {
-                    options |= QRegularExpression::CaseInsensitiveOption;
-                }
-                QRegularExpression regex(m_searchText, options);
-                shouldHighlight = regex.isValid() && regex.match(text).hasMatch();
+            if (m_useRegex && m_regexValid) {
+                shouldHighlight = m_cachedRegex.match(text).hasMatch();
             } else {
-                // 普通字符串模式
                 Qt::CaseSensitivity cs = m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
                 shouldHighlight = text.contains(m_searchText, cs);
             }
@@ -1090,9 +1080,9 @@ public:
             }
         }
 
-        // 【性能优化】快速文本绘制 - 省略号优化
-        painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter,
-                        painter->fontMetrics().elidedText(text, Qt::ElideRight, textRect.width()));
+        // 【关键优化】直接绘制文本，不使用 elidedText（非常慢）
+        // 使用 QFontMetrics::elidedText 每次都要计算文本宽度，非常耗时
+        painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, text);
     }
     
     // 更新字体大小
@@ -1290,62 +1280,50 @@ public:
         cacheEntry->textHash = qHash(text);
         cacheEntry->fragments.reserve(10); // 预分配，减少重新分配
         
-        if (m_useRegex) {
-            // 【新增】正则表达式模式高亮
-            QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
-            if (!m_caseSensitive) {
-                options |= QRegularExpression::CaseInsensitiveOption;
-            }
-            QRegularExpression regex(m_searchText, options);
+        if (m_useRegex && m_regexValid) {
+            // 【关键优化】使用预编译的正则表达式
+            QRegularExpressionMatchIterator matchIterator = m_cachedRegex.globalMatch(text);
             
-            if (regex.isValid()) {
-                QRegularExpressionMatchIterator matchIterator = regex.globalMatch(text);
-                while (matchIterator.hasNext()) {
-                    QRegularExpressionMatch match = matchIterator.next();
-                    const int matchStart = match.capturedStart();
-                    const int matchEnd = match.capturedEnd();
-                    const int matchLen = matchEnd - matchStart;
-                    
-                    // 绘制匹配前的文本
-                    if (matchStart > lastPos) {
-                        const QString before = text.mid(lastPos, matchStart - lastPos);
-                        const int beforeWidth = fm.horizontalAdvance(before);
-                        const int xOffset = rectLeft + currentXOffset;
-                        painter->drawText(xOffset, rectBottom, before);
-                        currentXOffset += beforeWidth;
-                        cacheEntry->fragments.append({before, beforeWidth, false});
-                    }
-                    
-                    // 计算并绘制高亮背景
-                    const QString matched = text.mid(matchStart, matchLen);
-                    const int matchWidth = fm.horizontalAdvance(matched);
+            while (matchIterator.hasNext()) {
+                QRegularExpressionMatch match = matchIterator.next();
+                const int matchStart = match.capturedStart();
+                const int matchEnd = match.capturedEnd();
+                const int matchLen = matchEnd - matchStart;
+                
+                // 绘制匹配前的文本
+                if (matchStart > lastPos) {
+                    const QString before = text.mid(lastPos, matchStart - lastPos);
+                    const int beforeWidth = fm.horizontalAdvance(before);
                     const int xOffset = rectLeft + currentXOffset;
-                    painter->fillRect(xOffset, rectTop, matchWidth, rectHeight, m_highlightColor);
-                    
-                    // 绘制匹配文本
-                    painter->drawText(xOffset, rectBottom, matched);
-                    currentXOffset += matchWidth;
-                    
-                    // 添加到缓存片段
-                    cacheEntry->fragments.append({matched, matchWidth, true});
-                    
-                    lastPos = matchEnd;
+                    painter->drawText(xOffset, rectBottom, before);
+                    currentXOffset += beforeWidth;
+                    cacheEntry->fragments.append({before, beforeWidth, false});
                 }
                 
-                // 绘制剩余文本
-                if (lastPos < textLength) {
-                    const QString remaining = text.mid(lastPos);
-                    const int remainingWidth = fm.horizontalAdvance(remaining);
-                    const int xOffset = rectLeft + currentXOffset;
-                    painter->drawText(xOffset, rectBottom, remaining);
-                    currentXOffset += remainingWidth;
-                    cacheEntry->fragments.append({remaining, remainingWidth, false});
-                }
-            } else {
-                // 正则表达式无效，直接绘制文本
-                const int textWidth = fm.horizontalAdvance(text);
-                painter->drawText(rectLeft, rectBottom, text);
-                cacheEntry->fragments.append({text, textWidth, false});
+                // 计算并绘制高亮背景
+                const QString matched = text.mid(matchStart, matchLen);
+                const int matchWidth = fm.horizontalAdvance(matched);
+                const int xOffset = rectLeft + currentXOffset;
+                painter->fillRect(xOffset, rectTop, matchWidth, rectHeight, m_highlightColor);
+                
+                // 绘制匹配文本
+                painter->drawText(xOffset, rectBottom, matched);
+                currentXOffset += matchWidth;
+                
+                // 添加到缓存片段
+                cacheEntry->fragments.append({matched, matchWidth, true});
+                
+                lastPos = matchEnd;
+            }
+            
+            // 绘制剩余文本
+            if (lastPos < textLength) {
+                const QString remaining = text.mid(lastPos);
+                const int remainingWidth = fm.horizontalAdvance(remaining);
+                const int xOffset = rectLeft + currentXOffset;
+                painter->drawText(xOffset, rectBottom, remaining);
+                currentXOffset += remainingWidth;
+                cacheEntry->fragments.append({remaining, remainingWidth, false});
             }
         } else {
             // 普通字符串模式（原逻辑）
@@ -1417,6 +1395,10 @@ private:
     bool m_isHashKeyColumn = false;
     bool m_useRegex = false;
     bool m_caseSensitive = false;
+    
+    // 【关键优化】缓存的正则表达式，避免每次绘制都编译
+    mutable QRegularExpression m_cachedRegex;
+    mutable bool m_regexValid = false;
     
     // 预创建的字体对象，避免每次绘制都创建
     QFont m_monospaceFont;

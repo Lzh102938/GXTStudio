@@ -114,8 +114,7 @@ void ReplaceWorker::processReplace()
             emit progressUpdated(completedEntries, totalEntries, message);
             emit entryReplaced(tableIndex, entryIndex, replacements);
             
-            // 添加小延迟避免UI冻结
-            QThread::msleep(1);
+            // 【性能优化】移除 msleep，Qt 信号槽机制会自动处理 UI 更新
         }
         
         QString finishMessage = QString("替换完成！共处理 %1 个条目，执行 %2 次替换")

@@ -166,7 +166,6 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_autoSaveEnabled(false)
     , m_autoSaveFutureWatcher(nullptr)
     , m_cleanupTimer(nullptr)
-    , m_resizeDebouncer(nullptr)
     , m_backgroundOpacity(1.0)  // 默认透明度100%（完全不透明）
     , m_backgroundEnabled(false)  // 默认禁用背景
     , m_backgroundAspectRatioMode(Qt::KeepAspectRatioByExpanding)  // 填充模式：保持比例填充，可能裁剪边缘
@@ -354,9 +353,6 @@ GXTStudio::~GXTStudio()
     if (m_cleanupTimer) {
         m_cleanupTimer->stop();
     }
-    if (m_resizeDebouncer) {
-        m_resizeDebouncer->stop();
-    }
 
     // 保存设置
     QSettings settings;
@@ -375,8 +371,15 @@ GXTStudio::~GXTStudio()
         // 首先取消翻译 - 使用非阻塞方式避免死锁
         if (m_smartTranslator) {
             QMetaObject::invokeMethod(m_smartTranslator, "cancelTranslation", Qt::QueuedConnection);
-            // 给一些时间让取消操作完成
-            QThread::msleep(100);
+            
+            // 【性能优化】使用 QEventLoop 非阻塞等待，避免 UI 冻结
+            QEventLoop waitLoop;
+            QTimer timeoutTimer;
+            timeoutTimer.setSingleShot(true);
+            timeoutTimer.setInterval(300);
+            QObject::connect(&timeoutTimer, &QTimer::timeout, &waitLoop, &QEventLoop::quit);
+            timeoutTimer.start();
+            waitLoop.exec();
         }
         
         // 更优雅的线程终止
@@ -416,8 +419,16 @@ GXTStudio::~GXTStudio()
     // 停止替换线程
     if (m_replaceWorker) {
         m_replaceWorker->requestCancel();
-        // 给一些时间让工作线程处理取消请求
-        QThread::msleep(100);
+        
+        // 【性能优化】使用 QEventLoop 非阻塞等待，避免 UI 冻结
+        QEventLoop waitLoop;
+        QTimer timeoutTimer;
+        timeoutTimer.setSingleShot(true);
+        timeoutTimer.setInterval(200);
+        QObject::connect(&timeoutTimer, &QTimer::timeout, &waitLoop, &QEventLoop::quit);
+        timeoutTimer.start();
+        waitLoop.exec();
+        
         delete m_replaceWorker;
         m_replaceWorker = nullptr;
     }
@@ -509,13 +520,14 @@ QWidget* GXTStudio::createWelcomeTab()
 
 void GXTStudio::setupUI()
 {
-    // 创建标签页容器
     m_tabWidget = new QTabWidget(this);
     m_tabWidget->setTabsClosable(true);
     m_tabWidget->setMovable(true);
     m_tabWidget->setDocumentMode(true);
+    m_tabWidget->tabBar()->setDrawBase(false);
+    m_tabWidget->tabBar()->setUsesScrollButtons(true);
+    m_tabWidget->tabBar()->setExpanding(false);
     
-    // 添加欢迎标签页
     m_tabWidget->addTab(createWelcomeTab(), "欢迎使用");
     setCentralWidget(m_tabWidget);
 }
@@ -920,16 +932,10 @@ void GXTStudio::setupSaveThread()
 
 void GXTStudio::setupResizeOptimizations()
 {
-    // 创建防抖定时器 - 增加延迟以大幅减少计算频率
-    m_resizeDebouncer = new QTimer(this);
-    m_resizeDebouncer->setSingleShot(true);
-    m_resizeDebouncer->setInterval(400); // 增加到400ms，大幅减少触发频率
-    connect(m_resizeDebouncer, &QTimer::timeout, this, &GXTStudio::performDelayedResize);
     m_lastWindowSize = size();
     
-    // 创建缓存清理定时器
     m_cleanupTimer = new QTimer(this);
-    m_cleanupTimer->setInterval(60000); // 60秒清理一次，减少频率
+    m_cleanupTimer->setInterval(300000);  // 5分钟清理一次，减少干扰
     connect(m_cleanupTimer, &QTimer::timeout, this, &GXTStudio::cleanupDelegatesCache);
     m_cleanupTimer->start();
 }
@@ -972,77 +978,16 @@ void GXTStudio::clearSearchCache()
 
 // 缓存预热方法已删除
 
-void GXTStudio::performDelayedResize()
-{
-    FileTab* currentTab = getCurrentTab();
-    if (!currentTab || !currentTab->entryTableView) return;
-    
-    // 只有在真正需要时才调整列宽
-    if (!currentTab->cache.layoutNeedsUpdate) return;
-    
-    QHeaderView* header = currentTab->entryTableView->horizontalHeader();
-    if (!header) return;
-    
-    // 缓存当前宽度，避免重复计算
-    static int lastTotalWidth = -1;
-    int totalWidth = currentTab->entryTableView->viewport()->width();
-    
-    // 避免对相同宽度重复计算
-    if (abs(lastTotalWidth - totalWidth) < 10) { // 增加阈值到10px
-        currentTab->cache.layoutNeedsUpdate = false;
-        return;
-    }
-    
-    if (totalWidth > 0) {
-        // 使用辅助函数计算键列宽度：始终保持显示10个字符的宽度
-        int keyWidth = calculateKeyColumnWidth();
-        
-        int valueWidth = totalWidth - keyWidth - 2;
-        if (valueWidth < 300) {
-            valueWidth = 300;
-            keyWidth = totalWidth - valueWidth - 2;
-        }
-        
-        // 批量调整列宽，减少重绘次数
-        header->blockSignals(true);
-        header->resizeSection(0, keyWidth);
-        header->resizeSection(1, valueWidth);
-        header->blockSignals(false);
-        
-        lastTotalWidth = totalWidth;
-    }
-    
-    currentTab->cache.layoutNeedsUpdate = false;
-}
-
 void GXTStudio::cleanupDelegatesCache()
 {
-    // 遍历所有标签页的委托并清理缓存
-    int totalCleared = 0;
     for (auto& tab : m_fileTabs) {
         if (tab.entryTableView) {
             auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab.entryTableView->itemDelegate());
             if (delegate) {
-                // 获取清理前的缓存大小
-                int cacheSize = delegate->getCacheSize();
                 delegate->clearCache();
-                totalCleared += cacheSize;
-                
-                // 强制垃圾回收
-                if (delegate->getCacheSize() == 0) {
-                    tab.entryTableView->viewport()->update();
-                }
             }
         }
-        
-        // 同时清理列表缓存
         cleanupListCache(&tab);
-    }
-    
-    // 如果清理了大量缓存，触发系统垃圾回收
-    if (totalCleared > 500) {
-        // 触发Qt的事件循环清理
-        QCoreApplication::processEvents();
     }
 }
 
@@ -6667,11 +6612,6 @@ void GXTStudio::updateFontSizes()
             tab.tableList->setFont(leftTableFont);
         }
     }
-    
-    // 延迟布局更新
-    if (m_resizeDebouncer) {
-        m_resizeDebouncer->start(50);
-    }
 }
 
 // 工具方法
@@ -6738,122 +6678,41 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     searchEdit->setPlaceholderText("搜索文本或哈希值...");
     searchEdit->setMinimumHeight(32);
     
-    // 设置搜索框样式和字体 - 使用自动判断的颜色
     QFont searchFont("Microsoft YaHei", m_fontSize);
     searchEdit->setFont(searchFont);
-    searchEdit->setStyleSheet(QString(R"(
-        QLineEdit {
-            border: 2px solid #e1e5e9;
-            border-radius: 6px;
-            padding: 6px 12px;
-            padding-left: 14px;
-            background-color: rgba(255, 255, 255, 0.5);
-            font-size: 12px;
-            color: %1;
-        }
-        QLineEdit:focus {
-            border-color: #2196f3;
-            outline: none;
-        }
-    )").arg(searchTextColorName));
+    searchEdit->setStyleSheet(QString("QLineEdit{border:2px solid #e1e5e9;border-radius:6px;padding:6px 12px;padding-left:14px;background-color:rgba(255,255,255,0.5);font-size:12px;color:%1;}QLineEdit:focus{border-color:#2196f3;outline:none;}").arg(searchTextColorName));
     
-    // 创建大小写敏感图标按钮
     QToolButton* caseSensitiveButton = new QToolButton();
     caseSensitiveButton->setFixedSize(32, 28);
     caseSensitiveButton->setCheckable(true);
     caseSensitiveButton->setText(FA::CaseSensitive);
     caseSensitiveButton->setToolTip("区分大小写");
 
-    // 创建正则表达式图标按钮
     QToolButton* regexButton = new QToolButton();
     regexButton->setFixedSize(32, 28);
     regexButton->setCheckable(true);
     regexButton->setText(FA::Regex);
     regexButton->setToolTip("正则表达式");
 
-    // 设置图标按钮样式（显式指定 FontAwesome 字体族）- 使用自动判断的颜色
     QString fontFamily = FA::solidFontFamily();
     QString buttonStyle;
     if (fontFamily.isEmpty()) {
-        // 如果字体加载失败，使用默认样式
-        buttonStyle = QString(R"(
-            QToolButton {
-                border: none;
-                border-radius: 4px;
-                background-color: transparent;
-                color: %1;
-            }
-            QToolButton:hover {
-                background-color: rgba(255, 255, 255, 0.5);
-                color: %1;
-            }
-            QToolButton:pressed {
-                background-color: #e9ecef;
-            }
-            QToolButton:checked {
-                color: #2196f3;
-                background-color: #e3f2fd;
-            }
-            QToolButton:checked:hover {
-                background-color: #bbdefb;
-            }
-        )").arg(searchTextColorName);
+        buttonStyle = QString("QToolButton{border:none;border-radius:4px;background-color:transparent;color:%1;}QToolButton:hover{background-color:rgba(255,255,255,0.5);color:%1;}QToolButton:pressed{background-color:#e9ecef;}QToolButton:checked{color:#2196f3;background-color:#e3f2fd;}QToolButton:checked:hover{background-color:#bbdefb;}").arg(searchTextColorName);
     } else {
-        // 如果字体加载成功，显式指定字体族
-        buttonStyle = QString(R"(
-            QToolButton {
-                border: none;
-                border-radius: 4px;
-                background-color: transparent;
-                color: %1;
-                font-family: '%2';
-                font-size: 13px;
-            }
-            QToolButton:hover {
-                background-color: rgba(255, 255, 255, 0.5);
-                color: %1;
-            }
-            QToolButton:pressed {
-                background-color: #e9ecef;
-            }
-            QToolButton:checked {
-                color: #2196f3;
-                background-color: #e3f2fd;
-            }
-            QToolButton:checked:hover {
-                background-color: #bbdefb;
-            }
-        )").arg(searchTextColorName, fontFamily);
+        buttonStyle = QString("QToolButton{border:none;border-radius:4px;background-color:transparent;color:%1;font-family:'%2';font-size:13px;}QToolButton:hover{background-color:rgba(255,255,255,0.5);color:%1;}QToolButton:pressed{background-color:#e9ecef;}QToolButton:checked{color:#2196f3;background-color:#e3f2fd;}QToolButton:checked:hover{background-color:#bbdefb;}").arg(searchTextColorName, fontFamily);
     }
 
     caseSensitiveButton->setStyleSheet(buttonStyle);
     regexButton->setStyleSheet(buttonStyle);
     
-    // 设置 FontAwesome 字体到图标按钮（关键修复）
     caseSensitiveButton->setFont(FA::solidFont(12));
     regexButton->setFont(FA::solidFont(12));
     
-    // 创建搜索按钮 - 使用0.5不透明度的白色背景和自动判断的颜色
     QPushButton* prevButton = new QPushButton();
     QPushButton* nextButton = new QPushButton();
     
     int btnSize = qMax(30, m_fontSize + 10);
-    QString navButtonStyle = QString(R"(
-        QPushButton {
-            background-color: rgba(255, 255, 255, 0.5);
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            color: %1;
-            font-weight: bold;
-        }
-        QPushButton:hover {
-            background-color: rgba(255, 255, 255, 0.7);
-            border-color: #adb5bd;
-        }
-        QPushButton:pressed {
-            background-color: rgba(255, 255, 255, 0.9);
-        }
-    )").arg(searchTextColorName);
+    QString navButtonStyle = QString("QPushButton{background-color:rgba(255,255,255,0.5);border:1px solid #dee2e6;border-radius:6px;color:%1;font-weight:bold;}QPushButton:hover{background-color:rgba(255,255,255,0.7);border-color:#adb5bd;}QPushButton:pressed{background-color:rgba(255,255,255,0.9);}").arg(searchTextColorName);
     
     for (auto* btn : {prevButton, nextButton}) {
         btn->setFixedSize(btnSize, btnSize);
@@ -6885,6 +6744,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     QSplitter* splitter = new QSplitter(Qt::Horizontal);
     splitter->setHandleWidth(2);
     splitter->setChildrenCollapsible(false);
+    splitter->setOpaqueResize(true);  // 立即调整，不使用透明预览
     splitter->setStyleSheet("QSplitter::handle { background-color: transparent; border: none; }");
     
     // 创建左侧面板容器
@@ -6910,20 +6770,8 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     }
     QLabel* tableListLabel = new QLabel(tableListText);
     tableListLabel->setTextFormat(Qt::RichText);
-    // 设置默认样式（透明背景，灰色文字）- 与 applyLabelStyle 使用完全相同的格式
-    tableListLabel->setStyleSheet(R"(
-        QLabel {
-            font-weight: bold;
-            font-size: 14px;
-            color: #495057;
-            padding: 6px 8px;
-            background-color: transparent;
-            border-radius: 6px;
-            border: none;
-        }
-    )");
+    tableListLabel->setStyleSheet("QLabel{font-weight:bold;font-size:14px;color:#495057;padding:6px 8px;background-color:transparent;border-radius:6px;border:none;}");
     
-    // 创建左侧表格列表 - 极致性能优化
     DraggableTableList* tableList = new DraggableTableList();
     tableList->setSelectionMode(QAbstractItemView::SingleSelection);
     tableList->setSelectionBehavior(QAbstractItemView::SelectItems);
@@ -6931,119 +6779,22 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     tableList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     tableList->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     
-    // 极致性能优化设置 - 启用虚拟滚动和懒加载
-    // 启用虚拟滚动和懒加载优化
     tableList->setUniformItemSizes(true);
     tableList->setLayoutMode(QListView::Batched);
     tableList->setBatchSize(20);
     tableList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    tableList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);           // 所有项大小相同，最大化性能
-    tableList->setLayoutMode(QListView::Batched);   // 批量布局模式（虚拟滚动）
-    tableList->setBatchSize(20);                     // 优化批处理大小
-    tableList->setMovement(QListView::Static);       // 禁用拖动移动
-    tableList->setResizeMode(QListView::Fixed);      // 固定大小模式
-    tableList->setWordWrap(false);                   // 禁用自动换行
-    tableList->setTextElideMode(Qt::ElideRight);     // 文本省略模式
-    tableList->setAlternatingRowColors(false);       // 禁用斑马纹（用自定义绘制）
-    tableList->setIconSize(QSize(0, 0));            // 禁用图标
-    
-    // 启用滚动优化
-    tableList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     tableList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-    
-    // 高性能渲染优化
+    tableList->setMovement(QListView::Static);
+    tableList->setResizeMode(QListView::Fixed);
+    tableList->setWordWrap(false);
+    tableList->setTextElideMode(Qt::ElideRight);
+    tableList->setAlternatingRowColors(false);
+    tableList->setIconSize(QSize(0, 0));
     tableList->setSpacing(0);
-    tableList->setGridSize(QSize(0, 36));            // 更新固定网格大小
+    tableList->setGridSize(QSize(0, 36));
     
-    // 设置性能优化样式表
-    tableList->setStyleSheet(
-        "QListWidget {"
-        "   background-color: white;"
-        "   border: 1px solid #ddd;"
-        "   outline: none;"
-        "   selection-background-color: transparent;"
-        "}"
-        "QListWidget::item {"
-        "   border: none;"
-        "   padding: 0px;"
-        "   margin: 0px;"
-        "   min-height: 36px;"
-        "   max-height: 36px;"
-        "}"
-        "QListWidget::item:selected {"
-        "   background-color: transparent;"
-        "}"
-        "QListWidget::item:hover {"
-        "   background-color: transparent;"
-        "}"
-    );
+    tableList->setStyleSheet("QListWidget{border:1px solid #dee2e6;border-radius:8px;background-color:rgba(255,255,255,0.5);padding:6px;outline:none;}QListWidget::item{border:1px solid #e9ecef;border-radius:6px;background-color:transparent;padding:10px 12px;margin:2px 1px;min-height:18px;}QListWidget::item:selected{background-color:rgba(187,222,251,0.9);border-color:#1976d2;color:#0d47a1;font-weight:500;}QListWidget::item:hover{background-color:rgba(227,242,253,0.6);border-color:#90caf9;}QListWidget::item:selected:hover{background-color:rgba(144,202,249,0.95);}QScrollBar:vertical{width:12px;background:transparent;margin:0px;}QScrollBar::handle:vertical{background:rgba(150,150,150,0.6);min-height:30px;border-radius:6px;margin:2px;}QScrollBar::handle:vertical:hover{background:rgba(120,120,120,0.8);}QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0px;background:none;}QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical{background:none;}");
     
-    // 设置现代化的列表样式
-    tableList->setStyleSheet(R"(
-        QListWidget {
-            border: 1px solid #dee2e6;
-            border-radius: 8px;
-            background-color: rgba(255, 255, 255, 0.5);
-            padding: 6px;
-            outline: none;
-            alternate-background-color: #f8f9fa;
-        }
-        QListWidget::item {
-            border: 1px solid #e9ecef;
-            border-radius: 6px;
-            background-color: transparent;
-            padding: 10px 12px;
-            margin: 2px 1px;
-            min-height: 18px;
-        }
-        QListWidget::item:selected {
-            background-color: rgba(187, 222, 251, 0.9);  // 加深选中背景色
-            border-color: #1976d2;
-            color: #0d47a1;  // 加深文字颜色
-            font-weight: 500;
-        }
-        QListWidget::item:hover {
-            background-color: rgba(227, 242, 253, 0.6);  // 加深悬停背景色
-            border-color: #90caf9;
-        }
-        QListWidget::item:selected:hover {
-            background-color: rgba(144, 202, 249, 0.95);  // 更深的选中悬停背景色
-        }
-        /* 垂直滚动条样式 */
-        QScrollBar:vertical {
-            width: 12px;
-            background: transparent;
-            margin: 0px;
-        }
-        /* 滚动条滑块样式 - 圆角矩形 */
-        QScrollBar::handle:vertical {
-            background: rgba(150, 150, 150, 0.6);
-            min-height: 30px;
-            border-radius: 6px;
-            margin: 2px;
-        }
-        /* 滑块悬停效果 */
-        QScrollBar::handle:vertical:hover {
-            background: rgba(120, 120, 120, 0.8);
-        }
-        /* 滑块按下效果 */
-        QScrollBar::handle:vertical:pressed {
-            background: rgba(100, 100, 100, 0.9);
-        }
-        /* 向上/向下按钮隐藏 */
-        QScrollBar::add-line:vertical,
-        QScrollBar::sub-line:vertical {
-            height: 0px;
-            background: none;
-        }
-        /* 滚动条上下边缘隐藏 */
-        QScrollBar::add-page:vertical,
-        QScrollBar::sub-page:vertical {
-            background: none;
-        }
-    )");
-    
-    // 设置列表字体和行高
     QFont leftFont("Microsoft YaHei", qMax(m_fontSize - 1, 9));
     leftFont.setHintingPreference(QFont::PreferFullHinting);
     leftFont.setStyleStrategy(QFont::PreferAntialias);
@@ -7172,71 +6923,16 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     }
     QLabel* entryTableLabel = new QLabel(entryTableText);
     entryTableLabel->setTextFormat(Qt::RichText);
-    // 设置默认样式（透明背景，灰色文字）- 与 applyLabelStyle 使用完全相同的格式
-    entryTableLabel->setStyleSheet(R"(
-        QLabel {
-            font-weight: bold;
-            font-size: 14px;
-            color: #495057;
-            padding: 6px 8px;
-            background-color: transparent;
-            border-radius: 6px;
-            border: none;
-        }
-    )");
+    entryTableLabel->setStyleSheet("QLabel{font-weight:bold;font-size:14px;color:#495057;padding:6px 8px;background-color:transparent;border-radius:6px;border:none;}");
     
-    // 创建右侧数据表格
     QTableView* entryTableView = new QTableView();
     entryTableView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     entryTableView->setSelectionBehavior(QAbstractItemView::SelectItems);
     entryTableView->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked);
     entryTableView->setContextMenuPolicy(Qt::CustomContextMenu);
     
-    // 设置表格样式 - 简化设计，去除边框，优化表头，使用标准滚动条
-    entryTableView->setStyleSheet(R"(
-        QTableView {
-            border: none;
-            background-color: rgba(255, 255, 255, 0.5);
-            gridline-color: #f0f0f0;
-            outline: none;
-            selection-background-color: #bbdefb;
-            selection-color: #0d47a1;
-        }
-        QTableView::item {
-            padding: 6px 8px;
-            border-bottom: 1px solid #f0f0f0;
-            border-right: 1px solid #f0f0f0;
-            outline: none;
-        }
-        QTableView::item:selected {
-            background-color: #bbdefb;
-            color: #0d47a1;
-        }
-        QTableView::item:hover {
-            background-color: #e3f2fd;
-        }
-        QTableView::item:focus {
-            background-color: #fff;
-        }
-        QHeaderView::section {
-            background-color: rgba(245, 245, 245, 0.5);
-            border: 1px solid #ddd;
-            border-bottom: 2px solid #ccc;
-            padding: 4px 8px;
-            font-weight: bold;
-            font-size: 13px;
-            color: #333;
-            text-align: center;
-        }
-        QHeaderView::section:first {
-            min-width: 120px;
-        }
-        QHeaderView::section:hover {
-            background-color: rgba(232, 232, 232, 0.5);
-        }
-    )");
+    entryTableView->setStyleSheet("QTableView{border:none;background-color:rgba(255,255,255,0.5);gridline-color:#f0f0f0;outline:none;selection-background-color:#bbdefb;selection-color:#0d47a1;}QTableView::item{padding:6px 8px;border-bottom:1px solid #f0f0f0;border-right:1px solid #f0f0f0;outline:none;}QTableView::item:selected{background-color:#bbdefb;color:#0d47a1;}QTableView::item:hover{background-color:#e3f2fd;}QHeaderView::section{background-color:rgba(245,245,245,0.5);border:1px solid #ddd;border-bottom:2px solid #ccc;padding:4px 8px;font-weight:bold;font-size:13px;color:#333;text-align:center;}QHeaderView::section:first{min-width:120px;}QHeaderView::section:hover{background-color:rgba(232,232,232,0.5);}");
     
-    // 设置表格字体
     QFont tableFont("Microsoft YaHei", m_fontSize);
     tableFont.setHintingPreference(QFont::PreferFullHinting);
     tableFont.setStyleStrategy(QFont::PreferAntialias);
@@ -7254,92 +6950,41 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         addEntryLayout->setContentsMargins(0, 8, 0, 0);
         addEntryLayout->setSpacing(8);
 
-        // 键输入框
         QLineEdit* keyEdit = new QLineEdit();
         keyEdit->setPlaceholderText("键 (Key)");
         keyEdit->setMinimumHeight(32);
         keyEdit->setMaximumWidth(200);
-        keyEdit->setStyleSheet(R"(
-            QLineEdit {
-                border: 2px solid #e1e5e9;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-size: 12px;
-                background-color: rgba(255, 255, 255, 0.5);
-            }
-            QLineEdit:focus {
-                border-color: #2196f3;
-                outline: none;
-            }
-        )");
+        keyEdit->setStyleSheet("QLineEdit{border:2px solid #e1e5e9;border-radius:6px;padding:6px 12px;font-size:12px;background-color:rgba(255,255,255,0.5);}QLineEdit:focus{border-color:#2196f3;outline:none;}");
 
-        // 值输入框
         QLineEdit* valueEdit = new QLineEdit();
         valueEdit->setPlaceholderText("值 (Value)");
         valueEdit->setMinimumHeight(32);
-        valueEdit->setStyleSheet(R"(
-            QLineEdit {
-                border: 2px solid #e1e5e9;
-                border-radius: 6px;
-                padding: 6px 12px;
-                font-size: 12px;
-                background-color: rgba(255, 255, 255, 0.5);
-            }
-            QLineEdit:focus {
-                border-color: #2196f3;
-                outline: none;
-            }
-        )");
+        valueEdit->setStyleSheet("QLineEdit{border:2px solid #e1e5e9;border-radius:6px;padding:6px 12px;font-size:12px;background-color:rgba(255,255,255,0.5);}QLineEdit:focus{border-color:#2196f3;outline:none;}");
 
-        // 添加按钮 - 使用FA7符号U+002b (plus图标)
         QPushButton* addEntryButton = new QPushButton(QChar(0x002b));
-        addEntryButton->setFixedSize(32, 32);  // 与文本框高度一致（32px）
+        addEntryButton->setFixedSize(32, 32);
         addEntryButton->setEnabled(!m_isReadOnly);
 
         QString buttonColor = "#3498db";
         QString hoverColor = QColor(buttonColor).darker(120).name();
         QString pressedColor = QColor(buttonColor).darker(150).name();
 
-        addEntryButton->setStyleSheet(QString(R"(
-            QPushButton {
-                background-color: %1;
-                color: white;
-                border: none;
-                border-radius: 6px;  /* 与文本框圆角一致（6px） */
-                padding: 0px;  /* 移除内边距 */
-                font-size: 12px;  /* 与文本框字体大小一致 */
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: %2;
-            }
-            QPushButton:pressed {
-                background-color: %3;
-            }
-            QPushButton:disabled {
-                background-color: #e0e0e0;
-                color: #a0a0a0;
-            }
-        )").arg(buttonColor).arg(hoverColor).arg(pressedColor));
+        addEntryButton->setStyleSheet(QString("QPushButton{background-color:%1;color:white;border:none;border-radius:6px;padding:0px;font-size:12px;font-weight:bold;}QPushButton:hover{background-color:%2;}QPushButton:pressed{background-color:%3;}QPushButton:disabled{background-color:#e0e0e0;color:#a0a0a0;}").arg(buttonColor).arg(hoverColor).arg(pressedColor));
 
-        // 使用Font Awesome字体渲染U+002b图标
         QString addEntryFontFamily = FA::solidFontFamily();
         if (!addEntryFontFamily.isEmpty()) {
-            addEntryButton->setFont(FA::solidFont(12));  // 与文本框字体大小一致（12px）
+            addEntryButton->setFont(FA::solidFont(12));
         } else {
             addEntryButton->setFont(QFont("Microsoft YaHei", 12, QFont::Bold));
         }
 
-        // 设置伸缩因子
         keyEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         valueEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-        // 连接添加按钮信号
         connect(addEntryButton, &QPushButton::clicked, this, [this, keyEdit, valueEdit]() {
             addEntryFromInputs(keyEdit, valueEdit);
         });
 
-        // 支持回车键添加
         connect(valueEdit, &QLineEdit::returnPressed, addEntryButton, &QPushButton::click);
 
         addEntryLayout->addWidget(keyEdit);
@@ -7348,7 +6993,6 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
 
         rightLayout->addWidget(addEntryContainer);
 
-        // 保存控件引用
         tab.keyEdit = keyEdit;
         tab.valueEdit = valueEdit;
         tab.addEntryButton = addEntryButton;
@@ -7443,24 +7087,11 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     // 设置视口大小策略以优化渲染
     entryTableView->viewport()->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     
-    // 【关键优化】连接滚动事件 - 强制重绘消除残留
+    // 【关键优化】连接滚动事件 - 不再强制重绘，Qt会自动处理
     connect(entryTableView->verticalScrollBar(), &QScrollBar::valueChanged, this,
             [this, entryTableView](int value) {
                 Q_UNUSED(value);
-                // 强制刷新视口以消除滚动残留
-                if (entryTableView) {
-                    entryTableView->viewport()->update();
-                }
-
-                // 懒加载：当滚动到接近底部时预加载数据
-                if (entryTableView && entryTableView->model()) {
-                    int total = entryTableView->model()->rowCount();
-                    int visible = entryTableView->viewport()->height() / entryTableView->verticalHeader()->defaultSectionSize();
-                    int triggerPoint = total - visible - 20; // 提前20行触发
-
-                    // 这里可以添加预加载逻辑
-                    Q_UNUSED(triggerPoint);
-                }
+                Q_UNUSED(entryTableView);
             });
     
     // 连接选择改变事件以更新渲染窗格
@@ -7595,101 +7226,61 @@ void GXTStudio::setupTableOptimizations(QTableView* table)
 {
     if (!table) return;
     
-    // 启用虚拟滚动和懒加载优化
     table->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     
-    // 基础性能优化
     table->setSortingEnabled(false);
     table->setWordWrap(false);
-    table->setAlternatingRowColors(false); // 禁用，使用自定义斑马纹
+    table->setAlternatingRowColors(false);
     table->setShowGrid(false);
     table->setSelectionBehavior(QAbstractItemView::SelectItems);
     table->setSelectionMode(QAbstractItemView::SingleSelection);
     
-    // 【关键优化】虚拟滚动优化设置 - 消除滚动残留问题
-    table->setAttribute(Qt::WA_StaticContents, false);     // 禁用静态内容，确保滚动时正确重绘
-    table->setAttribute(Qt::WA_OpaquePaintEvent, false);    // 禁用不透明绘制，使用透明合成
-    table->setAttribute(Qt::WA_NoSystemBackground, false);  // 启用系统背景，正确绘制背景
-    table->setAutoFillBackground(true);                    // 启用自动填充背景，清除残留内容
-    table->setAttribute(Qt::WA_PaintOnScreen, false);       // 禁用直接屏幕绘制，使用双缓冲
+    table->setAttribute(Qt::WA_StaticContents, false);
+    table->setAttribute(Qt::WA_OpaquePaintEvent, false);
+    table->setAttribute(Qt::WA_NoSystemBackground, false);
+    table->setAutoFillBackground(true);
+    table->setAttribute(Qt::WA_PaintOnScreen, false);
     
-    // 【关键优化】视口优化 - 消除残留的核心设置
-    table->viewport()->setAttribute(Qt::WA_StaticContents, false);     // 禁用静态内容
-    table->viewport()->setAttribute(Qt::WA_OpaquePaintEvent, false);    // 禁用不透明绘制
-    table->viewport()->setAttribute(Qt::WA_NoSystemBackground, false);  // 启用系统背景
-    table->viewport()->setAutoFillBackground(true);                    // 启用自动填充背景
-    table->viewport()->setAttribute(Qt::WA_PaintOnScreen, false);       // 禁用直接屏幕绘制
+    table->viewport()->setAttribute(Qt::WA_StaticContents, false);
+    table->viewport()->setAttribute(Qt::WA_OpaquePaintEvent, false);
+    table->viewport()->setAttribute(Qt::WA_NoSystemBackground, false);
+    table->viewport()->setAutoFillBackground(true);
+    table->viewport()->setAttribute(Qt::WA_PaintOnScreen, false);
     
-    // 【极致优化】启用虚拟滚动和懒加载 - 支持上万行数据
     table->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     table->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     table->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     
-    // 表头优化
     table->verticalHeader()->setVisible(false);
     table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);
-    table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed); // 固定行高
+    table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
     
     auto* header = table->horizontalHeader();
     header->setFixedHeight(28);
+    header->setMinimumSectionSize(50);
+    header->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    header->setHighlightSections(false);
+    header->setStretchLastSection(false);
     if (table->model() && table->model()->columnCount() > 0) {
         header->setSectionResizeMode(0, QHeaderView::Fixed);
         int keyColumnWidth = calculateKeyColumnWidth();
         header->resizeSection(0, keyColumnWidth);
         header->setSectionResizeMode(1, QHeaderView::Stretch);
     }
-    header->setStretchLastSection(false);
-    header->setHighlightSections(false);
     
-    // 禁用拖拽
     table->setDragEnabled(false);
     table->setDragDropMode(QAbstractItemView::NoDragDrop);
     table->setDropIndicatorShown(false);
     table->setAcceptDrops(false);
     
-    // 编辑触发器
     table->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     
-    // 【关键优化】禁用不必要的功能以提升性能
     table->setAutoScroll(false);
     table->setTabKeyNavigation(true);
-    table->setMouseTracking(false);           // 禁用鼠标跟踪减少事件处理
-    table->setFocusPolicy(Qt::StrongFocus);    // 优化焦点策略
-    
-    // 【关键优化】移除selectionChanged和valueChanged连接，减少不必要的重绘
-    // 这些连接会导致频繁的视口更新，严重影响性能
-    
-    // 【极致优化】启用批量数据处理模式
-    table->setAutoScrollMargin(100); // 滚动边距
-    
-    // 【极致优化】禁用平滑滚动以提升性能
-    table->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-    
-    // 【Win10记事本风格】启用懒加载机制
-    connect(table->verticalScrollBar(), &QScrollBar::valueChanged, this, [=](int value) {
-        // 只在滚动时渲染可见区域
-        FileTab* tab = getCurrentTab();
-        if (tab && tab->entryTableModel) {
-            // 计算可见区域的行范围
-            const QRect visibleRect = table->viewport()->rect();
-            const QModelIndex topLeft = table->indexAt(visibleRect.topLeft());
-            const QModelIndex bottomRight = table->indexAt(visibleRect.bottomRight());
-            
-            if (topLeft.isValid() && bottomRight.isValid()) {
-                int firstRow = topLeft.row();
-                int lastRow = bottomRight.row();
-                
-                // 预加载前后各10行，减少滚动时的延迟
-                firstRow = qMax(0, firstRow - 10);
-                lastRow = qMin(tab->entryTableModel->rowCount() - 1, lastRow + 10);
-                
-                // 使用部分缓存构建代替全量构建
-                tab->entryTableModel->buildPartialDisplayCache(firstRow, lastRow);
-            }
-        }
-    });
+    table->setMouseTracking(false);
+    table->setFocusPolicy(Qt::StrongFocus);
+    table->setAutoScrollMargin(100);
 }
 
 int GXTStudio::calculateKeyColumnWidth()
@@ -7982,63 +7573,32 @@ QString DraggableTableList::createTempTableFile(int tableIndex, const QString& t
 
 void GXTStudio::resizeEvent(QResizeEvent* event)
 {
-    // 调用父类resizeEvent
     QMainWindow::resizeEvent(event);
-
-    // 更严格的尺寸变化过滤，大幅减少不必要的计算
+    
     QSize newSize = event->size();
-    QSize oldSize = m_lastWindowSize;
-
-    int widthDiff = newSize.width() - oldSize.width();
-
-    // 【关键优化1】忽略小的宽度变化，提高阈值到30px
-    if (abs(widthDiff) < 30) {
-        // 宽度变化太小，直接返回，不做任何处理
-        return;
-    }
-
-    // 【关键优化2】只有在宽度显著变化时才调整列宽
-    bool needsColumnResize = abs(widthDiff) >= 50;
-
-    if (needsColumnResize && m_resizeDebouncer) {
-        // 停止之前的防抖定时器，重置防抖
-        if (m_resizeDebouncer->isActive()) {
-            m_resizeDebouncer->stop();
-        }
-
-        // 【关键优化3】只标记需要更新，不立即执行任何操作
-        FileTab* currentTab = getCurrentTab();
-        if (currentTab) {
-            currentTab->cache.layoutNeedsUpdate = true;
-        }
-
-        // 启动新的防抖定时器，延迟执行实际操作
-        m_resizeDebouncer->start();
-    }
-
-    // 记录新的大小
+    QSize oldSize = event->oldSize();
+    
     m_lastWindowSize = newSize;
-
-    // 【性能优化】窗口大小显著变化时，清理颜色计算器的网格缓存
-    // 精确缓存会自动失效，但网格缓存可能包含过时数据
-    if (m_backgroundEnabled && abs(widthDiff) >= 100) {
-        m_textColorCalculator.clearCache();
+    
+    if (oldSize.isValid()) {
+        int widthDiff = qAbs(newSize.width() - oldSize.width());
+        int heightDiff = qAbs(newSize.height() - oldSize.height());
+        
+        if (widthDiff < 5 && heightDiff < 5) {
+            return;
+        }
     }
-
-    // 如果启用了背景，更新标签颜色以匹配新位置的背景
-    if (m_backgroundEnabled) {
-        updateLabelColors();
-    }
+    
+    m_cachedBackgroundPixmap = QPixmap();
+    m_cachedBackgroundSize = QSize();
 }
 
 // ==================== 自定义背景相关方法 ====================
 
 void GXTStudio::paintEvent(QPaintEvent* event)
 {
-    // 先调用父类的绘制（绘制默认背景）
     QMainWindow::paintEvent(event);
 
-    // 如果启用了背景并且背景图片有效，则绘制自定义背景
     if (m_backgroundEnabled && !m_backgroundPixmap.isNull()) {
         QPainter painter(this);
         drawBackground(&painter);
@@ -8051,13 +7611,9 @@ void GXTStudio::drawBackground(QPainter* painter)
         return;
     }
 
-    // 保存画家状态
     painter->save();
-
-    // 设置透明度
     painter->setOpacity(m_backgroundOpacity);
 
-    // 获取窗口中央部件的几何区域（用于绘制背景）
     QWidget* centralWidget = this->centralWidget();
     QRect targetRect;
     if (centralWidget) {
@@ -8066,192 +7622,116 @@ void GXTStudio::drawBackground(QPainter* painter)
         targetRect = this->rect();
     }
 
-    // 设置裁剪区域，只绘制到中央部件区域，避免覆盖工具栏和状态栏
     painter->setClipRect(targetRect);
 
-    // 缩放图片以适应目标区域
-    QPixmap scaledPixmap = m_backgroundPixmap.scaled(
-        targetRect.size(),
-        m_backgroundAspectRatioMode,
-        Qt::SmoothTransformation
-    );
+    // 【关键优化】缓存缩放后的背景图片，避免每次重绘都缩放
+    QSize currentSize = targetRect.size();
+    if (m_cachedBackgroundPixmap.isNull() || m_cachedBackgroundSize != currentSize) {
+        m_cachedBackgroundPixmap = m_backgroundPixmap.scaled(
+            currentSize,
+            m_backgroundAspectRatioMode,
+            Qt::SmoothTransformation
+        );
+        m_cachedBackgroundSize = currentSize;
+    }
 
-    // 计算图片居中显示的位置
-    int x = targetRect.x() + (targetRect.width() - scaledPixmap.width()) / 2;
-    int y = targetRect.y() + (targetRect.height() - scaledPixmap.height()) / 2;
+    int x = targetRect.x() + (targetRect.width() - m_cachedBackgroundPixmap.width()) / 2;
+    int y = targetRect.y() + (targetRect.height() - m_cachedBackgroundPixmap.height()) / 2;
 
-    // 绘制背景图片
-    painter->drawPixmap(x, y, scaledPixmap);
+    painter->drawPixmap(x, y, m_cachedBackgroundPixmap);
 
-    // 恢复画家状态
     painter->restore();
 }
 
 QColor GXTStudio::getTextColorForPosition(const QPoint& pos)
 {
-    // 使用优化的颜色计算器
     QWidget* centralWidget = this->centralWidget();
     QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
     return m_textColorCalculator.calculateColor(pos, targetRect);
 }
 
-// 辅助函数：应用标签样式，确保除颜色外所有样式一致
 static void applyLabelStyle(QLabel* label, const QColor& textColor)
 {
     if (!label) return;
     
-    // 使用完全一致的样式模板，只改变颜色
-    static const QString styleTemplate = R"(
-        QLabel {
-            font-weight: bold;
-            color: %1;
-            padding: 6px 8px;
-            background-color: transparent;
-            border-radius: 6px;
-            border: none;
-        }
-    )";
+    static const QString styleTemplate = "QLabel{font-weight:bold;color:%1;padding:6px 8px;background-color:transparent;border-radius:6px;border:none;}";
     
     label->setStyleSheet(styleTemplate.arg(textColor.name()));
 }
 
 void GXTStudio::updateLabelColors()
 {
-    // 更新所有标签页的标签颜色和搜索UI颜色
-    for (auto& tab : m_fileTabs) {
-        // CharTable没有tableListLabel和entryTableLabel，跳过
-        if (tab.isCharTable) {
-            continue;
-        }
-        
-        if (tab.tableListLabel) {
-            QPoint pos = tab.tableListLabel->mapTo(this, QPoint(tab.tableListLabel->width() / 2, tab.tableListLabel->height() / 2));
-            QColor textColor = getTextColorForPosition(pos);
-            applyLabelStyle(tab.tableListLabel, textColor);
-        }
-        
-        if (tab.entryTableLabel) {
-            QPoint pos = tab.entryTableLabel->mapTo(this, QPoint(tab.entryTableLabel->width() / 2, tab.entryTableLabel->height() / 2));
-            QColor textColor = getTextColorForPosition(pos);
-            applyLabelStyle(tab.entryTableLabel, textColor);
-        }
-        
-        // 更新搜索UI颜色
-        updateSearchUIColors(tab);
+    if (m_fileTabs.empty()) return;
+    
+    bool hasBackground = m_backgroundEnabled && !m_backgroundPixmap.isNull();
+    if (!hasBackground) return;
+    
+    FileTab* currentTab = getCurrentTab();
+    if (!currentTab || currentTab->isCharTable) return;
+    
+    QWidget* centralWidget = this->centralWidget();
+    QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
+    
+    if (currentTab->tableListLabel) {
+        QPoint pos = currentTab->tableListLabel->mapTo(this, QPoint(currentTab->tableListLabel->width() / 2, currentTab->tableListLabel->height() / 2));
+        QColor textColor = m_textColorCalculator.calculateColor(pos, targetRect);
+        applyLabelStyle(currentTab->tableListLabel, textColor);
     }
+    
+    if (currentTab->entryTableLabel) {
+        QPoint pos = currentTab->entryTableLabel->mapTo(this, QPoint(currentTab->entryTableLabel->width() / 2, currentTab->entryTableLabel->height() / 2));
+        QColor textColor = m_textColorCalculator.calculateColor(pos, targetRect);
+        applyLabelStyle(currentTab->entryTableLabel, textColor);
+    }
+    
+    updateSearchUIColors(*currentTab);
 }
 
 void GXTStudio::updateSearchUIColors(FileTab& tab)
 {
-    // 获取搜索区域的位置（使用搜索框的中心点）
     if (!tab.searchEdit) return;
     
+    static QString cachedSearchEditStyle;
+    static QString cachedButtonStyle;
+    static QString cachedNavButtonStyle;
+    static QColor lastTextColor;
+    
+    QWidget* centralWidget = this->centralWidget();
+    QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
     QPoint searchPos = tab.searchEdit->mapTo(this, QPoint(tab.searchEdit->width() / 2, tab.searchEdit->height() / 2));
-    QColor textColor = getTextColorForPosition(searchPos);
-    QString colorName = textColor.name();
+    QColor textColor = m_textColorCalculator.calculateColor(searchPos, targetRect);
     
-    // 更新搜索框文字颜色
-    if (tab.searchEdit) {
-        tab.searchEdit->setStyleSheet(QString(R"(
-            QLineEdit {
-                border: 2px solid #e1e5e9;
-                border-radius: 6px;
-                padding: 6px 12px;
-                padding-left: 14px;
-                background-color: rgba(255, 255, 255, 0.5);
-                font-size: 12px;
-                color: %1;
-            }
-            QLineEdit:focus {
-                border-color: #2196f3;
-                outline: none;
-            }
-        )").arg(colorName));
+    if (textColor != lastTextColor) {
+        QString colorName = textColor.name();
+        QString fontFamily = FA::solidFontFamily();
+        
+        cachedSearchEditStyle = QString("QLineEdit{border:2px solid #e1e5e9;border-radius:6px;padding:6px 12px;padding-left:14px;background-color:rgba(255,255,255,0.5);font-size:12px;color:%1;}QLineEdit:focus{border-color:#2196f3;outline:none;}").arg(colorName);
+        
+        if (fontFamily.isEmpty()) {
+            cachedButtonStyle = QString("QToolButton{border:none;border-radius:4px;background-color:transparent;color:%1;}QToolButton:hover{background-color:rgba(255,255,255,0.5);color:%1;}QToolButton:pressed{background-color:#e9ecef;}QToolButton:checked{color:#2196f3;background-color:#e3f2fd;}QToolButton:checked:hover{background-color:#bbdefb;}").arg(colorName);
+        } else {
+            cachedButtonStyle = QString("QToolButton{border:none;border-radius:4px;background-color:transparent;color:%1;font-family:'%2';font-size:13px;}QToolButton:hover{background-color:rgba(255,255,255,0.5);color:%1;}QToolButton:pressed{background-color:#e9ecef;}QToolButton:checked{color:#2196f3;background-color:#e3f2fd;}QToolButton:checked:hover{background-color:#bbdefb;}").arg(colorName, fontFamily);
+        }
+        
+        cachedNavButtonStyle = QString("QPushButton{background-color:rgba(255,255,255,0.5);border:1px solid #dee2e6;border-radius:6px;color:%1;font-weight:bold;}QPushButton:hover{background-color:rgba(255,255,255,0.7);}").arg(colorName);
+        
+        lastTextColor = textColor;
     }
     
-    // 更新图标按钮颜色
-    QString fontFamily = FA::solidFontFamily();
-    QString buttonStyle;
-    if (fontFamily.isEmpty()) {
-        buttonStyle = QString(R"(
-            QToolButton {
-                border: none;
-                border-radius: 4px;
-                background-color: transparent;
-                color: %1;
-            }
-            QToolButton:hover {
-                background-color: rgba(255, 255, 255, 0.5);
-                color: %1;
-            }
-            QToolButton:pressed {
-                background-color: #e9ecef;
-            }
-            QToolButton:checked {
-                color: #2196f3;
-                background-color: #e3f2fd;
-            }
-            QToolButton:checked:hover {
-                background-color: #bbdefb;
-            }
-        )").arg(colorName);
-    } else {
-        buttonStyle = QString(R"(
-            QToolButton {
-                border: none;
-                border-radius: 4px;
-                background-color: transparent;
-                color: %1;
-                font-family: '%2';
-                font-size: 13px;
-            }
-            QToolButton:hover {
-                background-color: rgba(255, 255, 255, 0.5);
-                color: %1;
-            }
-            QToolButton:pressed {
-                background-color: #e9ecef;
-            }
-            QToolButton:checked {
-                color: #2196f3;
-                background-color: #e3f2fd;
-            }
-            QToolButton:checked:hover {
-                background-color: #bbdefb;
-            }
-        )").arg(colorName, fontFamily);
-    }
+    tab.searchEdit->setStyleSheet(cachedSearchEditStyle);
     
     if (tab.caseSensitiveButton) {
-        tab.caseSensitiveButton->setStyleSheet(buttonStyle);
+        tab.caseSensitiveButton->setStyleSheet(cachedButtonStyle);
     }
     if (tab.regexButton) {
-        tab.regexButton->setStyleSheet(buttonStyle);
+        tab.regexButton->setStyleSheet(cachedButtonStyle);
     }
-    
-    // 更新上下个按钮样式
-    QString navButtonStyle = QString(R"(
-        QPushButton {
-            background-color: rgba(255, 255, 255, 0.5);
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            color: %1;
-            font-weight: bold;
-        }
-        QPushButton:hover {
-            background-color: rgba(255, 255, 255, 0.7);
-            border-color: #adb5bd;
-        }
-        QPushButton:pressed {
-            background-color: rgba(255, 255, 255, 0.9);
-        }
-    )").arg(colorName);
     
     if (tab.searchPrevButton) {
-        tab.searchPrevButton->setStyleSheet(navButtonStyle);
+        tab.searchPrevButton->setStyleSheet(cachedNavButtonStyle);
     }
     if (tab.searchNextButton) {
-        tab.searchNextButton->setStyleSheet(navButtonStyle);
+        tab.searchNextButton->setStyleSheet(cachedNavButtonStyle);
     }
 }
 

@@ -8,7 +8,9 @@
 
 // 初始化静态成员变量
 QMap<uint32_t, QString> GXTTableModel::s_satKeyMap;
+QMap<QString, uint32_t> GXTTableModel::s_satKeyReverseMap;
 QMap<uint32_t, QString> GXTTableModel::s_ivtKeyMap;
+QMap<QString, uint32_t> GXTTableModel::s_ivtKeyReverseMap;
 
 // FileTab结构体需要在某个地方定义，这里我们使用外部定义
 // 在GXTStudio.h中定义的FileTab
@@ -48,146 +50,65 @@ void GXTTableModel::setEditable(bool editable)
     m_editable = editable;
 }
 
+namespace {
+    int loadKeyMapInternal(const QString& fileName, QMap<uint32_t, QString>& keyMap, QMap<QString, uint32_t>& reverseMap, bool caseInsensitive) {
+        QString keylistPath = QDir::current().filePath(fileName);
+        
+        if (!QFile::exists(keylistPath)) {
+            qWarning() << "文件不存在:" << keylistPath;
+            return 0;
+        }
+        
+        QFile file(keylistPath);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            qWarning() << "无法打开文件:" << keylistPath;
+            return 0;
+        }
+        
+        QTextStream stream(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        stream.setEncoding(QStringConverter::Utf8);
+#else
+        stream.setCodec("UTF-8");
+#endif
+        
+        int loadedCount = 0;
+        while (!stream.atEnd()) {
+            QString line = stream.readLine().trimmed();
+            if (line.isEmpty() || line.startsWith("#")) continue;
+            
+            QStringList parts = line.split('\t');
+            if (parts.size() != 2) continue;
+            
+            QString keyStr = parts[0].trimmed();
+            QString hashStr = parts[1].trimmed();
+            
+            bool ok;
+            uint32_t hash = hashStr.toUInt(&ok, 16);
+            if (!ok) continue;
+            
+            keyMap[hash] = keyStr;
+            reverseMap[caseInsensitive ? keyStr.toLower() : keyStr] = hash;
+            loadedCount++;
+        }
+        
+        file.close();
+        return loadedCount;
+    }
+}
+
 void GXTTableModel::loadSATKeyMap()
 {
-    // 如果已经加载过，直接返回
-    if (!s_satKeyMap.isEmpty()) {
-        return;
-    }
-    
-    // 构建文件路径
-    QString keylistPath = QDir::current().filePath("keylist/SATKEY.lst");
-    
-    // 检查文件是否存在
-    if (!QFile::exists(keylistPath)) {
-        qWarning() << "SATKEY.lst文件不存在:" << keylistPath;
-        return;
-    }
-    
-    // 打开文件
-    QFile file(keylistPath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "无法打开SATKEY.lst文件:" << keylistPath;
-        return;
-    }
-    
-    QTextStream stream(&file);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    stream.setEncoding(QStringConverter::Utf8);
-#else
-    stream.setCodec("UTF-8");
-#endif
-    
-    int loadedCount = 0;
-    while (!stream.atEnd()) {
-        QString line = stream.readLine().trimmed();
-        
-        // 跳过空行和注释
-        if (line.isEmpty() || line.startsWith("#")) {
-            continue;
-        }
-        
-        // 按制表符分割
-        QStringList parts = line.split('\t');
-        if (parts.size() != 2) {
-            continue; // 格式不正确
-        }
-        
-        QString keyStr = parts[0].trimmed();
-        QString hashStr = parts[1].trimmed();
-        
-        // 解析hash（移除0x前缀并转换为uint32）
-        bool ok;
-        uint32_t hash = hashStr.toUInt(&ok, 16); // 16进制转换
-        if (!ok) {
-            qWarning() << "解析hash失败:" << hashStr;
-            continue;
-        }
-        
-        // 添加到映射
-        s_satKeyMap[hash] = keyStr;
-        loadedCount++;
-    }
-    
-    file.close();
-    
-    qDebug() << "成功加载" << loadedCount << "条SATKEY映射";
+    if (!s_satKeyMap.isEmpty()) return;
+    int count = loadKeyMapInternal("keylist/SATKEY.lst", s_satKeyMap, s_satKeyReverseMap, false);
+    qDebug() << "加载SATKEY映射" << count << "条";
 }
 
 void GXTTableModel::loadIVTKeyMap()
 {
-    // 如果已经加载过，直接返回
-    if (!s_ivtKeyMap.isEmpty()) {
-        qInfo() << "IVTKEY映射表已加载，大小: " << s_ivtKeyMap.size();
-        return;
-    }
-
-    qInfo() << "开始加载IVTKEY映射表...";
-
-    // 构建文件路径
-    QString keylistPath = QDir::current().filePath("keylist/IVTKEY.lst");
-
-    // 检查文件是否存在
-    if (!QFile::exists(keylistPath)) {
-        qWarning() << "IVTKEY.lst文件不存在:" << keylistPath;
-        return;
-    }
-
-    // 打开文件
-    QFile file(keylistPath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "无法打开IVTKEY.lst文件:" << keylistPath;
-        return;
-    }
-
-    qInfo() << "已打开IVTKEY.lst文件:" << keylistPath;
-
-    QTextStream stream(&file);
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    stream.setEncoding(QStringConverter::Utf8);
-#else
-    stream.setCodec("UTF-8");
-#endif
-    
-    int loadedCount = 0;
-    while (!stream.atEnd()) {
-        QString line = stream.readLine().trimmed();
-
-        // 跳过空行和注释
-        if (line.isEmpty() || line.startsWith("#")) {
-            continue;
-        }
-
-        // 按制表符分割
-        QStringList parts = line.split('\t');
-        if (parts.size() != 2) {
-            continue; // 格式不正确
-        }
-
-        QString keyStr = parts[0].trimmed();
-        QString hashStr = parts[1].trimmed();
-
-        // 解析hash（移除0x前缀并转换为uint32）
-        bool ok;
-        uint32_t hash = hashStr.toUInt(&ok, 16); // 16进制转换
-        if (!ok) {
-            qWarning() << "解析hash失败:" << hashStr;
-            continue;
-        }
-
-        // 添加到映射
-        s_ivtKeyMap[hash] = keyStr;
-        loadedCount++;
-
-        // 记录前5条加载的数据
-        if (loadedCount <= 5) {
-            qInfo() << "加载: " << keyStr << " -> 0x" << QString::number(hash, 16);
-        }
-    }
-
-    file.close();
-
-    qInfo() << "IVTKEY映射表加载完成，共加载 " << loadedCount << " 条记录";
+    if (!s_ivtKeyMap.isEmpty()) return;
+    int count = loadKeyMapInternal("keylist/IVTKEY.lst", s_ivtKeyMap, s_ivtKeyReverseMap, true);
+    qDebug() << "加载IVTKEY映射" << count << "条";
 }
 
 bool GXTTableModel::findSATKey(uint32_t hash, QString& outKey)
@@ -212,36 +133,25 @@ bool GXTTableModel::findIVTKey(uint32_t hash, QString& outKey)
 
 bool GXTTableModel::findSATHash(const QString& key, uint32_t& outHash)
 {
-    // 遍历映射表，查找匹配的key
-    for (auto it = s_satKeyMap.begin(); it != s_satKeyMap.end(); ++it) {
-        if (it.value() == key) {
-            outHash = it.key();
-            return true;
-        }
+    auto it = s_satKeyReverseMap.find(key);
+    if (it != s_satKeyReverseMap.end()) {
+        outHash = it.value();
+        return true;
     }
     return false;
 }
 
 bool GXTTableModel::findIVTHash(const QString& key, uint32_t& outHash)
 {
-    qInfo() << "查找IVTKEY映射，输入键: " << key << ", 映射表大小: " << s_ivtKeyMap.size();
-
-    // 如果映射表为空，先尝试加载
-    if (s_ivtKeyMap.isEmpty()) {
-        qWarning() << "IVTKEY映射表为空，尝试加载";
+    if (s_ivtKeyReverseMap.isEmpty()) {
         loadIVTKeyMap();
-        qWarning() << "加载后IVTKEY映射表大小: " << s_ivtKeyMap.size();
     }
-
-    // 遍历映射表，查找匹配的key（不区分大小写）
-    for (auto it = s_ivtKeyMap.begin(); it != s_ivtKeyMap.end(); ++it) {
-        if (it.value().compare(key, Qt::CaseInsensitive) == 0) {
-            outHash = it.key();
-            qInfo() << "找到匹配: " << key << " -> 0x" << QString::number(outHash, 16);
-            return true;
-        }
+    
+    auto it = s_ivtKeyReverseMap.find(key.toLower());
+    if (it != s_ivtKeyReverseMap.end()) {
+        outHash = it.value();
+        return true;
     }
-    qWarning() << "未找到匹配: " << key;
     return false;
 }
 
@@ -418,178 +328,130 @@ QVariant GXTTableModel::data(const QModelIndex& index, int role) const
     return QVariant();
 }
 
-// 【性能优化】格式化哈希键
-QString GXTTableModel::formatHashKey(uint32_t hash) const
-{
-    return "0x" + QString::number(hash, 16).toUpper().rightJustified(8, '0');
+namespace {
+    bool isAllHex(const QString& s) {
+        for (int i = 0; i < s.length(); ++i) {
+            QChar c = s[i].toLower();
+            if (!c.isDigit() && (c < 'a' || c > 'f')) return false;
+        }
+        return true;
+    }
+    
+    void fillCacheRow(GXTTableModel::RowCache& cache, uint32_t hash, const std::string& text) {
+        cache.key = "0x" + QString::number(hash, 16).toUpper().rightJustified(8, '0');
+        cache.value = QString::fromStdString(text);
+        cache.valid = true;
+    }
+    
+    void fillCacheRow(GXTTableModel::RowCache& cache, const std::string& key, const std::string& originalKey, 
+                      const std::string& value, GXTVersion version, 
+                      const QMap<uint32_t, QString>& satMap, const QMap<uint32_t, QString>& ivtMap) {
+        if (version == GXTVersion::GTA_III || version == GXTVersion::GTA_VC) {
+            cache.key = QString::fromStdString(key);
+        } else if (!originalKey.empty()) {
+            cache.key = QString::fromStdString(originalKey);
+        } else {
+            QString keyStr = QString::fromStdString(key);
+            
+            if (version == GXTVersion::GTA_SA && !satMap.isEmpty()) {
+                bool ok;
+                uint32_t hash = keyStr.toUInt(&ok, 16);
+                if (ok) {
+                    auto it = satMap.find(hash);
+                    cache.key = (it != satMap.end()) ? it.value() : 
+                               (keyStr.length() == 8 && isAllHex(keyStr) ? "0x" + keyStr : keyStr);
+                } else {
+                    cache.key = keyStr;
+                }
+            } else if (version == GXTVersion::GTA_IV && !ivtMap.isEmpty()) {
+                bool ok;
+                uint32_t hash = keyStr.toUInt(&ok, 16);
+                if (ok) {
+                    auto it = ivtMap.find(hash);
+                    cache.key = (it != ivtMap.end()) ? it.value() : 
+                               (keyStr.length() == 8 && isAllHex(keyStr) ? "0x" + keyStr : keyStr);
+                } else {
+                    cache.key = keyStr;
+                }
+            } else {
+                cache.key = keyStr.length() == 8 && isAllHex(keyStr) ? "0x" + keyStr : keyStr;
+            }
+        }
+        cache.value = QString::fromStdString(value);
+        cache.valid = true;
+    }
 }
 
-// 【性能优化】格式化GXT键
-QString GXTTableModel::formatKey(const std::string& key, const std::string& originalKey, GXTVersion version) const
-{
-    // GTA III 和 VC: 直接返回原始键
-    if (version == GXTVersion::GTA_III || version == GXTVersion::GTA_VC) {
-        return QString::fromStdString(key);
-    }
-    
-    // 优先使用原始键值
-    if (!originalKey.empty()) {
-        return QString::fromStdString(originalKey);
-    }
-    
-    QString keyStr = QString::fromStdString(key);
-    
-    // GTA SA: 尝试SATKEY映射
-    if (version == GXTVersion::GTA_SA && !s_satKeyMap.isEmpty()) {
-        bool ok;
-        uint32_t hash = keyStr.toUInt(&ok, 16);
-        if (ok) {
-            auto it = s_satKeyMap.find(hash);
-            if (it != s_satKeyMap.end()) {
-                return it.value();
-            }
-        }
-    }
-    
-    // GTA IV: 尝试IVTKEY映射
-    if (version == GXTVersion::GTA_IV && !s_ivtKeyMap.isEmpty()) {
-        bool ok;
-        uint32_t hash = keyStr.toUInt(&ok, 16);
-        if (ok) {
-            auto it = s_ivtKeyMap.find(hash);
-            if (it != s_ivtKeyMap.end()) {
-                return it.value();
-            }
-        }
-    }
-    
-    // 添加0x前缀（如果是8位hex）
-    if (keyStr.length() == 8) {
-        bool allHex = true;
-        for (int i = 0; i < 8; ++i) {
-            QChar c = keyStr[i].toLower();
-            if (!c.isDigit() && (c < 'a' || c > 'f')) {
-                allHex = false;
-                break;
-            }
-        }
-        if (allHex) {
-            return "0x" + keyStr;
-        }
-    }
-    
-    return keyStr;
-}
-
-// 【性能优化】构建显示缓存
 void GXTTableModel::buildDisplayCache() const
 {
     m_displayCache.clear();
+    m_displayCacheValid = true;
     
-    if (!m_tab) {
-        m_displayCacheValid = true;
-        return;
-    }
+    if (!m_tab) return;
     
     int rowCount = 0;
-    
-    // 计算行数并预分配
     if (m_tab->isWHM) {
         rowCount = static_cast<int>(m_tab->whmEntries.size());
-    } else if (m_tab->isDAT) {
-        rowCount = static_cast<int>(m_tab->datEntries.size());
-    } else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
-        rowCount = static_cast<int>(m_tab->tables[m_tab->currentTableIndex].entries.size());
-    }
-    
-    m_displayCache.reserve(rowCount);
-    
-    // WHM 格式
-    if (m_tab->isWHM) {
+        m_displayCache.reserve(rowCount);
         for (const auto& entry : m_tab->whmEntries) {
             RowCache cache;
-            cache.key = formatHashKey(entry.hash);
-            cache.value = QString::fromStdString(entry.text);
-            cache.valid = true;
+            fillCacheRow(cache, entry.hash, entry.text);
             m_displayCache.append(cache);
         }
-    }
-    // DAT 格式
-    else if (m_tab->isDAT) {
+    } else if (m_tab->isDAT) {
+        rowCount = static_cast<int>(m_tab->datEntries.size());
+        m_displayCache.reserve(rowCount);
         for (const auto& entry : m_tab->datEntries) {
             RowCache cache;
-            cache.key = formatHashKey(entry.hash);
-            cache.value = QString::fromStdString(entry.text);
-            cache.valid = true;
+            fillCacheRow(cache, entry.hash, entry.text);
             m_displayCache.append(cache);
         }
-    }
-    // GXT 格式
-    else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
+    } else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
         const auto& table = m_tab->tables[m_tab->currentTableIndex];
+        rowCount = static_cast<int>(table.entries.size());
+        m_displayCache.reserve(rowCount);
         for (const auto& entry : table.entries) {
             RowCache cache;
-            cache.key = formatKey(entry.key, entry.originalKey, m_tab->version);
-            cache.value = QString::fromStdString(entry.value);
-            cache.valid = true;
+            fillCacheRow(cache, entry.key, entry.originalKey, entry.value, m_tab->version, s_satKeyMap, s_ivtKeyMap);
             m_displayCache.append(cache);
         }
     }
     
-    m_displayCacheValid = true;
     m_cachedRowCount = rowCount;
 }
 
-// 【极致优化】按需构建显示缓存 - 只构建可见区域的数据
 void GXTTableModel::buildPartialDisplayCache(int firstRow, int lastRow) const
 {
-    if (!m_tab) {
-        m_displayCacheValid = true;
-        return;
-    }
+    m_displayCacheValid = true;
+    if (!m_tab) return;
     
-    // 只在需要时扩展缓存
     if (m_displayCache.size() < lastRow + 1) {
         m_displayCache.resize(lastRow + 1);
     }
     
-    // WHM 格式
     if (m_tab->isWHM) {
         for (int row = firstRow; row <= lastRow && row < static_cast<int>(m_tab->whmEntries.size()); ++row) {
             const auto& entry = m_tab->whmEntries[row];
             RowCache cache;
-            cache.key = formatHashKey(entry.hash);
-            cache.value = QString::fromStdString(entry.text);
-            cache.valid = true;
+            fillCacheRow(cache, entry.hash, entry.text);
             m_displayCache[row] = cache;
         }
-    }
-    // DAT 格式
-    else if (m_tab->isDAT) {
+    } else if (m_tab->isDAT) {
         for (int row = firstRow; row <= lastRow && row < static_cast<int>(m_tab->datEntries.size()); ++row) {
             const auto& entry = m_tab->datEntries[row];
             RowCache cache;
-            cache.key = formatHashKey(entry.hash);
-            cache.value = QString::fromStdString(entry.text);
-            cache.valid = true;
+            fillCacheRow(cache, entry.hash, entry.text);
             m_displayCache[row] = cache;
         }
-    }
-    // GXT 格式
-    else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
+    } else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
         const auto& table = m_tab->tables[m_tab->currentTableIndex];
         for (int row = firstRow; row <= lastRow && row < static_cast<int>(table.entries.size()); ++row) {
             const auto& entry = table.entries[row];
             RowCache cache;
-            cache.key = formatKey(entry.key, entry.originalKey, m_tab->version);
-            cache.value = QString::fromStdString(entry.value);
-            cache.valid = true;
+            fillCacheRow(cache, entry.key, entry.originalKey, entry.value, m_tab->version, s_satKeyMap, s_ivtKeyMap);
             m_displayCache[row] = cache;
         }
     }
-    
-    // 保持缓存有效状态
-    m_displayCacheValid = true;
 }
 
 QVariant GXTTableModel::headerData(int section, Qt::Orientation orientation, int role) const
