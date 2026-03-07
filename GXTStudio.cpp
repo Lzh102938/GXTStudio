@@ -742,7 +742,7 @@ void GXTStudio::setupStatusBar()
     connect(m_autoSaveButton, &QToolButton::clicked, this, &GXTStudio::onAutoSaveToggle);
 
     // 创建版本标签
-    QLabel* versionLabel = new QLabel("v1.0", this);
+    QLabel* versionLabel = new QLabel("v3.0", this);
     versionLabel->setFont(smallFont);
     versionLabel->setStyleSheet("color: #000000; margin-left: 8px;");
 

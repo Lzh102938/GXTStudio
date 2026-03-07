@@ -13,6 +13,8 @@
 #include <QUrl>
 #include <QEvent>
 #include <QSizePolicy>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include "GXTStudio.h"
 
 class VersionCard : public QFrame {
@@ -55,6 +57,7 @@ protected:
 
 private slots:
     void onCheckUpdateClicked();
+    void onCheckUpdateReply(QNetworkReply* reply);
     void openHomePage();
 
 private:
@@ -72,12 +75,13 @@ private:
     QString getCardStyle() const;
     QString getSectionTitleStyle() const;
     QString getButtonStyle() const;
+    
+    bool isNewerVersion(const QString& remoteVersion) const;
 
-    // 主布局
     QVBoxLayout* m_mainLayout;
     QScrollArea* m_scrollArea;
     QWidget* m_contentWidget;
     
-    // 底部按钮
     QPushButton* m_checkUpdateButton;
+    QNetworkAccessManager* m_networkManager;
 };

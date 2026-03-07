@@ -477,7 +477,26 @@ void SmartTranslator::translateBatchAsync(const QList<TranslateTask>& batch, int
 
                     if (!responseDoc.isNull() && responseDoc.isObject()) {
                         QJsonObject responseObj = responseDoc.object();
-                        if (responseObj.contains("choices")) {
+                        
+                        if (responseObj.contains("error")) {
+                            QJsonObject errorObj = responseObj["error"].toObject();
+                            QString errorMsg = errorObj.value("message").toString("未知错误");
+                            QString errorCode = errorObj.value("code").toString();
+                            
+                            if (errorMsg.contains("余额不足") || errorMsg.contains("insufficient") || 
+                                errorMsg.contains("balance") || errorCode == "insufficient_quota") {
+                                result = "账户余额不足，请前往 platform.xiaomimimo.com 充值后继续使用";
+                            } else if (errorMsg.contains("API密钥") || errorMsg.contains("api key") || 
+                                      errorMsg.contains("invalid") || errorCode == "invalid_api_key") {
+                                result = "API密钥无效，请检查配置";
+                            } else if (errorMsg.contains("rate limit") || errorMsg.contains("频率") || 
+                                      errorCode == "rate_limit_exceeded") {
+                                result = "API调用频率超限，请稍后重试";
+                            } else {
+                                result = QString("API错误: %1").arg(errorMsg);
+                            }
+                            success = false;
+                        } else if (responseObj.contains("choices")) {
                             QJsonArray choices = responseObj["choices"].toArray();
                             if (!choices.isEmpty()) {
                                 QJsonObject choice = choices[0].toObject();
@@ -490,7 +509,18 @@ void SmartTranslator::translateBatchAsync(const QList<TranslateTask>& batch, int
                         }
                     }
                 } else {
-                    result = QString("网络错误: %1").arg(reply->errorString());
+                    int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                    QString errorStr = reply->errorString();
+                    
+                    if (statusCode == 401) {
+                        result = "API密钥无效或已过期，请检查配置";
+                    } else if (statusCode == 429) {
+                        result = "API调用频率超限，请稍后重试";
+                    } else if (statusCode == 402) {
+                        result = "账户余额不足，请前往 platform.xiaomimimo.com 充值";
+                    } else {
+                        result = QString("网络错误(HTTP %1): %2").arg(statusCode).arg(errorStr);
+                    }
                 }
             } else {
                 reply->abort();
@@ -630,9 +660,32 @@ void SmartTranslator::handleBatchResult(QSharedPointer<BatchRequest> batchReques
     // 【关键修复】失败处理和重试逻辑 - 彻底重构
     if (!success) {
         bool isAuthError = result.contains("API密钥无效") || result.contains("401");
+        bool isBalanceError = result.contains("余额不足") || result.contains("insufficient") || 
+                             result.contains("balance") || result.contains("充值");
+        bool isRateLimitError = result.contains("频率超限") || result.contains("rate limit");
 
         if (isAuthError) {
             emit translationError("API密钥无效，请检查配置");
+            {
+                QMutexLocker locker(&m_mutex);
+                m_cancelled = true;
+                m_activeRequests.removeOne(batchRequest);
+            }
+            return;
+        }
+        
+        if (isBalanceError) {
+            emit translationError("账户余额不足，请前往 platform.xiaomimimo.com 充值后继续使用");
+            {
+                QMutexLocker locker(&m_mutex);
+                m_cancelled = true;
+                m_activeRequests.removeOne(batchRequest);
+            }
+            return;
+        }
+        
+        if (isRateLimitError) {
+            emit translationError("API调用频率超限，请稍后重试或降低并发数");
             {
                 QMutexLocker locker(&m_mutex);
                 m_cancelled = true;
@@ -667,6 +720,9 @@ void SmartTranslator::handleBatchResult(QSharedPointer<BatchRequest> batchReques
                                      result.contains("API返回空结果") ||
                                      result.contains("网络错误") ||
                                      result.contains("请求超时") ||
+                                     result.contains("API错误") ||
+                                     result.contains("余额不足") ||
+                                     result.contains("HTTP") ||
                                      result.length() < 10;
 
                 if (shouldSkipRetry) {
