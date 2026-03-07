@@ -85,6 +85,7 @@
     </property>
     <addaction name="actionCodeTable"/>
     <addaction name="actionSmartTranslate"/>
+    <addaction name="actionGenerateCharTable"/>
     <addaction name="separator"/>
     <addaction name="actionReadOnly"/>
    </widget>
@@ -261,6 +262,14 @@
    </property>
    <property name="toolTip">
     <string>智能翻译功能</string>
+   </property>
+  </action>
+  <action name="actionGenerateCharTable">
+   <property name="text">
+    <string>生成字符表DAT(&amp;D)</string>
+   </property>
+   <property name="toolTip">
+    <string>生成字符表DAT文件（仅GTA_VC和GTA_IV版本）</string>
    </property>
   </action>
  </widget>

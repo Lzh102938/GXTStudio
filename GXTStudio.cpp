@@ -4,6 +4,7 @@
 #include "WelcomeWidget.h"
 #include "MultiThreadProgressDialog.h"
 #include "GXTTableModel.h"
+#include "CharTableParser.h"
 #include <QApplication>
 #include <QGuiApplication>
 #include <QScreen>
@@ -159,6 +160,7 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_pendingReplaceTable(-1)
     , m_pendingReplaceRow(-1)
     , m_lastReplaceScope(ReplaceDialog::CurrentTable)
+    , m_pendingCloseTabIndex(-1)
     , m_autoSaveButton(nullptr)
 
 
@@ -552,6 +554,8 @@ void GXTStudio::setupMenus()
     m_aboutAction = ui.actionAbout;
     m_codeTableAction = ui.actionCodeTable;
     m_smartTranslateAction = ui.actionSmartTranslate;
+    m_generateCharTableAction = ui.actionGenerateCharTable;
+    m_generateCharTableAction->setEnabled(false); // 初始禁用，只有GTA_VC和GTA_IV版本才启用
 
     // 设置只读模式初始状态
     m_readOnlyAction->setChecked(m_isReadOnly);
@@ -864,6 +868,7 @@ void GXTStudio::connectSignals()
     connect(m_replaceAction, &QAction::triggered, this, &GXTStudio::showReplaceDialog);
     connect(m_codeTableAction, &QAction::triggered, this, &GXTStudio::onCodeTableConvert);
     connect(m_smartTranslateAction, &QAction::triggered, this, &GXTStudio::onSmartTranslate);
+    connect(m_generateCharTableAction, &QAction::triggered, this, &GXTStudio::onGenerateCharTable);
     connect(m_readOnlyAction, &QAction::toggled, this, &GXTStudio::toggleReadOnly);
     
     connect(m_increaseFontAction, &QAction::triggered, this, &GXTStudio::increaseFont);
@@ -4210,6 +4215,167 @@ void GXTStudio::onSmartTranslate()
     }
 }
 
+void GXTStudio::onGenerateCharTable()
+{
+    FileTab* currentTab = getCurrentTab();
+    if (!currentTab) {
+        QMessageBox::warning(this, "错误", "没有打开的文件");
+        return;
+    }
+    
+    // 检查版本是否支持
+    GXTVersion version = currentTab->version;
+    if (version != GXTVersion::GTA_VC && version != GXTVersion::GTA_IV) {
+        QMessageBox::warning(this, "不支持", "生成字符表DAT功能仅支持GTA_VC和GTA_IV版本");
+        return;
+    }
+    
+    // GTA_IV需要过滤的字符集（这些字符在GTA_IV中已有内置支持，不需要放入字符表）
+    QSet<uint16_t> gtaIvExcludedChars;
+    if (version == GXTVersion::GTA_IV) {
+        gtaIvExcludedChars = QSet<uint16_t>{
+            0x0099,  //  控制字符
+            0x00A9,  // © 版权符号
+            0x00AC,  // ¬ 否定符号
+            0x00AE,  // ® 注册商标符号
+            0x00B7,  // · 中点
+            0x00C8,  // È
+            0x00C9,  // É
+            0x00E0,  // à
+            0x00E1,  // á
+            0x00E7,  // ç
+            0x00E8,  // è
+            0x00E9,  // é
+            0x00F1,  // ñ
+            0x00FA,  // ú
+            0x00FC   // ü
+        };
+    }
+    
+    // 收集所有非ASCII字符
+    QSet<uint16_t> nonAsciiChars;
+    
+    for (const auto& table : currentTab->tables) {
+        for (const auto& entry : table.entries) {
+            QString value = QString::fromStdString(entry.value);
+            for (const QChar& ch : value) {
+                ushort unicode = ch.unicode();
+                // 收集非ASCII字符（大于127的字符）
+                if (unicode > 127) {
+                    // GTA_IV版本过滤掉内置支持的字符
+                    if (version == GXTVersion::GTA_IV && gtaIvExcludedChars.contains(unicode)) {
+                        continue;
+                    }
+                    nonAsciiChars.insert(unicode);
+                }
+            }
+        }
+    }
+    
+    if (nonAsciiChars.isEmpty()) {
+        QMessageBox::information(this, "提示", "当前文件中没有非ASCII字符，无需生成字符表");
+        return;
+    }
+    
+    // 按Unicode排序
+    QList<uint16_t> sortedChars = nonAsciiChars.values();
+    std::sort(sortedChars.begin(), sortedChars.end());
+    
+    // 显示收集到的字符数量
+    int charCount = sortedChars.size();
+    
+    // 创建CharTableData
+    CharTableData charData;
+    
+    if (version == GXTVersion::GTA_VC) {
+        // GTA_VC格式：64x64网格映射表
+        charData.type = CharTableData::GTA_VC;
+        charData.rows = 64;
+        charData.cols = 64;
+        charData.cells.fill(0, 64 * 64);
+        
+        // 按行列顺序填充字符
+        int idx = 0;
+        for (uint16_t ch : sortedChars) {
+            int row = idx / 64;
+            int col = idx % 64;
+            if (row < 64) {
+                charData.cells[row * 64 + col] = ch;
+                idx++;
+            } else {
+                break; // 超过64x64容量
+            }
+        }
+    } else if (version == GXTVersion::GTA_IV) {
+        // GTA_IV格式：UTF-16LE字符序列
+        charData.type = CharTableData::GTA_IV;
+        charData.rows = (charCount + 63) / 64; // 计算行数
+        charData.cols = 64;
+        charData.cells.fill(0, charData.rows * charData.cols);
+        
+        // 按行优先顺序填充字符
+        for (int i = 0; i < sortedChars.size() && i < charData.cells.size(); ++i) {
+            charData.cells[i] = sortedChars[i];
+        }
+    }
+    
+    // 创建标签页名称
+    QString tabName = QString("CHAR_%1").arg(QFileInfo(currentTab->fileName).completeBaseName());
+    
+    // 创建CharTable标签页
+    CharTableWidget* charWidget = createCharTableTab(tabName, charData);
+    if (!charWidget) {
+        showLogMessage("创建字符表控件失败");
+        QMessageBox::critical(this, "错误", "创建字符表界面失败");
+        return;
+    }
+    
+    // 添加FileTab
+    FileTab newTab;
+    newTab.filePath = currentTab->filePath + ".char_table.dat";
+    newTab.fileName = tabName + ".dat";
+    newTab.isCharTable = true;
+    newTab.isWHM = false;
+    newTab.isDAT = true;
+    newTab.isModified = true;
+    newTab.charTableData = charData;
+    newTab.charTableWidget = charWidget;
+    newTab.version = version;
+    
+    int tabIndex = m_fileTabs.size();
+    m_fileTabs.push_back(newTab);
+    
+    QWidget* parentPage = charWidget->property("parentPage").value<QWidget*>();
+    if (!parentPage) parentPage = charWidget->parentWidget();
+    m_tabWidget->insertTab(tabIndex, parentPage, newTab.fileName);
+    
+    // 连接修改信号
+    connect(charWidget, &CharTableWidget::textModified, [this, tabIndex]() {
+        if (tabIndex >= 0 && tabIndex < static_cast<int>(m_fileTabs.size())) {
+            FileTab& tab = m_fileTabs[tabIndex];
+            if (!tab.isModified) {
+                tab.isModified = true;
+                updateWindowTitle();
+            }
+            if (m_autoSaveEnabled && m_autoSaveTimer) {
+                m_autoSaveTimer->stop();
+                m_autoSaveTimer->start();
+            }
+        }
+    });
+    
+    m_currentTabIndex = tabIndex;
+    m_tabWidget->setCurrentIndex(tabIndex);
+    QCoreApplication::processEvents();
+    
+    QString versionName = (version == GXTVersion::GTA_VC) ? "GTA_VC" : "GTA_IV";
+    showLogMessage(QString("已生成%1字符表: %2 个非ASCII字符").arg(versionName).arg(charCount));
+    
+    updateActions();
+    updateStatusBar();
+    updateWindowTitle();
+}
+
 void GXTStudio::addNewEntry()
 {
     if (m_isReadOnly) return;
@@ -5581,35 +5747,32 @@ void GXTStudio::closeTab(int index)
     
     // 检查是否有未保存的更改
     if (tab.isModified) {
-        int ret = QMessageBox::question(this, "保存更改",
-            QString("文件 '%1' 有未保存的更改。\n是否保存？").arg(tab.fileName),
-            QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
-
-        if (ret == QMessageBox::Save) {
-            // 如果是CharTable，使用同步保存
-            if (tab.isCharTable && tab.charTableWidget) {
-                tab.charTableWidget->updateDataFromText();
-                const CharTableData& data = tab.charTableWidget->data();
-                bool success = false;
-                if (data.type == CharTableData::GTA_VC) {
-                    success = CharTableParser::saveGtaVc(tab.filePath, data);
-                } else if (data.type == CharTableData::GTA_IV) {
-                    success = CharTableParser::saveGtaIv(tab.filePath, data);
-                }
-                if (success) {
-                    tab.isModified = false;
-                    showLogMessage("字符表已保存: " + tab.filePath);
-                } else {
-                    QMessageBox::critical(this, "保存失败", "无法保存字符表文件");
-                    return;
-                }
-            } else {
-                // TODO: 实现 GXTParser 的 saveToFile 方法
-                // 对于GXT/DAT文件，暂时直接关闭
-            }
-        } else if (ret == QMessageBox::Cancel) {
+        QMessageBox msgBox(this);
+        msgBox.setWindowTitle("保存更改");
+        msgBox.setText(QString("文件 '%1' 有未保存的更改。\n是否保存？").arg(tab.fileName));
+        msgBox.setIcon(QMessageBox::Question);
+        
+        QPushButton* saveBtn = msgBox.addButton("保存", QMessageBox::AcceptRole);
+        QPushButton* discardBtn = msgBox.addButton("不保存", QMessageBox::DestructiveRole);
+        QPushButton* cancelBtn = msgBox.addButton("取消", QMessageBox::RejectRole);
+        msgBox.setDefaultButton(saveBtn);
+        
+        msgBox.exec();
+        
+        QAbstractButton* clickedBtn = msgBox.clickedButton();
+        
+        if (clickedBtn == saveBtn) {
+            // 设置待关闭标签页索引，保存完成后会自动关闭
+            m_pendingCloseTabIndex = index;
+            // 切换到该标签页并调用保存
+            m_tabWidget->setCurrentIndex(index);
+            m_currentTabIndex = index;
+            saveFile();
+            return;
+        } else if (clickedBtn == cancelBtn) {
             return;
         }
+        // 如果点击"不保存"，继续关闭流程
     }
     
     // 快速关闭：先移除UI，立即更新界面
@@ -5693,6 +5856,116 @@ void GXTStudio::closeTab(int index)
         }
         
         // 清理数据结构
+        closingTab.tables.clear();
+        closingTab.whmEntries.clear();
+        closingTab.cache = {};
+    });
+    
+    // 最后移除数据
+    m_fileTabs.erase(m_fileTabs.begin() + index);
+}
+
+void GXTStudio::closeTabInternal(int index)
+{
+    // 内部关闭标签页函数，不检查保存状态，直接关闭
+    // 用于保存成功后关闭标签页
+    
+    if (index < 0 || index >= m_tabWidget->count()) {
+        return;
+    }
+
+    if (index < 0 || index >= static_cast<int>(m_fileTabs.size())) {
+        QWidget* widget = m_tabWidget->widget(index);
+        m_tabWidget->removeTab(index);
+        if (widget) {
+            widget->deleteLater();
+        }
+        if (m_fileTabs.empty()) {
+            m_currentTabIndex = -1;
+        } else {
+            m_currentTabIndex = qMin(m_currentTabIndex, static_cast<int>(m_fileTabs.size()) - 1);
+        }
+        updateActions();
+        updateStatusBar();
+        return;
+    }
+
+    FileTab& tab = m_fileTabs[index];
+    
+    // 快速关闭：先移除UI，立即更新界面
+    m_tabWidget->removeTab(index);
+    
+    // 立即更新当前标签页索引，保证界面响应
+    if (m_fileTabs.empty()) {
+        m_currentTabIndex = -1;
+    } else {
+        if (index < m_currentTabIndex) {
+            m_currentTabIndex--;
+        }
+        else if (index == m_currentTabIndex) {
+            m_currentTabIndex = qMin(m_currentTabIndex, static_cast<int>(m_fileTabs.size()) - 1);
+        }
+    }
+    
+    // 立即设置当前标签页
+    if (m_currentTabIndex >= 0 && m_currentTabIndex < static_cast<int>(m_fileTabs.size())) {
+        m_tabWidget->setCurrentIndex(m_currentTabIndex);
+    }
+    
+    // 立即更新界面状态
+    updateActions();
+    updateWindowTitle();
+    showLogMessage("已关闭标签页: " + tab.fileName);
+    
+    // 异步清理资源，避免阻塞界面
+    FileTab& closingTab = m_fileTabs[index];
+    
+    // 立即断开信号连接，防止回调
+    if (closingTab.entryTableView) {
+        closingTab.entryTableView->disconnect();
+        QScrollBar* scrollBar = closingTab.entryTableView->verticalScrollBar();
+        if (scrollBar) {
+            scrollBar->disconnect();
+        }
+    }
+    if (closingTab.tableList) {
+        closingTab.tableList->disconnect();
+    }
+    
+    // 使用定时器延迟清理重资源，避免阻塞UI
+    QTimer::singleShot(0, this, [this, closingTab]() mutable {
+        if (closingTab.cache.scrollTimer) {
+            closingTab.cache.scrollTimer->stop();
+            closingTab.cache.scrollTimer->deleteLater();
+            closingTab.cache.scrollTimer = nullptr;
+        }
+        
+        if (closingTab.progressDialog) {
+            closingTab.progressDialog->close();
+            closingTab.progressDialog->deleteLater();
+            closingTab.progressDialog = nullptr;
+        }
+        
+        if (closingTab.entryTableModel) {
+            closingTab.entryTableModel->deleteLater();
+            closingTab.entryTableModel = nullptr;
+        }
+        if (closingTab.entryTableView) {
+            closingTab.entryTableView->deleteLater();
+            closingTab.entryTableView = nullptr;
+        }
+        
+        if (closingTab.tableList) {
+            closingTab.tableList->clear();
+            closingTab.tableList->deleteLater();
+            closingTab.tableList = nullptr;
+        }
+        
+        if (closingTab.charTableWidget) {
+            closingTab.charTableWidget->deleteLater();
+            closingTab.charTableWidget = nullptr;
+        }
+        
         closingTab.tables.clear();
         closingTab.whmEntries.clear();
         closingTab.cache = {};
@@ -6229,6 +6502,17 @@ void GXTStudio::updateActions()
         
         // 更新按钮文本
         updateCodeTableButtonText();
+    }
+    
+    // 【新增】更新生成字符表DAT菜单项状态
+    // 只有GTA_VC和GTA_IV版本才启用此功能
+    if (m_generateCharTableAction) {
+        bool canGenerate = false;
+        if (hasFile && currentTab && !currentTab->isWHM && !currentTab->isDAT && !currentTab->isCharTable) {
+            GXTVersion version = currentTab->version;
+            canGenerate = (version == GXTVersion::GTA_VC || version == GXTVersion::GTA_IV);
+        }
+        m_generateCharTableAction->setEnabled(canGenerate);
     }
 }
 
@@ -8743,6 +9027,9 @@ void GXTStudio::onSaveCompleted(const SaveResult& result)
     }
     
     if (!result.success) {
+        // 保存失败 - 重置待关闭标签页标志
+        m_pendingCloseTabIndex = -1;
+        
         // 保存失败 - 显示自定义对话框
         showLogMessage(QString("保存失败: %1 - %2").arg(result.fileName, result.errorMessage));
         
@@ -8935,6 +9222,16 @@ void GXTStudio::onSaveCompleted(const SaveResult& result)
     } else {
         // 自动保存完全静默，不显示任何消息
         qDebug() << "自动保存完成:" << result.fileName;
+    }
+
+    // 如果有待关闭的标签页，保存成功后关闭它
+    if (m_pendingCloseTabIndex >= 0 && m_pendingCloseTabIndex < static_cast<int>(m_fileTabs.size())) {
+        int closeIndex = m_pendingCloseTabIndex;
+        m_pendingCloseTabIndex = -1;  // 重置标志
+        // 延迟关闭，确保对话框已关闭
+        QTimer::singleShot(100, this, [this, closeIndex]() {
+            closeTabInternal(closeIndex);
+        });
     }
 
     updateActions();

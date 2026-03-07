@@ -650,6 +650,7 @@ private slots:
     void onSmartTranslate();
     void onConfigTranslate();
     void onExecuteTranslate();
+    void onGenerateCharTable(); // 生成字符表DAT
 
     // 背景设置相关
     void onSetBackground();    // 设置背景图片
@@ -695,6 +696,7 @@ private slots:
     void onTabChanged(int index);
     void onTabMoved(int from, int to);  // 处理标签页拖拽移动
     void closeTab(int index);
+    void closeTabInternal(int index);  // 内部关闭标签页（不检查保存状态）
     
     // 异步保存相关
     void setupSaveThread();
@@ -785,6 +787,7 @@ private:
     QAction* m_aboutAction;
     QAction* m_codeTableAction;    // 码表转换（已弃用，改为下拉按钮）
     QAction* m_smartTranslateAction; // 智能翻译
+    QAction* m_generateCharTableAction; // 生成字符表DAT
     QAction* m_configTranslateAction; // 配置翻译
     QAction* m_executeTranslateAction; // 执行翻译
     QAction* m_setBackgroundAction;    // 设置背景图片
@@ -827,6 +830,9 @@ private:
     int m_pendingReplaceRow;
     QString m_lastReplaceFindText;
     ReplaceDialog::ReplaceScope m_lastReplaceScope;
+    
+    // 保存后关闭标签页
+    int m_pendingCloseTabIndex;  // 保存完成后需要关闭的标签页索引，-1表示无
 
     // 自动保存相关
     QToolButton* m_autoSaveButton;  // 自动保存开关按钮
