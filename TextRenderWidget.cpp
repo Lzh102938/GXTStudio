@@ -87,7 +87,7 @@ static QColor getColorForToken(const QString& token, int gtaVersion) {
         {"~g~", QColor(87, 124, 88, 255)},      // green
         {"~s~", QColor(255, 255, 255, 255)},  // white text
         {"~p~", QColor(152, 111, 158, 255)},    // purple
-        {"~r~", QColor(153, 69, 69, 255)},      // red
+        {"~r~", QColor(138, 62, 62, 255)},      // red
         {"~w~", QColor(255, 255, 255, 255)},  // light gray - reset to default color
         {"~x~", QColor(173, 216, 230, 255)},  // light blue
         {"~y~", QColor(215, 197, 121, 255)},    // yellow

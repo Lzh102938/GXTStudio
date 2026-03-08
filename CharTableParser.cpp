@@ -55,7 +55,7 @@ bool CharTableParser::loadGtaVc(const QString& datPath, CharTableData& out)
 
 bool CharTableParser::loadGtaIv(const QString& datPath, CharTableData& out)
 {
-    // IV字符表是UTF-16LE编码的字符序列，参考Python实现
+    // IV字符表格式：前4字节为字符数量(uint32_t LE)，后面是UTF-32LE编码的字符序列（每个字符4字节）
     QFile f(datPath);
     if (!f.open(QIODevice::ReadOnly)) {
         qWarning() << "无法打开 IV dat 文件:" << datPath;
@@ -65,34 +65,39 @@ bool CharTableParser::loadGtaIv(const QString& datPath, CharTableData& out)
     QByteArray bytes = f.readAll();
     f.close();
 
-    if (bytes.isEmpty()) {
-        qWarning() << "IV dat 文件为空:" << datPath;
+    if (bytes.size() < 8) {
+        qWarning() << "IV dat 文件太小:" << datPath;
         return false;
     }
 
-    // 检查并跳过BOM (Byte Order Mark: 0xFF 0xFE for UTF-16LE)
-    int offset = 0;
-    if (bytes.size() >= 2) {
-        quint8 byte0 = static_cast<quint8>(bytes[0]);
-        quint8 byte1 = static_cast<quint8>(bytes[1]);
-        if (byte0 == 0xFF && byte1 == 0xFE) {
-            offset = 2;
-        }
-    }
+    // 读取字符数量（前4字节，小端序）
+    quint32 charCount = static_cast<quint8>(bytes[0]) |
+                        (static_cast<quint8>(bytes[1]) << 8) |
+                        (static_cast<quint8>(bytes[2]) << 16) |
+                        (static_cast<quint8>(bytes[3]) << 24);
 
-    // 读取UTF-16LE字符序列，过滤掉空白字符和换行符
+    // 从偏移4开始读取UTF-32LE字符序列（每个字符4字节）
+    int offset = 4;
+
+    // 读取UTF-32LE字符序列，过滤掉空白字符和换行符
     QVector<uint16_t> characters;
-    characters.reserve(bytes.size() / 2); // 预分配空间以提高性能
+    characters.reserve(charCount);
 
-    for (int i = offset; i + 1 < bytes.size(); i += 2) {
-        // 小端序：低字节在前，高字节在后
-        quint8 lo = static_cast<quint8>(bytes[i]);
-        quint8 hi = static_cast<quint8>(bytes[i + 1]);
-        quint16 w = static_cast<quint16>((hi << 8) | lo);
+    for (quint32 i = 0; i < charCount && (offset + 4) <= bytes.size(); ++i) {
+        // 小端序：低字节在前
+        quint32 codepoint = static_cast<quint8>(bytes[offset]) |
+                           (static_cast<quint8>(bytes[offset + 1]) << 8) |
+                           (static_cast<quint8>(bytes[offset + 2]) << 16) |
+                           (static_cast<quint8>(bytes[offset + 3]) << 24);
+        offset += 4;
 
-        // 跳过空白字符：空字符(0x0000)、空格(0x0020)、制表符(0x0009)、换行符(0x000A)、回车符(0x000D)
-        if (w != 0x0000 && w != 0x0020 && w != 0x0009 && w != 0x000A && w != 0x000D) {
-            characters.append(w);
+        // 跳过空白字符
+        if (codepoint != 0x0000 && codepoint != 0x0020 && codepoint != 0x0009 &&
+            codepoint != 0x000A && codepoint != 0x000D) {
+            // 如果码点超过16位，截断或跳过
+            if (codepoint <= 0xFFFF) {
+                characters.append(static_cast<uint16_t>(codepoint));
+            }
         }
     }
 
@@ -184,16 +189,28 @@ bool CharTableParser::saveGtaIv(const QString& datPath, const CharTableData& dat
         return false;
     }
 
-    // GTA IV char_table.dat 格式：UTF-16LE字符序列，无BOM
-    // 按行优先顺序写入有效字符（跳过空白字符：0x0000, 0x0020, 0x0009, 0x000A, 0x000D）
+    // 收集有效字符（排除空白字符）
+    QVector<uint32_t> validChars;
     for (int idx = 0; idx < data.cells.size(); ++idx) {
         uint16_t ch = data.cells[idx];
-        // 跳过空白字符（与loadGtaIv保持一致）
         if (ch != 0x0000 && ch != 0x0020 && ch != 0x0009 && ch != 0x000A && ch != 0x000D) {
-            // 小端序：低字节在前，高字节在后
-            file.putChar(static_cast<char>(ch & 0xFF));
-            file.putChar(static_cast<char>((ch >> 8) & 0xFF));
+            validChars.append(ch);
         }
+    }
+
+    // 写入字符数量（4字节，小端序）
+    quint32 charCount = static_cast<quint32>(validChars.size());
+    file.putChar(static_cast<char>(charCount & 0xFF));
+    file.putChar(static_cast<char>((charCount >> 8) & 0xFF));
+    file.putChar(static_cast<char>((charCount >> 16) & 0xFF));
+    file.putChar(static_cast<char>((charCount >> 24) & 0xFF));
+
+    // 按UTF-32LE格式写入每个字符（每个字符4字节）
+    for (quint32 codepoint : validChars) {
+        file.putChar(static_cast<char>(codepoint & 0xFF));
+        file.putChar(static_cast<char>((codepoint >> 8) & 0xFF));
+        file.putChar(static_cast<char>((codepoint >> 16) & 0xFF));
+        file.putChar(static_cast<char>((codepoint >> 24) & 0xFF));
     }
 
     file.close();
