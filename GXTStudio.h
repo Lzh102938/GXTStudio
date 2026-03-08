@@ -821,6 +821,10 @@ private:
     SaveWorker* m_saveWorker;
     QProgressBar* m_saveProgressBar;  // 保存进度条（位于状态栏中间）
     
+    // 字符表图片导出相关
+    QThread* m_charTableExportThread;
+    class CharTableExportWorker* m_charTableExportWorker;
+    
     // 异步替换相关
     ReplaceWorker* m_replaceWorker;
     QThread* m_replaceThread;

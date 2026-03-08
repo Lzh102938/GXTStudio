@@ -108,6 +108,8 @@ set(PROJECT_SOURCES
     CharTableParser.cpp
     CharTableWidget.h
     CharTableWidget.cpp
+    CharTableExportWorker.h
+    CharTableExportWorker.cpp
     ReplaceDialog.h
     ReplaceDialog.cpp
     ReplaceWorker.h

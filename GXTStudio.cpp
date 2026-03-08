@@ -5,6 +5,7 @@
 #include "MultiThreadProgressDialog.h"
 #include "GXTTableModel.h"
 #include "CharTableParser.h"
+#include "CharTableExportWorker.h"
 #include <QApplication>
 #include <QGuiApplication>
 #include <QScreen>
@@ -156,6 +157,8 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_saveThread(nullptr)
     , m_saveWorker(nullptr)
     , m_saveProgressBar(nullptr)
+    , m_charTableExportThread(nullptr)
+    , m_charTableExportWorker(nullptr)
     , m_replaceWorker(nullptr)
     , m_replaceThread(nullptr)
     , m_replaceProgressDialog(nullptr)
@@ -418,6 +421,18 @@ GXTStudio::~GXTStudio()
         delete m_saveThread;
         m_saveThread = nullptr;
         m_saveWorker = nullptr;
+    }
+    
+    // 停止字符表导出线程
+    if (m_charTableExportThread) {
+        if (m_charTableExportWorker) {
+            m_charTableExportWorker->requestCancel();
+        }
+        m_charTableExportThread->quit();
+        m_charTableExportThread->wait(3000);
+        delete m_charTableExportThread;
+        m_charTableExportThread = nullptr;
+        m_charTableExportWorker = nullptr;
     }
     
     // 停止替换线程
@@ -10961,10 +10976,8 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         dialogLayout->setSpacing(12);
         dialogLayout->setContentsMargins(20, 20, 20, 20);
         
-        // 根据版本设置默认字号
         int defaultFontSize = (data.type == CharTableData::GTA_IV) ? 48 : 42;
         
-        // 字体选择按钮
         QHBoxLayout* fontLayout = new QHBoxLayout();
         QLabel* fontLabel = new QLabel("字体设置:", &exportDialog);
         QPushButton* fontBtn = new QPushButton("选择字体...", &exportDialog);
@@ -10976,7 +10989,6 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         fontLayout->addStretch();
         dialogLayout->addLayout(fontLayout);
         
-        // 格式选择
         QHBoxLayout* formatLayout = new QHBoxLayout();
         QLabel* formatLabel = new QLabel("输出格式:", &exportDialog);
         QComboBox* formatCombo = new QComboBox(&exportDialog);
@@ -10989,7 +11001,6 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         formatLayout->addStretch();
         dialogLayout->addLayout(formatLayout);
         
-        // 信息提示 - 根据版本显示
         QString versionName = (data.type == CharTableData::GTA_IV) ? "GTA_IV" : "GTA_VC";
         int rows = (data.type == CharTableData::GTA_IV) ? 62 : 64;
         int cellHeight = (data.type == CharTableData::GTA_IV) ? 66 : 64;
@@ -10998,7 +11009,6 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         infoLabel->setStyleSheet("color: #666; font-size: 11px;");
         dialogLayout->addWidget(infoLabel);
         
-        // 按钮
         QHBoxLayout* btnLayout = new QHBoxLayout();
         btnLayout->addStretch();
         QPushButton* okBtn = new QPushButton("确定", &exportDialog);
@@ -11009,7 +11019,6 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         btnLayout->addWidget(cancelBtn);
         dialogLayout->addLayout(btnLayout);
         
-        // 字体选择对话框
         connect(fontBtn, &QPushButton::clicked, [&exportDialog, &selectedFont, fontBtn]() {
             bool ok = false;
             QFont font = QFontDialog::getFont(&ok, selectedFont, &exportDialog, "选择字体");
@@ -11035,7 +11044,6 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         QString out = QFileDialog::getSaveFileName(this, "导出图片", defaultName, filter);
         if (out.isEmpty()) return;
         
-        // 获取文本中的所有字符
         QString text = widget->toPlainText();
         QVector<QChar> chars;
         for (const QChar& ch : text) {
@@ -11044,48 +11052,76 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
             }
         }
         
-        // 创建4096x4096透明背景图片
-        const int IMG_SIZE = 4096;
+        if (chars.isEmpty()) {
+            showLogMessage("没有可导出的字符");
+            return;
+        }
         
-        // 根据版本设置格子参数
+        const int IMG_SIZE = 4096;
         const int COLS = 64;
         const int ROWS = (data.type == CharTableData::GTA_IV) ? 62 : 64;
-        const int CELL_WIDTH = IMG_SIZE / COLS;   // 64
-        const int CELL_HEIGHT = IMG_SIZE / ROWS;  // VC: 64, IV: 66
+        const int CELL_WIDTH = IMG_SIZE / COLS;
+        const int CELL_HEIGHT = IMG_SIZE / ROWS;
         
-        QImage image(IMG_SIZE, IMG_SIZE, QImage::Format_ARGB32);
-        image.fill(Qt::transparent);
+        if (m_charTableExportWorker) {
+            showLogMessage("上一个导出任务仍在进行中，请稍候...");
+            return;
+        }
         
-        QPainter painter(&image);
-        painter.setRenderHint(QPainter::Antialiasing);
-        painter.setRenderHint(QPainter::TextAntialiasing);
+        if (!m_charTableExportThread) {
+            m_charTableExportThread = new QThread(this);
+        }
         
-        painter.setFont(selectedFont);
+        m_charTableExportWorker = new CharTableExportWorker();
+        m_charTableExportWorker->moveToThread(m_charTableExportThread);
         
-        // 90%不透明度白字
-        QColor textColor(255, 255, 255, 230);
-        painter.setPen(textColor);
+        connect(m_charTableExportWorker, &CharTableExportWorker::progressChanged, this, [this](int percentage, const QString& message) {
+            m_saveProgressBar->setValue(percentage);
+            m_saveProgressBar->setFormat(message + " %p%");
+        });
         
-        // 填充字符到格子中（整体向上平移2像素）
-        int charIndex = 0;
-        for (int row = 0; row < ROWS && charIndex < chars.size(); ++row) {
-            for (int col = 0; col < COLS && charIndex < chars.size(); ++col) {
-                int x = col * CELL_WIDTH;
-                int y = row * CELL_HEIGHT - 2;
-                
-                QRect cellRect(x, y, CELL_WIDTH, CELL_HEIGHT);
-                painter.drawText(cellRect, Qt::AlignCenter, QString(chars[charIndex]));
-                ++charIndex;
+        connect(m_charTableExportWorker, &CharTableExportWorker::exportCompleted, this, [this](const CharTableExportResult& result) {
+            m_saveProgressBar->hide();
+            m_saveProgressBar->setValue(0);
+            
+            if (result.success) {
+                showLogMessage(QString("已导出: %1 (耗时 %2ms)").arg(result.outputPath).arg(result.elapsedMs));
+            } else {
+                showLogMessage("导出失败: " + result.errorMessage);
             }
-        }
+            
+            if (m_charTableExportThread && m_charTableExportThread->isRunning()) {
+                m_charTableExportThread->quit();
+                m_charTableExportThread->wait();
+            }
+            
+            if (m_charTableExportWorker) {
+                m_charTableExportWorker->deleteLater();
+                m_charTableExportWorker = nullptr;
+            }
+        });
         
-        painter.end();
+        m_charTableExportThread->start();
         
-        if (image.save(out)) {
-            showLogMessage("已导出: " + out);
-        } else {
-            showLogMessage("导出失败: " + out);
-        }
+        CharTableExportTask task;
+        task.outputPath = out;
+        task.format = selectedFormat;
+        task.font = selectedFont;
+        task.characters = chars;
+        task.type = (data.type == CharTableData::GTA_IV) ? 1 : 0;
+        task.rows = ROWS;
+        task.cols = COLS;
+        task.cellWidth = CELL_WIDTH;
+        task.cellHeight = CELL_HEIGHT;
+        task.imgSize = IMG_SIZE;
+        
+        m_saveProgressBar->setFormat("正在导出图片 %p%");
+        m_saveProgressBar->show();
+        m_saveProgressBar->setValue(0);
+        
+        QMetaObject::invokeMethod(m_charTableExportWorker, "exportImage", Qt::QueuedConnection, Q_ARG(CharTableExportTask, task));
+        
+        showLogMessage("正在后台导出字符表图片: " + out);
     });
 
     // 保存搜索控件到widget属性，供后续使用
