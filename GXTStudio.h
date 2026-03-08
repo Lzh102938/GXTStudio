@@ -276,6 +276,7 @@ struct FileTab {
     bool isDAT = false;  // 区分DAT和WHM文件
     bool isWHMRSC = false;  // 压缩的 HTML 文档格式
     bool isCharTable = false;  // 字符表文件（VC/IV）
+    bool isWHMReadOnlyLocked = false;  // WHM文件只读锁定标志，禁止用户解除只读
     bool isModified = false;
     int currentTableIndex = 0;
     GXTVersion version = GXTVersion::UNKNOWN; // 文件版本信息

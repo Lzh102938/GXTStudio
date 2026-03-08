@@ -2504,18 +2504,24 @@ void GXTStudio::handleReplaceAll(const QString& findText, const QString& replace
 
 void GXTStudio::toggleReadOnly(bool readOnly)
 {
+    if (!readOnly) {
+        FileTab* currentTab = getCurrentTab();
+        if (currentTab && currentTab->isWHMReadOnlyLocked) {
+            QMessageBox::information(this, "提示", "此版本暂未支持WHM文件编辑，敬请谅解。");
+            m_readOnlyAction->setChecked(true);
+            return;
+        }
+    }
+    
     m_isReadOnly = readOnly;
     
-    // 更新所有标签页中表格的编辑触发器和模型可编辑性
     for (auto& tab : m_fileTabs) {
         if (tab.tableList) {
             tab.tableList->setEditTriggers(QAbstractItemView::DoubleClicked);
         }
         if (tab.entryTableView) {
-            // 在只读模式下仍然允许选择，但不触发编辑
             if (m_isReadOnly) {
                 tab.entryTableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
-                // 设置选择行为为行选择，允许用户选择整个行
                 tab.entryTableView->setSelectionBehavior(QAbstractItemView::SelectRows);
                 tab.entryTableView->setSelectionMode(QAbstractItemView::ExtendedSelection);
             } else {
@@ -2527,49 +2533,39 @@ void GXTStudio::toggleReadOnly(bool readOnly)
         if (tab.entryTableModel) {
             tab.entryTableModel->setEditable(!m_isReadOnly);
         }
-        // 更新添加新表按钮状态
         if (tab.addTableButton) {
             tab.addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM && !tab.isDAT);
         }
-        // 更新添加条目按钮状态
         if (tab.addEntryButton) {
             tab.addEntryButton->setEnabled(!m_isReadOnly);
         }
-        // 如果是字符表，设置其只读状态
         if (tab.charTableWidget) {
             tab.charTableWidget->setReadOnly(m_isReadOnly);
         }
     }
     
-    // 更新菜单项文本和动作状态 - 保持文本固定为"只读模式"
     m_readOnlyAction->setText("只读模式");
-    updateActions(); // 【修复】更新保存按钮等动作的状态
+    updateActions();
     
-    // 【修复】更新码表转换按钮和下拉菜单状态
     if (m_codeTableButton) {
         bool enabled = !m_isReadOnly;
         m_codeTableButton->setEnabled(enabled);
         
-        // 更新下拉菜单中的动作状态
         if (m_mountCodeTableAction) {
             m_mountCodeTableAction->setEnabled(enabled);
         }
         if (m_convertCodeTableAction) {
-            // 转换菜单项只有在已挂载码表且非只读模式下才启用
             bool canConvert = enabled && m_codeTableConverter && m_codeTableConverter->isTableMounted();
             m_convertCodeTableAction->setEnabled(canConvert);
         }
         if (m_unmountCodeTableAction) {
-            // 卸载菜单项只有在已挂载码表且非只读模式下才启用
             bool canUnmount = enabled && m_codeTableConverter && m_codeTableConverter->isTableMounted();
             m_unmountCodeTableAction->setEnabled(canUnmount);
         }
         
-        // 更新按钮文本
         updateCodeTableButtonText();
     }
     
-    // 使用showLogMessage显示状态变更，它会自动在一段时间后恢复状态栏
     showLogMessage(QString("模式已切换: %1").arg(m_isReadOnly ? "只读" : "编辑"));
 }
 
@@ -5640,6 +5636,10 @@ void GXTStudio::onTabChanged(int index)
             updateStatusBar();
             updateActions();
 
+            if (currentTab->isWHMReadOnlyLocked && !m_isReadOnly) {
+                m_readOnlyAction->setChecked(true);
+            }
+
             if (currentTab->isCharTable && currentTab->charTableWidget) {
                 QWidget* parentPage = currentTab->charTableWidget->property("parentPage").value<QWidget*>();
                 if (parentPage) {
@@ -6736,6 +6736,7 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
         tab.datEntries = result.datEntries;  // 设置DAT条目
         tab.isWHM = result.isWHM;
         tab.isDAT = result.isDAT;  // 设置DAT标志
+        tab.isWHMReadOnlyLocked = result.isWHM;  // WHM文件强制只读锁定
         tab.version = result.version;  // 设置版本信息
 
         // 插入到标签页列表
@@ -6791,11 +6792,13 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
             updateEntryTable();
         }
 
-        // 立即处理事件，确保UI立即更新
         QCoreApplication::processEvents();
 
-        // 【修复】更新动作状态，确保保存按钮和添加表按钮状态正确
         updateActions();
+
+        if (fileTab.isWHMReadOnlyLocked && !m_isReadOnly) {
+            m_readOnlyAction->setChecked(true);
+        }
 
     } catch (const std::exception& e) {
         qCritical() << "处理解析结果时发生错误:" << e.what();
