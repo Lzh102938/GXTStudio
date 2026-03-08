@@ -330,117 +330,82 @@ void CharTableWidget::rebuildCharSet()
 
 void CharTableWidget::reformatText()
 {
-    if (m_formatting) return;  // 防止递归
+    if (m_formatting) return;
     m_formatting = true;
     
-    // 使用缓存文本，避免重复获取
     QString text = m_textDirty ? toPlainText() : m_cachedText;
-    // 过滤掉 ASCII 字符（包括粘贴或输入法泄露的 ASCII）
-    if (!text.isEmpty()) {
-        QString filtered;
-        filtered.reserve(text.length());
-        for (QChar ch : text) {
-            if (ch == '\n') {
-                filtered.append(ch);
-                continue;
-            }
-            if (ch.unicode() < 128) continue; // 跳过 ASCII
-            filtered.append(ch);
-        }
-        if (filtered != text) {
-            text = filtered;
-        }
-    }
     
-    // 快速检查：如果文本为空或没有换行，直接返回
-    if (text.isEmpty() || !text.contains('\n')) {
-        // 只需要检查字符限制
-        int chars = text.length();
-        if (chars > MAX_CHARS) {
-            text = text.left(MAX_CHARS);
-            setPlainText(text);
-            emit maxCharsReached();
-        }
+    if (text.isEmpty()) {
         m_formatting = false;
         return;
     }
     
-    // 移除所有换行符，合并成一行
-    text.remove('\n');
+    // 一次性遍历：过滤ASCII、去重、收集有效字符
+    int textLen = text.length();
+    int processLimit = qMin(textLen, MAX_CHARS);
     
-    // 检测并移除重复字符（只保留第一个出现的）
     QString deduped;
-    deduped.reserve(qMin(text.length(), MAX_CHARS));
+    deduped.reserve(processLimit);
     QSet<QChar> seen;
+    seen.reserve(processLimit);
+    
     bool hasDuplicate = false;
     QChar dupChar;
     
-    // 限制循环次数，只处理前MAX_CHARS个字符
-    int processLimit = qMin(text.length(), MAX_CHARS);
-    for (int i = 0; i < processLimit; ++i) {
+    for (int i = 0; i < textLen && deduped.size() < MAX_CHARS; ++i) {
         const QChar& ch = text[i];
-        // 再次过滤 ASCII（保险）
+        if (ch == '\n') continue;
         if (ch.unicode() < 128) continue;
         if (seen.contains(ch)) {
-            hasDuplicate = true;
-            dupChar = ch;
-            continue;  // 跳过重复字符
+            if (!hasDuplicate) {
+                hasDuplicate = true;
+                dupChar = ch;
+            }
+            continue;
         }
         seen.insert(ch);
         deduped.append(ch);
     }
     
-    // 显示重复字符提示
     if (hasDuplicate && m_hintLabel) {
         m_hintLabel->setText(QString("字符 '%1' 已存在，不允许重复").arg(dupChar));
         m_hintLabel->setStyleSheet("color: red; font-size: 12px;");
         emit duplicateChar(dupChar);
-        QTimer::singleShot(2000, this, [this]() {
-            updateHint();
-        });
+        QTimer::singleShot(2000, this, [this]() { updateHint(); });
     }
     
-    text = deduped;
-    
-    // 限制字符数不超过 64x64
-    if (text.length() > MAX_CHARS) {
-        text = text.left(MAX_CHARS);
-        emit maxCharsReached();
+    int len = deduped.size();
+    if (len == 0) {
+        m_formatting = false;
+        return;
     }
     
-    // 重新按每64字符分行 - 使用预分配
-    int len = text.length();
-    int newLines = (len - 1) / COLS_PER_LINE;
+    // 构建格式化文本
+    int lineCount = (len - 1) / COLS_PER_LINE + 1;
     QString formatted;
-    formatted.reserve(len + newLines);  // 预分配空间
+    formatted.reserve(len + lineCount - 1);
     
     for (int i = 0; i < len; ++i) {
-        formatted.append(text[i]);
+        formatted.append(deduped[i]);
         if ((i + 1) % COLS_PER_LINE == 0 && i < len - 1) {
             formatted.append('\n');
         }
     }
     
-    // 获取当前光标位置
-    QTextCursor cursor = textCursor();
-    int oldPos = cursor.position();
-    
-    // 只有在文本确实变化时才更新（使用缓存的旧文本比较）
     QString oldText = m_cachedText.isEmpty() ? toPlainText() : m_cachedText;
     if (formatted != oldText) {
+        QTextCursor cursor = textCursor();
+        int oldPos = cursor.position();
+        
         setPlainText(formatted);
-        m_cachedText = formatted;  // 更新缓存
+        m_cachedText = formatted;
         m_textDirty = false;
         
-        // 恢复光标位置（尽量保持在原位置）
         cursor.setPosition(qMin(oldPos, formatted.length()));
         setTextCursor(cursor);
     }
     
-    // 重建字符集合（复用seen集合，避免重新遍历）
     m_existingChars = std::move(seen);
-    
-    // 更新提示（使用缓存的文本）
     m_cachedText = formatted;
     m_textDirty = false;
     updateHint();
@@ -460,21 +425,19 @@ void CharTableWidget::setData(const CharTableData& data)
         return;
     }
     
-    // 收集有效字符（使用预分配和快速过滤）
-    QVector<uint16_t> characters;
-    characters.reserve(m_data.cells.size());
+    const int charCount = m_data.cells.size();
+    int validCount = 0;
     
-    // 使用const引用避免拷贝
-    const QVector<uint16_t>& cells = m_data.cells;
-    for (uint16_t ch : cells) {
-        // 快速过滤：使用位运算判断
+    // 第一遍：统计有效字符数量
+    const uint16_t* cells = m_data.cells.constData();
+    for (int i = 0; i < charCount; ++i) {
+        uint16_t ch = cells[i];
         if (ch != 0x0000 && ch != 0x0020 && ch != 0x0009 && ch != 0x000A && ch != 0x000D) {
-            characters.append(ch);
+            ++validCount;
         }
     }
     
-    // 如果没有有效字符，直接返回
-    if (characters.isEmpty()) {
+    if (validCount == 0) {
         setPlainText(QString());
         m_cachedText.clear();
         m_textDirty = false;
@@ -482,54 +445,46 @@ void CharTableWidget::setData(const CharTableData& data)
         return;
     }
     
+    // 第二遍：收集有效字符
+    QVector<uint16_t> characters;
+    characters.reserve(validCount);
+    for (int i = 0; i < charCount; ++i) {
+        uint16_t ch = cells[i];
+        if (ch != 0x0000 && ch != 0x0020 && ch != 0x0009 && ch != 0x000A && ch != 0x000D) {
+            characters.append(ch);
+        }
+    }
+    
     // 排序
     std::sort(characters.begin(), characters.end());
     
-    // 预计算需要的换行符数量
-    int charCount = characters.size();
-    int lineCount = (charCount - 1) / COLS_PER_LINE + 1;
-    int totalLength = charCount + (lineCount - 1);  // 文本 + 换行符
+    // 预计算文本长度
+    int lineCount = (validCount - 1) / COLS_PER_LINE + 1;
+    int totalLength = validCount + (lineCount - 1);
     
-    // 构建文本（预分配空间）
+    // 构建文本
     QString text;
     text.reserve(totalLength);
     
-    for (int i = 0; i < charCount; ++i) {
+    for (int i = 0; i < validCount; ++i) {
         text.append(QChar(characters[i]));
-        if ((i + 1) % COLS_PER_LINE == 0 && i < charCount - 1) {
+        if ((i + 1) % COLS_PER_LINE == 0 && i < validCount - 1) {
             text.append('\n');
         }
     }
     
-    // 使用光标插入文本，保持格式
+    // 直接设置文本
     setPlainText(text);
-    m_cachedText = text;  // 更新缓存
+    m_cachedText = text;
     m_textDirty = false;
     
-    // 设置固定行高（批量设置，使用更高效的方法）
-    QFontMetrics fm(font());
-    int lineHeight = fm.height();
-    QTextBlockFormat format;
-    format.setLineHeight(lineHeight, QTextBlockFormat::FixedHeight);
-    format.setTopMargin(0);
-    format.setBottomMargin(0);
-    
-    QTextCursor cursor(document());
-    cursor.beginEditBlock();  // 开始批量编辑
-    for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
-        QTextCursor blockCursor(block);
-        blockCursor.setBlockFormat(format);
-    }
-    cursor.endEditBlock();  // 结束批量编辑
-    
-    // 重建字符集合（使用已排序的characters）
+    // 重建字符集合
     m_existingChars.clear();
-    m_existingChars.reserve(charCount);
-    for (uint16_t ch : characters) {
-        m_existingChars.insert(QChar(ch));
+    m_existingChars.reserve(validCount);
+    for (int i = 0; i < validCount; ++i) {
+        m_existingChars.insert(QChar(characters[i]));
     }
     
-    // 更新提示
     updateHint();
 }
 

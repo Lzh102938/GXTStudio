@@ -43,6 +43,8 @@
 #include <QItemSelectionModel>
 #include <QSet>
 #include <QStringConverter>
+#include <QFontDialog>
+#include <QComboBox>
 #include <algorithm>
 
 #include <windows.h>
@@ -5474,34 +5476,21 @@ void GXTStudio::onTabChanged(int index)
 {
     qDebug() << "【Tab调试】onTabChanged被调用，index=" << index << "当前m_currentTabIndex=" << m_currentTabIndex;
     
-    // 【根治方案】如果索引超出范围，直接忽略（可能是在创建/删除标签页过程中的中间状态）
     if (index < 0 || index >= static_cast<int>(m_fileTabs.size())) {
         qDebug() << "【Tab调试】索引超出范围，直接返回";
         return;
     }
     
-    // 先保存前一个标签页索引，用于清理
     int previousTabIndex = m_currentTabIndex;
-    
-    // 【修复】只有当索引完全相同时才跳过清理步骤，但仍然需要确保UI状态正确
-    // 注意：新打开标签页时，虽然m_currentTabIndex可能已经被设置，但仍需执行UI更新
     bool skipCleanup = (m_currentTabIndex == index);
-    if (skipCleanup) {
-        qDebug() << "【Tab调试】索引相同，跳过清理步骤，但仍执行UI更新";
-    } else {
-        // 清理前一个标签页的资源
+    
+    if (!skipCleanup) {
         if (previousTabIndex >= 0 && previousTabIndex < static_cast<int>(m_fileTabs.size())) {
             FileTab* previousTab = &m_fileTabs[previousTabIndex];
             if (previousTab) {
-                // 【修复】CharTable标签页需要隐藏UI元素
                 if (previousTab->isCharTable && previousTab->charTableWidget) {
-                    QWidget* prevParentPage = previousTab->charTableWidget->property("parentPage").value<QWidget*>();
-                    if (prevParentPage) {
-                        prevParentPage->setUpdatesEnabled(false);
-                    }
                     previousTab->charTableWidget->setUpdatesEnabled(false);
                 }
-                // 普通GXT/DAT标签页的处理
                 if (previousTab->entryTableView) {
                     previousTab->entryTableView->setUpdatesEnabled(false);
                 }
@@ -5510,26 +5499,17 @@ void GXTStudio::onTabChanged(int index)
                 }
             }
         }
-
-        // 更新索引
         m_currentTabIndex = index;
         qDebug() << "【Tab调试】更新m_currentTabIndex为" << m_currentTabIndex;
     }
 
-    // 获取新的当前标签页
     FileTab* currentTab = getCurrentTab();
     qDebug() << "【Tab调试】getCurrentTab()返回" << currentTab;
     if (!currentTab) {
-        // 如果没有有效的当前标签页，恢复前一个标签页的状态
         if (!skipCleanup && previousTabIndex >= 0 && previousTabIndex < static_cast<int>(m_fileTabs.size())) {
             FileTab* previousTab = &m_fileTabs[previousTabIndex];
             if (previousTab) {
-                // 【修复】CharTable标签页需要恢复更新
                 if (previousTab->isCharTable && previousTab->charTableWidget) {
-                    QWidget* prevParentPage = previousTab->charTableWidget->property("parentPage").value<QWidget*>();
-                    if (prevParentPage) {
-                        prevParentPage->setUpdatesEnabled(true);
-                    }
                     previousTab->charTableWidget->setUpdatesEnabled(true);
                 }
                 if (previousTab->entryTableView) {
@@ -5543,19 +5523,11 @@ void GXTStudio::onTabChanged(int index)
         return;
     }
 
-    // 【关键修复】立即重新设置模型的tab指针，确保模型指向正确的FileTab
     if (currentTab->entryTableModel && currentTab->entryTableView) {
-        // 强制重新设置模型，清除所有缓存
         currentTab->entryTableModel->setTab(currentTab);
     }
 
-    // 暂停所有视图更新以防止闪烁和内存问题
-    // 【修复】CharTable标签页需要特殊处理
     if (currentTab->isCharTable && currentTab->charTableWidget) {
-        QWidget* parentPage = currentTab->charTableWidget->property("parentPage").value<QWidget*>();
-        if (parentPage) {
-            parentPage->setUpdatesEnabled(false);
-        }
         currentTab->charTableWidget->setUpdatesEnabled(false);
     }
     if (currentTab->entryTableView) {
@@ -5565,7 +5537,6 @@ void GXTStudio::onTabChanged(int index)
         currentTab->tableList->setUpdatesEnabled(false);
     }
 
-    // 清理委托缓存
     if (currentTab->entryTableView) {
         auto* delegate = qobject_cast<OptimizedItemDelegate*>(currentTab->entryTableView->itemDelegate());
         if (delegate) {
@@ -5573,13 +5544,10 @@ void GXTStudio::onTabChanged(int index)
         }
     }
 
-    // 确保视图可见
-    // CharTable文件需要特殊处理
     qDebug() << "【CharTable调试】currentTab->isCharTable=" << currentTab->isCharTable 
              << "currentTab->charTableWidget=" << currentTab->charTableWidget;
     if (currentTab->isCharTable && currentTab->charTableWidget) {
         qDebug() << "【CharTable调试】处理CharTable可见性";
-        // 确保CharTable的父页面可见
         QWidget* parentPage = currentTab->charTableWidget->property("parentPage").value<QWidget*>();
         qDebug() << "【CharTable调试】parentPage=" << parentPage;
         if (parentPage) {
@@ -5591,15 +5559,13 @@ void GXTStudio::onTabChanged(int index)
         currentTab->charTableWidget->show();
         qDebug() << "【CharTable调试】charTableWidget已设置为可见";
         
-        // 【关键修复】确保CharTable标签页获得焦点并激活
         if (parentPage) {
-            parentPage->raise();  // 提升到最上层
-            parentPage->activateWindow();  // 激活窗口
+            parentPage->raise();
+            parentPage->activateWindow();
         }
         currentTab->charTableWidget->raise();
-        currentTab->charTableWidget->setFocus();  // 设置焦点
+        currentTab->charTableWidget->setFocus();
     } else {
-        // 普通DAT文件的处理
         if (currentTab->entryTableView) {
             currentTab->entryTableView->setVisible(true);
             currentTab->entryTableView->show();
@@ -5610,46 +5576,35 @@ void GXTStudio::onTabChanged(int index)
         }
     }
 
-    // 【关键修复】捕获索引而不是指针，避免标签页移动后指针失效
     int currentTabIndex = m_currentTabIndex;
 
-    // 【性能优化】减少延迟从50ms到10ms，加快标签页切换响应速度
     QTimer::singleShot(10, this, [this, currentTabIndex, previousTabIndex]() {
-        // 【关键修复】每次都通过索引重新获取指针，避免指针失效
         FileTab* currentTab = (currentTabIndex >= 0 && currentTabIndex < static_cast<int>(m_fileTabs.size()))
                               ? &m_fileTabs[currentTabIndex] : nullptr;
 
-        // 确保当前标签页仍然有效
         if (!currentTab || currentTabIndex != m_currentTabIndex) {
             return;
         }
 
         try {
-            // 【关键修复】再次强制重置模型，确保数据完全同步
             if (currentTab->entryTableModel) {
                 currentTab->entryTableModel->forceDataReset();
             }
 
-            // 【关键修复】确保表格视图的模型已正确设置
             if (currentTab->entryTableView && currentTab->entryTableModel) {
                 QAbstractItemModel* currentModel = currentTab->entryTableView->model();
                 if (currentModel != currentTab->entryTableModel) {
-                    // 如果模型不匹配，重新设置
                     currentTab->entryTableView->setModel(currentTab->entryTableModel);
                 }
             }
 
-            // 恢复视图更新
-            // CharTable文件需要特殊处理
             if (currentTab->isCharTable && currentTab->charTableWidget) {
-                // 恢复CharTableWidget的更新
                 currentTab->charTableWidget->setUpdatesEnabled(true);
                 QWidget* parentPage = currentTab->charTableWidget->property("parentPage").value<QWidget*>();
                 if (parentPage) {
                     parentPage->setUpdatesEnabled(true);
                 }
             } else {
-                // 普通DAT文件的处理
                 if (currentTab->entryTableView) {
                     currentTab->entryTableView->setUpdatesEnabled(true);
                 }
@@ -5658,52 +5613,37 @@ void GXTStudio::onTabChanged(int index)
                 }
             }
 
-            // 【关键修复】强制刷新视口，确保内容立即显示
             if (currentTab->entryTableView) {
                 currentTab->entryTableView->viewport()->update();
-                currentTab->entryTableView->update();
             }
 
-            // 更新表格列表，这会设置正确的 currentTableIndex 并更新模型
-            // 注意：CharTable 没有 tableList，跳过 updateTableList
             if (!currentTab->isCharTable) {
                 scheduleUpdateTableList();
             }
 
-            // 不再单独调用 updateEntryTable()，因为 updateTableList 已经更新了模型
             updateWindowTitle();
             updateStatusBar();
-            updateActions();  // 【修复】切换标签页时更新按钮状态
+            updateActions();
 
-            // 【关键修复】强制更新表格视图，确保数据立即显示
-            // CharTable文件没有entryTableView，需要特殊处理
             if (currentTab->isCharTable && currentTab->charTableWidget) {
-                // 确保CharTableWidget可见并更新
                 QWidget* parentPage = currentTab->charTableWidget->property("parentPage").value<QWidget*>();
                 if (parentPage) {
                     parentPage->show();
-                    parentPage->update();
                 }
                 currentTab->charTableWidget->update();
-                currentTab->charTableWidget->viewport()->update();
             } else if (currentTab->entryTableView) {
                 currentTab->entryTableView->viewport()->repaint();
-                currentTab->entryTableView->repaint();
             }
 
-            // 如果启用了背景，更新搜索UI颜色以匹配当前背景
             if (m_backgroundEnabled) {
                 updateSearchUIColors(*currentTab);
             }
 
-            // 触发一次内存清理
             QTimer::singleShot(100, [this]() {
                 cleanupDelegatesCache();
-                QCoreApplication::processEvents();
             });
         } catch (...) {
             qWarning() << "Exception occurred during tab change";
-            // 确保视图更新被重新启用
             if (currentTab && currentTab->entryTableView) {
                 currentTab->entryTableView->setUpdatesEnabled(true);
             }
@@ -10988,41 +10928,164 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     bottomRow->addWidget(hintLabel);
     layout->addLayout(bottomRow);
 
-    // 连接光标位置变化信号
-    connect(widget, &CharTableWidget::cursorPositionChanged, [posLabel](int line, int column) {
-        posLabel->setText(QString("第 %1 行, 第 %2 列").arg(line).arg(column));
-    });
-    
     // 设置提示标签
     widget->setHintLabel(hintLabel);
     
-    // 连接字符数超限信号
-    connect(widget, &CharTableWidget::maxCharsReached, [hintLabel]() {
-        hintLabel->setText("字符数最多 64 x 64 (已达上限)");
-        hintLabel->setStyleSheet("color: red; font-size: 12px;");
-    });
-    
-    // 连接重复字符信号
-    connect(widget, &CharTableWidget::duplicateChar, [hintLabel](QChar ch) {
-        hintLabel->setText(QString("字符 '%1' 已存在，不允许重复").arg(ch));
-        hintLabel->setStyleSheet("color: red; font-size: 12px;");
+    // 延迟连接信号，减少初始化时的开销
+    QTimer::singleShot(0, widget, [widget, posLabel, hintLabel]() {
+        // 连接光标位置变化信号
+        connect(widget, &CharTableWidget::cursorPositionChanged, [posLabel](int line, int column) {
+            posLabel->setText(QString("第 %1 行, 第 %2 列").arg(line).arg(column));
+        });
+        
+        // 连接字符数超限信号
+        connect(widget, &CharTableWidget::maxCharsReached, [hintLabel]() {
+            hintLabel->setText("字符数最多 64 x 64 (已达上限)");
+            hintLabel->setStyleSheet("color: red; font-size: 12px;");
+        });
+        
+        // 连接重复字符信号
+        connect(widget, &CharTableWidget::duplicateChar, [hintLabel](QChar ch) {
+            hintLabel->setText(QString("字符 '%1' 已存在，不允许重复").arg(ch));
+            hintLabel->setStyleSheet("color: red; font-size: 12px;");
+        });
     });
 
-    // export button: render widget to image
-    connect(exportBtn, &QPushButton::clicked, [this, widget, fileName]() {
-        QString out = QFileDialog::getSaveFileName(this, "导出为PNG", QFileInfo(fileName).completeBaseName() + ".png", "PNG 图片 (*.png)");
+    // export button: export as character grid image
+    connect(exportBtn, &QPushButton::clicked, [this, widget, fileName, data]() {
+        QDialog exportDialog(this);
+        exportDialog.setWindowTitle("导出字符表图片");
+        exportDialog.setMinimumWidth(350);
+        
+        QVBoxLayout* dialogLayout = new QVBoxLayout(&exportDialog);
+        dialogLayout->setSpacing(12);
+        dialogLayout->setContentsMargins(20, 20, 20, 20);
+        
+        // 根据版本设置默认字号
+        int defaultFontSize = (data.type == CharTableData::GTA_IV) ? 48 : 42;
+        
+        // 字体选择按钮
+        QHBoxLayout* fontLayout = new QHBoxLayout();
+        QLabel* fontLabel = new QLabel("字体设置:", &exportDialog);
+        QPushButton* fontBtn = new QPushButton("选择字体...", &exportDialog);
+        fontBtn->setMinimumWidth(120);
+        QFont selectedFont("Microsoft YaHei", defaultFontSize);
+        fontBtn->setText(selectedFont.family() + " " + QString::number(defaultFontSize) + "pt");
+        fontLayout->addWidget(fontLabel);
+        fontLayout->addWidget(fontBtn);
+        fontLayout->addStretch();
+        dialogLayout->addLayout(fontLayout);
+        
+        // 格式选择
+        QHBoxLayout* formatLayout = new QHBoxLayout();
+        QLabel* formatLabel = new QLabel("输出格式:", &exportDialog);
+        QComboBox* formatCombo = new QComboBox(&exportDialog);
+        formatCombo->addItem("PNG", "png");
+        formatCombo->addItem("BMP", "bmp");
+        formatCombo->addItem("JPG", "jpg");
+        formatCombo->addItem("TIFF", "tiff");
+        formatLayout->addWidget(formatLabel);
+        formatLayout->addWidget(formatCombo);
+        formatLayout->addStretch();
+        dialogLayout->addLayout(formatLayout);
+        
+        // 信息提示 - 根据版本显示
+        QString versionName = (data.type == CharTableData::GTA_IV) ? "GTA_IV" : "GTA_VC";
+        int rows = (data.type == CharTableData::GTA_IV) ? 62 : 64;
+        int cellHeight = (data.type == CharTableData::GTA_IV) ? 66 : 64;
+        QLabel* infoLabel = new QLabel(QString("版本: %1\n输出尺寸: 4096 x 4096 像素\n排列: 64 x %2 格子 (每格 64 x %3)")
+            .arg(versionName).arg(rows).arg(cellHeight), &exportDialog);
+        infoLabel->setStyleSheet("color: #666; font-size: 11px;");
+        dialogLayout->addWidget(infoLabel);
+        
+        // 按钮
+        QHBoxLayout* btnLayout = new QHBoxLayout();
+        btnLayout->addStretch();
+        QPushButton* okBtn = new QPushButton("确定", &exportDialog);
+        okBtn->setMinimumWidth(80);
+        QPushButton* cancelBtn = new QPushButton("取消", &exportDialog);
+        cancelBtn->setMinimumWidth(80);
+        btnLayout->addWidget(okBtn);
+        btnLayout->addWidget(cancelBtn);
+        dialogLayout->addLayout(btnLayout);
+        
+        // 字体选择对话框
+        connect(fontBtn, &QPushButton::clicked, [&exportDialog, &selectedFont, fontBtn]() {
+            bool ok = false;
+            QFont font = QFontDialog::getFont(&ok, selectedFont, &exportDialog, "选择字体");
+            if (ok) {
+                selectedFont = font;
+                fontBtn->setText(selectedFont.family() + " " + QString::number(selectedFont.pointSize()) + "pt");
+            }
+        });
+        
+        connect(okBtn, &QPushButton::clicked, &exportDialog, &QDialog::accept);
+        connect(cancelBtn, &QPushButton::clicked, &exportDialog, &QDialog::reject);
+        
+        if (exportDialog.exec() != QDialog::Accepted) return;
+        
+        QString selectedFormat = formatCombo->currentData().toString();
+        QString filter;
+        if (selectedFormat == "png") filter = "PNG 图片 (*.png)";
+        else if (selectedFormat == "bmp") filter = "BMP 图片 (*.bmp)";
+        else if (selectedFormat == "jpg") filter = "JPG 图片 (*.jpg)";
+        else if (selectedFormat == "tiff") filter = "TIFF 图片 (*.tiff)";
+        
+        QString defaultName = QFileInfo(fileName).completeBaseName() + "." + selectedFormat;
+        QString out = QFileDialog::getSaveFileName(this, "导出图片", defaultName, filter);
         if (out.isEmpty()) return;
-        // 使用文档的实际大小
-        QSize imgSize = widget->document()->size().toSize();
-        if (imgSize.isEmpty()) {
-            imgSize = QSize(800, 600);
+        
+        // 获取文本中的所有字符
+        QString text = widget->toPlainText();
+        QVector<QChar> chars;
+        for (const QChar& ch : text) {
+            if (ch != '\n' && ch.unicode() >= 128) {
+                chars.append(ch);
+            }
         }
-        QImage image(imgSize, QImage::Format_ARGB32);
-        image.fill(Qt::white);
+        
+        // 创建4096x4096透明背景图片
+        const int IMG_SIZE = 4096;
+        
+        // 根据版本设置格子参数
+        const int COLS = 64;
+        const int ROWS = (data.type == CharTableData::GTA_IV) ? 62 : 64;
+        const int CELL_WIDTH = IMG_SIZE / COLS;   // 64
+        const int CELL_HEIGHT = IMG_SIZE / ROWS;  // VC: 64, IV: 66
+        
+        QImage image(IMG_SIZE, IMG_SIZE, QImage::Format_ARGB32);
+        image.fill(Qt::transparent);
+        
         QPainter painter(&image);
-        widget->render(&painter);
-        image.save(out);
-        showLogMessage("已导出: " + out);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setRenderHint(QPainter::TextAntialiasing);
+        
+        painter.setFont(selectedFont);
+        
+        // 90%不透明度白字
+        QColor textColor(255, 255, 255, 230);
+        painter.setPen(textColor);
+        
+        // 填充字符到格子中（整体向上平移2像素）
+        int charIndex = 0;
+        for (int row = 0; row < ROWS && charIndex < chars.size(); ++row) {
+            for (int col = 0; col < COLS && charIndex < chars.size(); ++col) {
+                int x = col * CELL_WIDTH;
+                int y = row * CELL_HEIGHT - 2;
+                
+                QRect cellRect(x, y, CELL_WIDTH, CELL_HEIGHT);
+                painter.drawText(cellRect, Qt::AlignCenter, QString(chars[charIndex]));
+                ++charIndex;
+            }
+        }
+        
+        painter.end();
+        
+        if (image.save(out)) {
+            showLogMessage("已导出: " + out);
+        } else {
+            showLogMessage("导出失败: " + out);
+        }
     });
 
     // 保存搜索控件到widget属性，供后续使用
@@ -11037,8 +11100,12 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         bool caseSensitive = false;
         QList<QTextCursor> matches;
         int currentMatchIndex = -1;
+        QTimer* searchTimer = nullptr;
     };
     CharSearchState* searchState = new CharSearchState();
+    searchState->searchTimer = new QTimer(widget);
+    searchState->searchTimer->setSingleShot(true);
+    searchState->searchTimer->setInterval(150);
     
     // 搜索函数
     auto performSearch = [widget, searchEdit, caseSensitiveButton, prevButton, nextButton, hintLabel, searchState]() {
@@ -11109,8 +11176,11 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         hintLabel->setText(QString("匹配 %1/%2").arg(searchState->currentMatchIndex + 1).arg(searchState->matches.size()));
     });
     
-    // 搜索框文本变化
-    connect(searchEdit, &QLineEdit::textChanged, performSearch);
+    // 搜索框文本变化 - 使用防抖延迟
+    connect(searchEdit, &QLineEdit::textChanged, [searchState, performSearch]() {
+        searchState->searchTimer->start();
+    });
+    connect(searchState->searchTimer, &QTimer::timeout, performSearch);
     connect(caseSensitiveButton, &QToolButton::toggled, performSearch);
 
     // 返回CharTableWidget指针，但它的父窗口是page
