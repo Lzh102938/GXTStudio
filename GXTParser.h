@@ -241,6 +241,7 @@ public:
     void exportDATToTxt(const std::string& datPath, const std::string& txtPath) const;
     const std::vector<GXTTabl>& getTables() const { return tables; }
     void setLogCallback(std::function<void(const std::string&)> callback);
+    void setProgressCallback(std::function<void(int, const std::string&)> callback);
     void setEncoding(int encoding) { encodingType = encoding; }
     GXTVersion getDetectedVersion() const { return detectedVersion; } // 添加获取检测版本的方法
 

@@ -46,21 +46,6 @@ static const QString s_scrollAreaStyle =
     "QScrollArea { "
     "border: none; "
     "background-color: #f5f7fa; "
-    "} "
-    "QScrollBar:vertical { "
-    "background: #e9ecef; "
-    "width: 8px; "
-    "border-radius: 4px; "
-    "margin: 0px; "
-    "} "
-    "QScrollBar::handle:vertical { "
-    "background: #adb5bd; "
-    "border-radius: 4px; "
-    "min-height: 30px; "
-    "margin: 2px; "
-    "} "
-    "QScrollBar::handle:vertical:hover { "
-    "background: #6c757d; "
     "}";
 
 static const QString s_labelStyle = 

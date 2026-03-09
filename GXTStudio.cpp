@@ -914,22 +914,29 @@ void GXTStudio::setupParseThread()
 {
     showLogMessage("正在设置解析线程...");
 
-    // 创建解析线程和工作对象
     m_parseThread = new QThread(this);
     m_parseWorker = new ParseWorker();
 
     showLogMessage("解析线程和工作对象已创建");
 
-    // 移动工作对象到子线程
     m_parseWorker->moveToThread(m_parseThread);
 
-    // 连接信号槽
     connect(m_parseWorker, &ParseWorker::parseCompleted,
             this, &GXTStudio::onParseCompleted, Qt::QueuedConnection);
 
+    connect(m_parseWorker, &ParseWorker::parseProgress,
+            this, [this](int percentage, const QString& message) {
+                if (m_saveProgressBar) {
+                    m_saveProgressBar->setValue(percentage);
+                    m_saveProgressBar->setFormat(message + " %p%");
+                    if (!m_saveProgressBar->isVisible()) {
+                        m_saveProgressBar->show();
+                    }
+                }
+            }, Qt::QueuedConnection);
+
     showLogMessage("信号槽连接完成");
 
-    // 启动线程
     m_parseThread->start();
 
     showLogMessage("解析线程已启动");
@@ -6709,6 +6716,11 @@ void GXTStudio::startAsyncParse(const QString& filePath)
 
 void GXTStudio::onParseCompleted(const ParseResult& result)
 {
+    if (m_saveProgressBar) {
+        m_saveProgressBar->hide();
+        m_saveProgressBar->setValue(0);
+    }
+
     showLogMessage(QString("onParseCompleted 被调用 - 文件: %1, 成功: %2, 错误信息: %3, 表数量: %4, WHM条目: %5, DAT条目: %6")
                   .arg(result.fileName)
                   .arg(result.success)
@@ -6718,7 +6730,6 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
                   .arg(result.isDAT ? result.datEntries.size() : 0));
 
     try {
-        // 验证结果
         if (!result.success) {
             throw std::runtime_error(QString("解析失败: %1").arg(result.errorMessage).toStdString());
         }

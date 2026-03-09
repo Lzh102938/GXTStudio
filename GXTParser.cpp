@@ -13,18 +13,26 @@
 #include <set>
 #include <QByteArray>
 
-// 添加日志回调函数指针
 static std::function<void(const std::string&)> g_logCallback = nullptr;
+static std::function<void(int, const std::string&)> g_progressCallback = nullptr;
 
-// 设置日志回调函数
 void GXTParser::setLogCallback(std::function<void(const std::string&)> callback) {
     g_logCallback = callback;
 }
 
-// 添加日志输出函数
+void GXTParser::setProgressCallback(std::function<void(int, const std::string&)> callback) {
+    g_progressCallback = callback;
+}
+
 static void addParseLog(const std::string& msg) {
     if (g_logCallback) {
         g_logCallback(msg);
+    }
+}
+
+static void reportProgress(int percentage, const std::string& message) {
+    if (g_progressCallback) {
+        g_progressCallback(percentage, message);
     }
 }
 
@@ -289,6 +297,7 @@ bool GXTParser::parseGXT2(FILE* f, std::vector<GXTTabl>& outTables) {
 //-------------------------------------
 bool GXTParser::parse(const std::string& filePath) {
     addParseLog("开始解析文件 " + filePath);
+    reportProgress(0, "正在打开文件...");
     
     FILE* f = nullptr;
     fopen_s(&f, filePath.c_str(), "rb");
@@ -298,28 +307,27 @@ bool GXTParser::parse(const std::string& filePath) {
     }
 
     tables.clear();
-    // 重置检测到的版本
     detectedVersion = GXTVersion::UNKNOWN;
 
-    // === 检测GTA5 GXT2 ===
+    reportProgress(5, "正在检测文件格式...");
+
     fseek(f, 0, SEEK_SET);
-    uint8_t head[8] = {}; // 读取8个字节用于版本检测
+    uint8_t head[8] = {};
     if (fread(head, 1, 8, f) == 8) {
-        // 优先检测GTA5 GXT2格式（最独特的格式）
         if (head[0] == '2' && head[1] == 'T' && head[2] == 'X' && head[3] == 'G') {
             this->detectedVersion = GXTVersion::GXT2;
+            reportProgress(10, "检测到GXT2格式，正在解析...");
             bool ok = parseGXT2(f, tables);
             fclose(f);
+            if (ok) reportProgress(100, "解析完成");
             return ok;
         }
     }
 
-    // === 检测其他格式 ===
     fseek(f, 0, SEEK_SET);
     bool isSA = false;
     int bitsPerChar = 8;
     if (fread(head, 1, 8, f) == 8) {
-        // 检查IV版本特征：头4字节为version和bits_per_char
         uint16_t version = head[0] | (head[1] << 8);
         uint16_t bits = head[2] | (head[3] << 8);
         if (version == 4 && bits == 16) {
@@ -327,25 +335,23 @@ bool GXTParser::parse(const std::string& filePath) {
             bitsPerChar = bits;
             this->detectedVersion = GXTVersion::GTA_IV;
         } 
-        // 检查SA版本特征：前4字节为version和bits，后4字节为'TABL'
         else if (version == 4 && (bits == 8 || bits == 16) && 
                  head[4] == 'T' && head[5] == 'A' && head[6] == 'B' && head[7] == 'L') {
             isSA = true;
             bitsPerChar = bits;
             this->detectedVersion = GXTVersion::GTA_SA;
         }
-        // 检查VC版本特征：直接以'TABL'开头
         else if (head[0] == 'T' && head[1] == 'A' && head[2] == 'B' && head[3] == 'L') {
             this->detectedVersion = GXTVersion::GTA_VC;
         }
-        // 检查III版本特征：直接以'TKEY'开头
         else if (head[0] == 'T' && head[1] == 'K' && head[2] == 'E' && head[3] == 'Y') {
             this->detectedVersion = GXTVersion::GTA_III;
         }
     }
     fseek(f, isSA ? 4 : 0, SEEK_SET);
 
-    // === 主循环 ===
+    reportProgress(10, "正在解析数据块...");
+
     int tableCount = 0;
     while (!feof(f)) {
         char tag[5] = {0};
@@ -595,9 +601,9 @@ bool GXTParser::parse(const std::string& filePath) {
             name.erase(std::find(name.begin(), name.end(), '\0'), name.end());
             GXTTabl tabl; tabl.name = name;
             
+            int progress = 10 + (tableCount * 80 / static_cast<int>(tabs.size()));
+            reportProgress(progress, "正在解析表: " + name);
 
-
-            // 定位到表的TKEY
             long absPos = (long)te.offset;
             fseek(f, absPos, SEEK_SET);
             
@@ -848,6 +854,7 @@ bool GXTParser::parse(const std::string& filePath) {
     }
     
     addParseLog("文件解析完成，共解析 " + std::to_string(tables.size()) + " 个表，版本: " + getVersionName(this->detectedVersion));
+    reportProgress(100, "解析完成");
     return !tables.empty();
 }
 

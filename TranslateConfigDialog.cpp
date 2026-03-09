@@ -2,6 +2,7 @@
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QFormLayout>
+#include <QtWidgets/QFrame>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkRequest>
 #include <QtNetwork/QNetworkReply>
@@ -167,9 +168,18 @@ TranslateConfigDialog::TranslateConfigDialog(QWidget *parent)
     
     QWidget* promptTab = new QWidget();
     QVBoxLayout* promptTabLayout = new QVBoxLayout(promptTab);
-    promptTabLayout->setContentsMargins(12, 12, 12, 12);
+    promptTabLayout->setContentsMargins(0, 0, 0, 0);
     
-    QGroupBox* unifiedGroup = new QGroupBox("提示词配置", promptTab);
+    QScrollArea* promptScrollArea = new QScrollArea(promptTab);
+    promptScrollArea->setWidgetResizable(true);
+    promptScrollArea->setFrameShape(QFrame::NoFrame);
+    promptScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    
+    QWidget* promptScrollContent = new QWidget();
+    QVBoxLayout* promptScrollLayout = new QVBoxLayout(promptScrollContent);
+    promptScrollLayout->setContentsMargins(12, 12, 12, 12);
+    
+    QGroupBox* unifiedGroup = new QGroupBox("提示词配置", promptScrollContent);
     QVBoxLayout* unifiedLayout = new QVBoxLayout(unifiedGroup);
     unifiedLayout->setSpacing(10);
 
@@ -208,8 +218,11 @@ TranslateConfigDialog::TranslateConfigDialog(QWidget *parent)
     promptHelpLabel->setStyleSheet("color: #888; font-size: 10px;");
     unifiedLayout->addWidget(promptHelpLabel);
 
-    promptTabLayout->addWidget(unifiedGroup);
-    promptTabLayout->addStretch();
+    promptScrollLayout->addWidget(unifiedGroup);
+    promptScrollLayout->addStretch();
+    
+    promptScrollArea->setWidget(promptScrollContent);
+    promptTabLayout->addWidget(promptScrollArea);
     
     QWidget* performanceTab = new QWidget();
     QVBoxLayout* performanceLayout = new QVBoxLayout(performanceTab);

@@ -433,14 +433,10 @@ void TextRenderWidget::setGtaVersion(int version)
 {
     if (m_gtaVersion != version) {
         m_gtaVersion = version;
-        // 重新加载字体
         loadViceCityFont();
-        // 标记缓存无效
         m_parseCacheValid = false;
         m_pngCacheValid = false;
-        m_charCache.clear();  // 【性能优化】清除字符缓存（字体变化）
         schedulePNGCacheUpdate();
-        // 触发重绘
         update();
     }
 }
@@ -533,7 +529,6 @@ void TextRenderWidget::onOutlineEnabledChanged(int state)
 {
     m_outlineEnabled = (state == Qt::Checked);
     m_pngCacheValid = false;
-    m_charCache.clear();  // 【性能优化】清除字符缓存
     schedulePNGCacheUpdate();
     update();
 }
@@ -552,9 +547,8 @@ void TextRenderWidget::onFontSizeChanged(int size)
     m_fontSize = size;
     m_mainFont.setPointSize(m_fontSize);
     m_fallbackFont.setPointSize(m_fontSize);
-    m_parseCacheValid = false;  // 字体大小改变，需要重新解析
+    m_parseCacheValid = false;
     m_pngCacheValid = false;
-    m_charCache.clear();  // 【性能优化】清除字符缓存
     schedulePNGCacheUpdate();
     update();
 }
@@ -613,9 +607,8 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
     }
 
     QRect rect = this->rect();
-    QRect textRect = rect.adjusted(10, 6, -10, -6);  // 增加边距使外观更现代化
+    QRect textRect = rect.adjusted(10, 6, -10, -6);
 
-    // 【性能优化】如果缓存无效，解析文本片段
     if (!m_parseCacheValid) {
         parseTextFragments(m_text);
     }
@@ -624,66 +617,21 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
     QFontMetrics fm(currentFont);
     int totalTextHeight = m_parsedLinesCache.size() * m_cachedLineHeight;
 
-    // 如果总文本高度超过可用空间，则限制在可用空间内
     int availableHeight = textRect.height();
     int maxLines = m_parsedLinesCache.size();
     if (totalTextHeight > availableHeight) {
-        // 如果文本太高，只显示能容纳的部分
         maxLines = availableHeight / m_cachedLineHeight;
         totalTextHeight = maxLines * m_cachedLineHeight;
     }
 
-    // 计算垂直居中的起始Y位置
     int startY = textRect.top() + (availableHeight - totalTextHeight) / 2;
 
-    // 【性能优化】绘制阴影（使用字符缓存）
-    if (m_shadowEnabled) {
-        QColor shadowColor(0, 0, 0, 120);
-
-        for (int i = 0; i < maxLines; ++i) {
-            const LineFragments& line = m_parsedLinesCache[i];
-            int shadowXPos = textRect.left() + 2;
-            int shadowYPos = startY + 2 + i * m_cachedLineHeight;
-            // 使用主字体的基线作为统一基线
-            int baseline = shadowYPos + fm.ascent();
-
-            for (const TextFragment& fragment : line.fragments) {
-                if (fragment.isHiddenToken || fragment.isColorToken) {
-                    continue;
-                }
-
-                for (const QChar& ch : fragment.text) {
-                    QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
-                    if (needsFallbackFont(ch) && m_mainFontLoaded && m_cachedFontScale < 1.0) {
-                        QFont scaledFont = charFont;
-                        scaledFont.setPointSizeF(charFont.pointSizeF() * m_cachedFontScale);
-                        charFont = scaledFont;
-                    }
-
-                    // 【性能优化】使用字符缓存渲染
-                    CharCacheValue cached = renderCharToCache(ch, charFont, shadowColor, false);
-
-                    if (shadowXPos + cached.width > textRect.right()) {
-                        break;
-                    }
-
-                    // 【修复】使用基线对齐：y = baseline - cached.ascent
-                    int drawY = baseline - cached.ascent;
-                    painter->drawPixmap(shadowXPos, drawY, cached.pixmap);
-                    shadowXPos += cached.width;
-                }
-            }
-        }
-    }
-
-    // 【性能优化】绘制文字（使用字符缓存，大幅减少绘制调用）
-    QColor currentColor(230, 230, 230, 255); // 默认浅灰色（~w~颜色）
+    QColor currentColor(230, 230, 230, 255);
 
     for (int i = 0; i < maxLines; ++i) {
         const LineFragments& line = m_parsedLinesCache[i];
         int xPos = textRect.left();
         int yPos = startY + i * m_cachedLineHeight;
-        // 使用主字体的基线作为统一基线
         int baseline = yPos + fm.ascent();
 
         for (const TextFragment& fragment : line.fragments) {
@@ -692,29 +640,56 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
             }
 
             if (fragment.isColorToken) {
-                // 更新颜色
                 currentColor = fragment.color;
             } else {
-                // 【性能优化】使用字符缓存批量绘制
-                for (const QChar& ch : fragment.text) {
-                    QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
-                    if (needsFallbackFont(ch) && m_mainFontLoaded && m_cachedFontScale < 1.0) {
-                        QFont scaledFont = charFont;
-                        scaledFont.setPointSizeF(charFont.pointSizeF() * m_cachedFontScale);
-                        charFont = scaledFont;
+                QString textToDraw = fragment.text;
+                
+                int charPos = 0;
+                while (charPos < textToDraw.length()) {
+                    QFont charFont = currentFont;
+                    int start = charPos;
+                    
+                    QChar firstChar = textToDraw[charPos];
+                    bool useFallback = needsFallbackFont(firstChar);
+                    if (useFallback) {
+                        charFont = m_fallbackFont;
                     }
-
-                    // 【性能优化】从缓存获取预渲染字符
-                    CharCacheValue cached = renderCharToCache(ch, charFont, currentColor, m_outlineEnabled);
-
-                    if (xPos + cached.width > textRect.right()) {
-                        break;
+                    
+                    while (charPos < textToDraw.length()) {
+                        QChar ch = textToDraw[charPos];
+                        if (needsFallbackFont(ch) != useFallback) {
+                            break;
+                        }
+                        charPos++;
                     }
-
-                    // 【修复】使用基线对齐：y = baseline - cached.ascent
-                    int drawY = baseline - cached.ascent;
-                    painter->drawPixmap(xPos, drawY, cached.pixmap);
-                    xPos += cached.width;
+                    
+                    QString segment = textToDraw.mid(start, charPos - start);
+                    QFontMetrics fmChar(charFont);
+                    
+                    if (m_shadowEnabled) {
+                        QColor shadowColor(0, 0, 0, 120);
+                        painter->setFont(charFont);
+                        painter->setPen(shadowColor);
+                        painter->drawText(xPos + 2, baseline, segment);
+                    }
+                    
+                    if (m_outlineEnabled) {
+                        QPainterPath path;
+                        path.addText(xPos, baseline, charFont, segment);
+                        
+                        QPen outlinePen(QColor(0, 0, 0, 255), 2.5);
+                        outlinePen.setJoinStyle(Qt::RoundJoin);
+                        outlinePen.setCapStyle(Qt::RoundCap);
+                        
+                        painter->strokePath(path, outlinePen);
+                        painter->fillPath(path, currentColor);
+                    } else {
+                        painter->setFont(charFont);
+                        painter->setPen(currentColor);
+                        painter->drawText(xPos, baseline, segment);
+                    }
+                    
+                    xPos += fmChar.horizontalAdvance(segment);
                 }
             }
         }
@@ -804,81 +779,6 @@ QStringList TextRenderWidget::splitTextAndTokensFast(const QString& input) {
     }
     
     return parts;
-}
-
-// 【性能优化】预渲染字符到位图缓存
-TextRenderWidget::CharCacheValue TextRenderWidget::renderCharToCache(
-    const QChar& ch, const QFont& font, const QColor& color, bool outline)
-{
-    CharCacheKey key{ch, color, outline, font.pointSize()};
-    
-    // 检查缓存
-    auto it = m_charCache.find(key);
-    if (it != m_charCache.end()) {
-        return it.value();
-    }
-    
-    // 清理缓存（LRU策略：当缓存过大时清理一半）
-    if (m_charCache.size() >= MAX_CHAR_CACHE_SIZE) {
-        QMutableHashIterator<CharCacheKey, CharCacheValue> iter(m_charCache);
-        int removeCount = MAX_CHAR_CACHE_SIZE / 2;
-        while (iter.hasNext() && removeCount > 0) {
-            iter.next();
-            iter.remove();
-            removeCount--;
-        }
-    }
-    
-    QFontMetrics fm(font);
-    int charWidth = fm.horizontalAdvance(ch);
-    int charHeight = fm.height();
-    int ascent = fm.ascent();
-    
-    // 统一使用相同的位图大小和位置，无论是否描边
-    int padding = 4; // 始终保留4像素padding用于描边
-    int pixmapWidth = charWidth + padding * 2;
-    int pixmapHeight = charHeight + padding;
-    
-    QPixmap pixmap(pixmapWidth, pixmapHeight);
-    pixmap.fill(Qt::transparent);
-    
-    QPainter painter(&pixmap);
-    
-    // 启用Freetype引擎优化渲染质量
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setRenderHint(QPainter::TextAntialiasing, true);
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    
-    // 设置字体渲染策略
-    QFont ft = font;
-    ft.setStyleStrategy(static_cast<QFont::StyleStrategy>(QFont::PreferAntialias | QFont::PreferQuality));
-    painter.setFont(ft);
-    
-    // 先绘制描边（如果启用）
-    if (outline) {
-        // 使用QPainterPath绘制描边，确保与文本完全对齐
-        QPainterPath path;
-        path.addText(padding, padding + ascent, ft, ch);
-        
-        // 单层简单清晰描边
-        QPen outlinePen(QColor(0, 0, 0, 255), 3.0);
-        outlinePen.setJoinStyle(Qt::RoundJoin);
-        outlinePen.setCapStyle(Qt::RoundCap);
-        outlinePen.setMiterLimit(2.0); // 限制斜接长度，避免尖锐角
-        
-        // 绘制清晰的黑色描边
-        painter.strokePath(path, outlinePen);
-    }
-    
-    // 绘制主文本
-    painter.setPen(color);
-    painter.drawText(padding, padding + ascent, ch);
-    painter.end();
-    
-    CharCacheValue value{pixmap, charWidth, ascent};
-    m_charCache.insert(key, value);
-    
-    return value;
 }
 
 void TextRenderWidget::exportToImage()
@@ -1020,16 +920,13 @@ void TextRenderWidget::dropEvent(QDropEvent* event)
 
 void TextRenderWidget::updateCachedPNG()
 {
-    // 【性能优化】确保解析缓存有效
     if (!m_parseCacheValid) {
         parseTextFragments(m_text);
     }
 
-    // 使用缓存的解析结果
     QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
     QFontMetrics fm(currentFont);
 
-    // 计算图片尺寸
     int maxWidth = 0;
     int totalHeight = m_parsedLinesCache.size() * m_cachedLineHeight;
 
@@ -1039,11 +936,9 @@ void TextRenderWidget::updateCachedPNG()
         }
     }
 
-    // 添加一些边距
     const int margin = 8;
     QSize imageSize(maxWidth + margin * 2, totalHeight + margin * 2);
 
-    // 如果文字为空，使用默认大小
     if (maxWidth == 0 || totalHeight == 0) {
         imageSize = this->size();
     }
@@ -1057,14 +952,12 @@ void TextRenderWidget::updateCachedPNG()
     painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
     painter.setFont(currentFont);
 
-    // 【性能优化】使用字符缓存绘制文字
     if (!m_text.isEmpty()) {
         QColor currentColor(255, 255, 255, 255);
         int yPos = margin;
 
         for (const LineFragments& lineFrags : m_parsedLinesCache) {
             int xPos = margin;
-            // 使用主字体的基线作为统一基线
             int baseline = yPos + fm.ascent();
 
             for (const TextFragment& fragment : lineFrags.fragments) {
@@ -1075,22 +968,54 @@ void TextRenderWidget::updateCachedPNG()
                 if (fragment.isColorToken) {
                     currentColor = fragment.color;
                 } else {
-                    // 【性能优化】使用字符缓存批量绘制
-                    for (const QChar& ch : fragment.text) {
-                        QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
-                        if (needsFallbackFont(ch) && m_mainFontLoaded && m_cachedFontScale < 1.0) {
-                            QFont scaledFont = charFont;
-                            scaledFont.setPointSizeF(charFont.pointSizeF() * m_cachedFontScale);
-                            charFont = scaledFont;
+                    QString textToDraw = fragment.text;
+                    
+                    int charPos = 0;
+                    while (charPos < textToDraw.length()) {
+                        QFont charFont = currentFont;
+                        int start = charPos;
+                        
+                        QChar firstChar = textToDraw[charPos];
+                        bool useFallback = needsFallbackFont(firstChar);
+                        if (useFallback) {
+                            charFont = m_fallbackFont;
                         }
-
-                        // 【性能优化】使用字符缓存
-                        CharCacheValue cached = renderCharToCache(ch, charFont, currentColor, m_outlineEnabled);
-
-                        // 【修复】使用基线对齐：y = baseline - cached.ascent
-                        int drawY = baseline - cached.ascent;
-                        painter.drawPixmap(xPos - 4, drawY, cached.pixmap);
-                        xPos += cached.width;
+                        
+                        while (charPos < textToDraw.length()) {
+                            QChar ch = textToDraw[charPos];
+                            if (needsFallbackFont(ch) != useFallback) {
+                                break;
+                            }
+                            charPos++;
+                        }
+                        
+                        QString segment = textToDraw.mid(start, charPos - start);
+                        QFontMetrics fmChar(charFont);
+                        
+                        if (m_shadowEnabled) {
+                            QColor shadowColor(0, 0, 0, 120);
+                            painter.setFont(charFont);
+                            painter.setPen(shadowColor);
+                            painter.drawText(xPos + 2, baseline, segment);
+                        }
+                        
+                        if (m_outlineEnabled) {
+                            QPainterPath path;
+                            path.addText(xPos, baseline, charFont, segment);
+                            
+                            QPen outlinePen(QColor(0, 0, 0, 255), 2.5);
+                            outlinePen.setJoinStyle(Qt::RoundJoin);
+                            outlinePen.setCapStyle(Qt::RoundCap);
+                            
+                            painter.strokePath(path, outlinePen);
+                            painter.fillPath(path, currentColor);
+                        } else {
+                            painter.setFont(charFont);
+                            painter.setPen(currentColor);
+                            painter.drawText(xPos, baseline, segment);
+                        }
+                        
+                        xPos += fmChar.horizontalAdvance(segment);
                     }
                 }
             }
@@ -1101,7 +1026,6 @@ void TextRenderWidget::updateCachedPNG()
 
     painter.end();
 
-    // 将图片转换为PNG格式的字节数组并缓存
     m_cachedPNGData.clear();
     QBuffer buffer(&m_cachedPNGData);
     buffer.open(QIODevice::WriteOnly);

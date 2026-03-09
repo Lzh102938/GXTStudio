@@ -50,4 +50,5 @@ public slots:
 
 signals:
     void parseCompleted(const ParseResult& result);
+    void parseProgress(int percentage, const QString& message);
 };
