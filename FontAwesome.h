@@ -71,6 +71,11 @@ namespace FA {
     constexpr QChar QUserGroup = QChar(0xf0c0);                // 用户组图标 (Solid) - 团队组织
     constexpr QChar QHeart = QChar(0xf004);                    // 心形图标 (Solid) - 特别鸣谢
     
+    constexpr QChar QFileExport = QChar(0xf56e);               // 文件导出图标 (Solid) - 另存为
+    constexpr QChar QLock = QChar(0xf023);                     // 锁图标 (Solid) - 只读
+    constexpr QChar QExchangeAlt = QChar(0xf362);              // 交换图标 (Solid) - 码表转换
+    constexpr QChar QPlay = QChar(0xf04b);                     // 播放图标 (Solid) - 执行
+    
     // Font Awesome 7 Brands 图标 Unicode
     constexpr QChar QWeixin = QChar(0xf1d7);                   // 微信图标 (Brands) - 捐赠
     constexpr QChar QAlipay = QChar(0xf642);                   // 支付宝图标 (Brands) - 捐赠

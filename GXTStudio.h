@@ -922,6 +922,28 @@ private:
     int m_cacheIndex;
     static const int MAX_SEARCH_CACHE = 20;
 
+    // 【性能优化】样式字符串缓存系统
+    struct CachedStyles {
+        QString tabWidgetStyle;
+        QString toolBarStyle;
+        QString toolButtonStyle;
+        QString splitterStyle;
+        QString tableListStyle;
+        QString tableViewStyle;
+        QString searchEditStyleTemplate;
+        QString navButtonStyleTemplate;
+        QString labelStyleTemplate;
+        QString addEntryButtonStyle;
+        QString iconButtonStyleTemplate;
+        bool initialized = false;
+    } m_cachedStyles;
+    
+    void initializeCachedStyles();
+    QString getSearchEditStyle(const QColor& textColor);
+    QString getNavButtonStyle(const QColor& textColor);
+    QString getLabelStyle(const QColor& textColor);
+    QString getIconButtonStyle(const QColor& textColor);
+
     // 控制搜索时是否跳转（用于替换操作重建搜索结果时保持焦点）
     bool m_suppressSearchJump;
     
