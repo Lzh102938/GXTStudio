@@ -1005,6 +1005,9 @@ private:
     void setupResizeOptimizations();
     void preloadVisibleArea(FileTab* tab);
     
+    // 延迟初始化
+    void initializeDeferredComponents();
+    
     // 搜索相关辅助方法
     void performSearch(const QString& searchText);
     void jumpToMatch(int matchIndex);

@@ -8,59 +8,89 @@
 #include <QTimer>
 #include <QDir>
 #include <QDebug>
+#include <QObject>
 
 // 全局变量保存字体ID - 供其他模块使用
 int g_fontAwesomeSolidId = -1;
 int g_fontAwesomeBrandsId = -1;
 
-// 加载 Font Awesome 图标字体
-static bool loadFontAwesome()
+// 后台线程加载字体
+class FontLoader : public QObject
 {
-    // 使用可执行文件所在目录，而不是当前工作目录
-    QString fontPath = QCoreApplication::applicationDirPath() + "/font/";
-    qDebug() << "Font Awesome path:" << fontPath;
-    qDebug() << "Application directory:" << QCoreApplication::applicationDirPath();
+    Q_OBJECT
+public:
+    explicit FontLoader(QObject *parent = nullptr) : QObject(parent) {}
 
-    QFontDatabase db;
-    int loadedCount = 0;
+public slots:
+    void loadFonts()
+    {
+        // 使用可执行文件所在目录，而不是当前工作目录
+        QString fontPath = QCoreApplication::applicationDirPath() + "/font/";
+        qDebug() << "Font Awesome path:" << fontPath;
+        qDebug() << "Application directory:" << QCoreApplication::applicationDirPath();
 
-    // 加载 Solid 字体
-    QString solidFont = fontPath + "Font Awesome 7 Free-Solid-900.otf";
-    qDebug() << "Loading Solid font from:" << solidFont;
-    g_fontAwesomeSolidId = db.addApplicationFont(solidFont);
-    if (g_fontAwesomeSolidId != -1) {
-        loadedCount++;
-        QString familyName = db.applicationFontFamilies(g_fontAwesomeSolidId).join(", ");
-        qDebug() << "Font Awesome 7 Free-Solid loaded successfully.";
-        qDebug() << "  Family:" << familyName << "ID:" << g_fontAwesomeSolidId;
-        qDebug() << "  Test char f031:" << QChar(0xf031);
-    } else {
-        qDebug() << "Failed to load Font Awesome 7 Free-Solid from:" << solidFont;
+        QFontDatabase db;
+        int loadedCount = 0;
+
+        // 加载 Solid 字体
+        QString solidFont = fontPath + "Font Awesome 7 Free-Solid-900.otf";
+        qDebug() << "Loading Solid font from:" << solidFont;
+        g_fontAwesomeSolidId = db.addApplicationFont(solidFont);
+        if (g_fontAwesomeSolidId != -1) {
+            loadedCount++;
+            QString familyName = db.applicationFontFamilies(g_fontAwesomeSolidId).join(", ");
+            qDebug() << "Font Awesome 7 Free-Solid loaded successfully.";
+            qDebug() << "  Family:" << familyName << "ID:" << g_fontAwesomeSolidId;
+        } else {
+            qDebug() << "Failed to load Font Awesome 7 Free-Solid from:" << solidFont;
+        }
+
+        // 加载 Brands 字体
+        QString brandsFont = fontPath + "Font Awesome 7 Brands-Regular-400.otf";
+        qDebug() << "Loading Brands font from:" << brandsFont;
+        g_fontAwesomeBrandsId = db.addApplicationFont(brandsFont);
+        if (g_fontAwesomeBrandsId != -1) {
+            loadedCount++;
+            QString familyName = db.applicationFontFamilies(g_fontAwesomeBrandsId).join(", ");
+            qDebug() << "Font Awesome 7 Brands loaded successfully.";
+            qDebug() << "  Family:" << familyName << "ID:" << g_fontAwesomeBrandsId;
+        } else {
+            qDebug() << "Failed to load Font Awesome 7 Brands from:" << brandsFont;
+        }
+
+        qDebug() << "Loaded" << loadedCount << "Font Awesome font(s)";
+
+        // 验证字体是否真正可用 - 直接从加载的字体ID获取字体
+        qDebug() << "=== Font Verification ===";
+        if (g_fontAwesomeSolidId != -1) {
+            QStringList solidFamilies = db.applicationFontFamilies(g_fontAwesomeSolidId);
+            qDebug() << "Solid font families:" << solidFamilies;
+        }
+
+        emit fontsLoaded(loadedCount > 0);
     }
 
-    // 加载 Brands 字体
-    QString brandsFont = fontPath + "Font Awesome 7 Brands-Regular-400.otf";
-    qDebug() << "Loading Brands font from:" << brandsFont;
-    g_fontAwesomeBrandsId = db.addApplicationFont(brandsFont);
-    if (g_fontAwesomeBrandsId != -1) {
-        loadedCount++;
-        QString familyName = db.applicationFontFamilies(g_fontAwesomeBrandsId).join(", ");
-        qDebug() << "Font Awesome 7 Brands loaded successfully.";
-        qDebug() << "  Family:" << familyName << "ID:" << g_fontAwesomeBrandsId;
-    } else {
-        qDebug() << "Failed to load Font Awesome 7 Brands from:" << brandsFont;
-    }
+signals:
+    void fontsLoaded(bool success);
+};
 
-    qDebug() << "Loaded" << loadedCount << "Font Awesome font(s)";
+// 启动字体加载线程
+void startFontLoading()
+{
+    QThread *fontThread = new QThread();
+    FontLoader *fontLoader = new FontLoader();
+    fontLoader->moveToThread(fontThread);
 
-    // 验证字体是否真正可用 - 直接从加载的字体ID获取字体
-    qDebug() << "=== Font Verification ===";
-    if (g_fontAwesomeSolidId != -1) {
-        QStringList solidFamilies = db.applicationFontFamilies(g_fontAwesomeSolidId);
-        qDebug() << "Solid font families:" << solidFamilies;
-    }
+    QObject::connect(fontThread, &QThread::started, fontLoader, &FontLoader::loadFonts);
+    QObject::connect(fontLoader, &FontLoader::fontsLoaded, [fontThread, fontLoader](bool success) {
+        qDebug() << "Font loading completed, success:" << success;
+        fontLoader->deleteLater();
+        fontThread->quit();
+        fontThread->wait(1000);
+        fontThread->deleteLater();
+    });
 
-    return loadedCount > 0;
+    fontThread->start();
 }
 
 int main(int argc, char *argv[])
@@ -80,8 +110,8 @@ int main(int argc, char *argv[])
     
     QApplication app(argc, argv);
     
-    // 加载 Font Awesome 图标字体
-    loadFontAwesome();
+    // 后台加载 Font Awesome 图标字体
+    startFontLoading();
     
     // 设置应用程序图标
     QString iconPath = QCoreApplication::applicationDirPath() + "/icon/favicon.ico";
@@ -154,3 +184,5 @@ int main(int argc, char *argv[])
     
     return app.exec();
 }
+
+#include "main.moc"

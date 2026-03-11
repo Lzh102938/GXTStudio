@@ -118,7 +118,11 @@ set(PROJECT_SOURCES
     AboutDialog.cpp
 )
 
-qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
+# 设置 Windows 资源文件（用于应用程序图标）
+set(WINDOWS_RESOURCE_FILE "${CMAKE_CURRENT_SOURCE_DIR}/app.rc")
+file(WRITE ${WINDOWS_RESOURCE_FILE} "IDI_ICON1 ICON DISCARDABLE \"${CMAKE_CURRENT_SOURCE_DIR}/icon/favicon.ico\"\n")
+
+qt_add_executable(${PROJECT_NAME} ${PROJECT_SOURCES} ${WINDOWS_RESOURCE_FILE})
 
 set_target_properties(${PROJECT_NAME}
     PROPERTIES

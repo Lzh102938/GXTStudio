@@ -255,37 +255,19 @@ GXTStudio::GXTStudio(QWidget *parent)
     setupStatusBar();
     setupCentralWidget();
     
-    // 设置异步解析线程
-    setupParseThread();
+    // 【性能优化】初始化样式字符串缓存（必要，UI需要）
+    initializeCachedStyles();
     
-    // 设置异步保存线程
-    setupSaveThread();
-    
-    // 设置智能翻译功能
-    setupTranslationProgress();
-    
-    // 初始化码表转换器
-    m_codeTableConverter = new CodeTableConverter(this);
-
-    // 初始化版本感知保存系统
-    initializeSaveStrategies();
-
-    // 【性能优化】初始化搜索结果缓存
+    // 【性能优化】初始化搜索结果缓存（必要，UI需要）
     m_searchResultCache = new SearchResultCache[MAX_SEARCH_CACHE];
     for (int i = 0; i < MAX_SEARCH_CACHE; ++i) {
         m_searchResultCache[i].cacheKey = QString::number(i);  // 初始化缓存键
     }
 
-    // 【性能优化】初始化样式字符串缓存
-    initializeCachedStyles();
-
     // 设置布局优化
     setupResizeOptimizations();
     
     connectSignals();
-    
-    // 预计算表格度量
-    precomputeTableMetrics();
     
     // 加载设置
     QSettings settings;
@@ -342,13 +324,12 @@ GXTStudio::GXTStudio(QWidget *parent)
     updateActions();
     updateStatusBar();
     
-    // 加载SATKEY映射
-    GXTTableModel::loadSATKeyMap();
-    
-    // 加载IVTKEY映射
-    GXTTableModel::loadIVTKeyMap();
-    
     showLogMessage("GXTStudio 已启动");
+    
+    // 延迟初始化非必要组件，让窗口先显示
+    QTimer::singleShot(100, this, [this]() {
+        initializeDeferredComponents();
+    });
 }
 
 GXTStudio::~GXTStudio()
@@ -1141,6 +1122,52 @@ void GXTStudio::clearSearchCache()
     m_searchState.clear();
     
     showLogMessage("搜索缓存已清除");
+}
+
+// 延迟初始化非必要组件
+void GXTStudio::initializeDeferredComponents()
+{
+    showLogMessage("开始延迟初始化组件...");
+    
+    // 设置异步解析线程
+    setupParseThread();
+    
+    // 设置异步保存线程
+    setupSaveThread();
+    
+    // 设置智能翻译功能
+    setupTranslationProgress();
+    
+    // 初始化码表转换器
+    m_codeTableConverter = new CodeTableConverter(this);
+
+    // 初始化版本感知保存系统
+    initializeSaveStrategies();
+    
+    // 预计算表格度量
+    precomputeTableMetrics();
+    
+    // 后台加载SATKEY和IVTKEY映射
+    QThread *keyMapThread = new QThread();
+    QObject *keyMapLoader = new QObject();
+    keyMapLoader->moveToThread(keyMapThread);
+    
+    QObject::connect(keyMapThread, &QThread::started, keyMapLoader, [keyMapThread, keyMapLoader]() {
+        // 加载SATKEY映射
+        GXTTableModel::loadSATKeyMap();
+        
+        // 加载IVTKEY映射
+        GXTTableModel::loadIVTKeyMap();
+        
+        QMetaObject::invokeMethod(keyMapThread, "quit", Qt::QueuedConnection);
+    });
+    
+    QObject::connect(keyMapThread, &QThread::finished, keyMapLoader, &QObject::deleteLater);
+    QObject::connect(keyMapThread, &QThread::finished, keyMapThread, &QThread::deleteLater);
+    
+    keyMapThread->start();
+    
+    showLogMessage("延迟初始化完成");
 }
 
 // 缓存预热方法已删除
