@@ -397,7 +397,7 @@ bool GXTParser::parse(const std::string& filePath) {
                     }
                 }
 
-                GXTTabl tabl; tabl.name = "MAIN";
+                // 无表文件，不创建MAIN表，直接存储到noTablEntries
                 for (auto& e : entries) {
                     std::string key(e.key, 8);
                     key.erase(std::find(key.begin(), key.end(), '\0'), key.end());
@@ -427,9 +427,8 @@ bool GXTParser::parse(const std::string& filePath) {
                         }
                     }
                     // 对于GTA_III格式，key和originalKey都使用原始字符串键
-                    tabl.entries.push_back({key, val, key});
+                    noTablEntries.push_back({key, val, key});
                 }
-                tables.push_back(std::move(tabl));
                 break;
             }
 
@@ -466,8 +465,7 @@ bool GXTParser::parse(const std::string& filePath) {
                     }
                 }
 
-                GXTTabl tabl;
-                tabl.name = "MAIN";
+                // 无表文件，不创建MAIN表，直接存储到noTablEntries
 
                 // 每个TKEY条目包含offset和crc两个字节
                 size_t entry_count = tkeyData.size() / 2;
@@ -554,10 +552,9 @@ bool GXTParser::parse(const std::string& filePath) {
 
                     char key_buffer[16];
                     snprintf(key_buffer, sizeof(key_buffer), "0x%08X", crc);
-                    tabl.entries.push_back({std::string(key_buffer), text});
+                    noTablEntries.push_back({std::string(key_buffer), text});
                 }
 
-                tables.push_back(std::move(tabl));
                 break;
             }
         }
@@ -853,9 +850,15 @@ bool GXTParser::parse(const std::string& filePath) {
         }
     }
     
-    addParseLog("文件解析完成，共解析 " + std::to_string(tables.size()) + " 个表，版本: " + getVersionName(this->detectedVersion));
+    // 根据是否有表显示不同的日志
+    if (tables.empty() && !noTablEntries.empty()) {
+        addParseLog("文件解析完成，无表文件，共 " + std::to_string(noTablEntries.size()) + " 个条目，版本: " + getVersionName(this->detectedVersion));
+    } else {
+        addParseLog("文件解析完成，共解析 " + std::to_string(tables.size()) + " 个表，版本: " + getVersionName(this->detectedVersion));
+    }
     reportProgress(100, "解析完成");
-    return !tables.empty();
+    // 无表文件：tables为空但noTablEntries不为空时也算成功
+    return !tables.empty() || !noTablEntries.empty();
 }
 
 

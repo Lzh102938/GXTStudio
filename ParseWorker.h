@@ -29,7 +29,9 @@ struct ParseResult {
     bool isWHM;
     bool isWHMRSC;  // 压缩的 HTML 文档格式
     bool isDAT;  // 完全区分DAT和WHM
+    bool originalHasTABL;  // 原始文件是否有TABL块
     std::vector<GXTTabl> tables;
+    std::vector<GXTEntry> noTablEntries;  // 无表文件的键值对
     std::vector<WHMEntry> whmEntries;
     std::vector<DATEntry> datEntries;  // DAT条目（完全独立）
     QString errorMessage;

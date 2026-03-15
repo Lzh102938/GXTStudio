@@ -18,6 +18,7 @@ void ParseWorker::parseFile(const ParseTask& task)
     result.fileName = task.fileName;
     result.isWHM = task.isWHM;
     result.isDAT = task.isDAT;
+    result.originalHasTABL = true;  // 默认为true
     result.tabIndex = task.tabIndex;
     result.parseTime = timer;
     result.success = false;
@@ -73,6 +74,8 @@ void ParseWorker::parseFile(const ParseTask& task)
             result.version = parser.getDetectedVersion();
             if (result.success) {
                 result.tables = parser.getTables();
+                result.noTablEntries = parser.getNoTablEntries();
+                result.originalHasTABL = parser.getOriginalHasTABL();
             } else {
                 result.errorMessage = "GXT解析失败";
             }

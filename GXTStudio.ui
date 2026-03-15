@@ -71,13 +71,14 @@
      <string>文件(&amp;F)</string>
     </property>
     <addaction name="actionOpen"/>
-    <addaction name="actionSave"/>
-    <addaction name="actionSaveAs"/>
-    <addaction name="separator"/>
-    <addaction name="actionExport"/>
-    <addaction name="actionClose"/>
-    <addaction name="separator"/>
-    <addaction name="actionExit"/>
+   <addaction name="actionSave"/>
+   <addaction name="actionSaveAs"/>
+   <addaction name="separator"/>
+   <addaction name="actionExport"/>
+   <addaction name="actionBatchExport"/>
+   <addaction name="actionClose"/>
+   <addaction name="separator"/>
+   <addaction name="actionExit"/>
    </widget>
    <widget class="QMenu" name="menuEdit">
     <property name="title">
@@ -159,8 +160,19 @@
    <property name="text">
     <string>导出(&amp;E)...</string>
    </property>
+   <property name="shortcut">
+    <string>Ctrl+Shift+E</string>
+   </property>
    <property name="toolTip">
     <string>导出为文本文件</string>
+   </property>
+  </action>
+  <action name="actionBatchExport">
+   <property name="text">
+    <string>批量导出(&amp;B)...</string>
+   </property>
+   <property name="toolTip">
+    <string>批量导出多个文件</string>
    </property>
   </action>
   <action name="actionClose">
@@ -214,6 +226,9 @@
    <property name="text">
     <string>只读模式(&amp;R)</string>
    </property>
+   <property name="shortcut">
+    <string>Ctrl+R</string>
+   </property>
    <property name="toolTip">
     <string>切换只读模式</string>
    </property>
@@ -244,6 +259,9 @@
    <property name="text">
     <string>关于(&amp;A)...</string>
    </property>
+   <property name="shortcut">
+    <string>F1</string>
+   </property>
    <property name="toolTip">
     <string>关于GXTStudio</string>
    </property>
@@ -251,6 +269,9 @@
   <action name="actionCodeTable">
    <property name="text">
     <string>码表转换(&amp;C)</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+Alt+C</string>
    </property>
    <property name="toolTip">
     <string>码表转换功能</string>
@@ -260,6 +281,9 @@
    <property name="text">
     <string>智能翻译(&amp;T)</string>
    </property>
+   <property name="shortcut">
+    <string>Ctrl+Alt+T</string>
+   </property>
    <property name="toolTip">
     <string>智能翻译功能</string>
    </property>
@@ -267,6 +291,9 @@
   <action name="actionGenerateCharTable">
    <property name="text">
     <string>生成字符表DAT(&amp;D)</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+G</string>
    </property>
    <property name="toolTip">
     <string>生成字符表DAT文件（仅GTA_VC和GTA_IV版本）</string>

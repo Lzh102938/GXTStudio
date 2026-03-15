@@ -279,7 +279,7 @@ GXTStudio::GXTStudio(QWidget *parent)
     if (m_autoSaveButton) {
         if (m_autoSaveEnabled) {
             m_autoSaveButton->setText(QString(QChar(0xf205)));  // 开启状态图标
-            m_autoSaveButton->setToolTip("自动保存（开启）");
+            m_autoSaveButton->setToolTip("自动保存（开启）(Ctrl+Shift+A)");
             // 启用状态使用蓝色 - 紧凑设计
             m_autoSaveButton->setStyleSheet(QString(R"(
                 QToolButton {
@@ -695,6 +695,7 @@ void GXTStudio::setupMenus()
     m_saveAction = ui.actionSave;
     m_saveAsAction = ui.actionSaveAs;
     m_exportAction = ui.actionExport;
+    m_batchExportAction = ui.actionBatchExport;
     m_closeAction = ui.actionClose;
     m_exitAction = ui.actionExit;
     m_findAction = ui.actionFind;
@@ -742,11 +743,12 @@ void GXTStudio::setupToolBars()
     m_toolBar->addAction(m_openAction);
     m_toolBar->addAction(m_saveAction);
     m_toolBar->addAction(m_saveAsAction);
+    m_toolBar->addAction(m_exportAction);
     m_toolBar->addSeparator();
 
     m_codeTableButton = new QToolButton(this);
-    m_codeTableButton->setText("码表转换");
-    m_codeTableButton->setToolTip("码表转换功能");
+    m_codeTableButton->setText("码表转换(&C)");
+    m_codeTableButton->setToolTip("码表转换功能 (Ctrl+Alt+C)");
     m_codeTableButton->setPopupMode(QToolButton::MenuButtonPopup);
     
     QMenu* codeTableMenu = new QMenu(this);
@@ -779,8 +781,8 @@ void GXTStudio::setupToolBars()
     m_toolBar->addSeparator();
     
     m_smartTranslateButton = new QToolButton(this);
-    m_smartTranslateButton->setText("智能翻译");
-    m_smartTranslateButton->setToolTip("智能翻译功能");
+    m_smartTranslateButton->setText("智能翻译(&T)");
+    m_smartTranslateButton->setToolTip("智能翻译功能 (Ctrl+Alt+T)");
     m_smartTranslateButton->setPopupMode(QToolButton::MenuButtonPopup);
     
     QMenu* translateMenu = new QMenu(this);
@@ -810,6 +812,10 @@ void GXTStudio::setupToolBars()
     m_toolBar->addWidget(m_smartTranslateButton);
     m_toolBar->addSeparator();
     m_toolBar->addAction(m_readOnlyAction);
+
+    // 为自动保存按钮添加快捷键（码表转换和智能翻译使用菜单的快捷键）
+    QShortcut* autoSaveShortcut = new QShortcut(QKeySequence("Ctrl+Shift+A"), this);
+    connect(autoSaveShortcut, &QShortcut::activated, this, &GXTStudio::onAutoSaveToggle);
 }
 
 void GXTStudio::setupStatusBar()
@@ -861,7 +867,7 @@ void GXTStudio::setupStatusBar()
     m_autoSaveButton = new QToolButton(this);
     m_autoSaveButton->setText(QString(QChar(0xf204)));  // 关闭状态图标 U+f204
     m_autoSaveButton->setFont(FA::solidFont(14));
-    m_autoSaveButton->setToolTip("自动保存（关闭）");
+    m_autoSaveButton->setToolTip("自动保存（关闭）(Ctrl+Shift+A)");
     m_autoSaveButton->setFixedSize(26, 26);
     m_autoSaveButton->setStyleSheet(QString(R"(
         QToolButton {
@@ -997,6 +1003,7 @@ void GXTStudio::connectSignals()
     connect(m_saveAction, &QAction::triggered, this, &GXTStudio::saveFile);
     connect(m_saveAsAction, &QAction::triggered, this, &GXTStudio::saveAsFile);
     connect(m_exportAction, &QAction::triggered, this, &GXTStudio::exportFile);
+    connect(m_batchExportAction, &QAction::triggered, this, &GXTStudio::batchExport);
     connect(m_closeAction, &QAction::triggered, this, &GXTStudio::closeFile);
     connect(m_exitAction, &QAction::triggered, this, &GXTStudio::exitApp);
     
@@ -2020,6 +2027,456 @@ void GXTStudio::exportFile()
     exportCurrentFile();
 }
 
+void GXTStudio::batchExport()
+{
+    // 检查是否有打开的文件
+    if (m_fileTabs.empty()) {
+        QMessageBox::information(this, "批量导出", "没有打开的文件可供导出");
+        return;
+    }
+    
+    // 创建批量导出对话框
+    QDialog dialog(this);
+    dialog.setWindowTitle("批量导出");
+    dialog.setMinimumSize(500, 400);
+    
+    QVBoxLayout* mainLayout = new QVBoxLayout(&dialog);
+    
+    // 说明标签
+    QLabel* infoLabel = new QLabel("请选择要导出的文件:");
+    mainLayout->addWidget(infoLabel);
+    
+    // 文件列表
+    QListWidget* fileListWidget = new QListWidget(&dialog);
+    fileListWidget->setSelectionMode(QAbstractItemView::MultiSelection);
+    
+    // 添加所有打开的文件到列表
+    for (size_t i = 0; i < m_fileTabs.size(); ++i) {
+        const auto& tab = m_fileTabs[i];
+        QString displayText = QString("%1 - %2").arg(tab.fileName).arg(tab.filePath);
+        QListWidgetItem* item = new QListWidgetItem(displayText);
+        item->setData(Qt::UserRole, static_cast<int>(i));
+        item->setCheckState(Qt::Checked); // 默认选中
+        fileListWidget->addItem(item);
+    }
+    mainLayout->addWidget(fileListWidget);
+    
+    // 全选/取消全选按钮
+    QHBoxLayout* selectLayout = new QHBoxLayout();
+    QPushButton* selectAllBtn = new QPushButton("全选", &dialog);
+    QPushButton* deselectAllBtn = new QPushButton("取消全选", &dialog);
+    selectLayout->addWidget(selectAllBtn);
+    selectLayout->addWidget(deselectAllBtn);
+    selectLayout->addStretch();
+    mainLayout->addLayout(selectLayout);
+    
+    // 导出路径选择
+    QHBoxLayout* pathLayout = new QHBoxLayout();
+    QLabel* pathLabel = new QLabel("导出到:");
+    QLineEdit* pathEdit = new QLineEdit(&dialog);
+    QPushButton* browseBtn = new QPushButton("浏览...", &dialog);
+    
+    // 默认使用第一个文件的目录
+    if (!m_fileTabs.empty()) {
+        QFileInfo fileInfo(m_fileTabs[0].filePath);
+        pathEdit->setText(fileInfo.absolutePath() + "/BatchExport");
+    }
+    
+    pathLayout->addWidget(pathLabel);
+    pathLayout->addWidget(pathEdit, 1);
+    pathLayout->addWidget(browseBtn);
+    mainLayout->addLayout(pathLayout);
+    
+    // 按钮框
+    QDialogButtonBox* buttonBox = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttonBox->button(QDialogButtonBox::Ok)->setText("导出");
+    buttonBox->button(QDialogButtonBox::Cancel)->setText("取消");
+    mainLayout->addWidget(buttonBox);
+    
+    // 连接信号
+    connect(selectAllBtn, &QPushButton::clicked, [fileListWidget]() {
+        for (int i = 0; i < fileListWidget->count(); ++i) {
+            fileListWidget->item(i)->setCheckState(Qt::Checked);
+        }
+    });
+    
+    connect(deselectAllBtn, &QPushButton::clicked, [fileListWidget]() {
+        for (int i = 0; i < fileListWidget->count(); ++i) {
+            fileListWidget->item(i)->setCheckState(Qt::Unchecked);
+        }
+    });
+    
+    connect(browseBtn, &QPushButton::clicked, [pathEdit, this]() {
+        QString dir = QFileDialog::getExistingDirectory(this, "选择导出目录", pathEdit->text());
+        if (!dir.isEmpty()) {
+            pathEdit->setText(dir);
+        }
+    });
+    
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    
+    // 显示对话框
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    
+    // 获取选中的文件
+    QString exportPath = pathEdit->text();
+    QDir exportDir(exportPath);
+    if (!exportDir.exists()) {
+        exportDir.mkpath(exportPath);
+    }
+    
+    // 收集选中的文件
+    std::vector<int> tabsToExport;
+    for (int i = 0; i < fileListWidget->count(); ++i) {
+        QListWidgetItem* item = fileListWidget->item(i);
+        if (item->checkState() == Qt::Checked) {
+            int tabIndex = item->data(Qt::UserRole).toInt();
+            if (tabIndex >= 0 && tabIndex < static_cast<int>(m_fileTabs.size())) {
+                tabsToExport.push_back(tabIndex);
+            }
+        }
+    }
+    
+    if (tabsToExport.empty()) {
+        showLogMessage("批量导出: 没有选择文件");
+        return;
+    }
+    
+    // 显示进度条
+    if (m_saveProgressBar) {
+        m_saveProgressBar->setRange(0, static_cast<int>(tabsToExport.size()));
+        m_saveProgressBar->setValue(0);
+        m_saveProgressBar->setFormat(QString("批量导出: 0/%1").arg(tabsToExport.size()));
+        m_saveProgressBar->show();
+    }
+    
+    // 禁用批量导出菜单
+    if (m_batchExportAction) {
+        m_batchExportAction->setEnabled(false);
+    }
+    
+    showLogMessage(QString("开始批量导出 %1 个文件到: %2").arg(tabsToExport.size()).arg(exportPath));
+    
+    // 使用QtConcurrent在后台线程执行导出
+    QFutureWatcher<std::pair<int, bool>>* watcher = new QFutureWatcher<std::pair<int, bool>>(this);
+    
+    int totalCount = static_cast<int>(tabsToExport.size());
+    
+    // 使用动态分配的原子变量，确保生命周期足够长
+    std::atomic<int>* completedCount = new std::atomic<int>(0);
+    std::atomic<int>* successCount = new std::atomic<int>(0);
+    std::atomic<int>* failedCount = new std::atomic<int>(0);
+    
+    connect(watcher, &QFutureWatcher<std::pair<int, bool>>::resultReadyAt, this, [this, successCount, failedCount, completedCount, totalCount, exportPath](int index) {
+        auto result = static_cast<QFutureWatcher<std::pair<int, bool>>*>(sender())->resultAt(index);
+        int tabIndex = result.first;
+        bool success = result.second;
+        
+        if (tabIndex >= 0 && tabIndex < static_cast<int>(m_fileTabs.size())) {
+            if (success) {
+                successCount->fetch_add(1);
+                showLogMessage(QString("已导出: %1").arg(m_fileTabs[tabIndex].fileName));
+            } else {
+                failedCount->fetch_add(1);
+                showLogMessage(QString("导出失败: %1").arg(m_fileTabs[tabIndex].fileName));
+            }
+            
+            // 更新进度条
+            int current = completedCount->fetch_add(1) + 1;
+            if (m_saveProgressBar) {
+                m_saveProgressBar->setValue(current);
+                m_saveProgressBar->setFormat(QString("批量导出: %1/%2 - %3").arg(current).arg(totalCount).arg(m_fileTabs[tabIndex].fileName));
+            }
+        }
+    });
+    
+    connect(watcher, &QFutureWatcher<std::pair<int, bool>>::finished, this, [this, watcher, exportPath, totalCount, successCount, failedCount, completedCount]() {
+        // 隐藏进度条
+        if (m_saveProgressBar) {
+            m_saveProgressBar->hide();
+        }
+        
+        // 启用批量导出菜单
+        if (m_batchExportAction) {
+            m_batchExportAction->setEnabled(true);
+        }
+        
+        int success = successCount->load();
+        int failed = failedCount->load();
+        
+        // 使用状态栏显示结果
+        showLogMessage(QString("批量导出完成 - 成功: %1, 失败: %2, 路径: %3")
+            .arg(success).arg(failed).arg(exportPath));
+        
+        // 显示临时提示（类似保存成功的提示）
+        if (m_statusBar) {
+            QString msg = QString("批量导出完成 (%1成功/%2失败)").arg(success).arg(failed);
+            m_statusBar->showMessage(msg, 5000);  // 显示5秒
+        }
+        
+        // 显示保存成功弹窗
+        QString resultMsg = QString("批量导出完成\n\n成功: %1 个文件\n失败: %2 个文件\n\n导出路径: %3")
+            .arg(success).arg(failed).arg(exportPath);
+        QMessageBox::information(this, "导出成功", resultMsg);
+        
+        // 清理内存
+        delete completedCount;
+        delete successCount;
+        delete failedCount;
+        
+        watcher->deleteLater();
+    });
+    
+    // 创建导出任务
+    QFuture<std::pair<int, bool>> future = QtConcurrent::mapped(tabsToExport, 
+        [this, exportPath](int tabIndex) -> std::pair<int, bool> {
+            // 双重检查：确保标签页仍然存在（防止在导出过程中用户关闭标签页）
+            if (tabIndex < 0 || tabIndex >= static_cast<int>(m_fileTabs.size())) {
+                showLogMessage(QString("导出跳过: 标签页已关闭 (索引: %1)").arg(tabIndex));
+                return {tabIndex, false};
+            }
+            
+            // 再次检查，确保在访问前标签页仍然存在
+            if (tabIndex >= static_cast<int>(m_fileTabs.size())) {
+                showLogMessage(QString("导出失败: 标签页索引越界 (索引: %1, 总数: %2)").arg(tabIndex).arg(m_fileTabs.size()));
+                return {tabIndex, false};
+            }
+            
+            FileTab& tab = const_cast<FileTab&>(m_fileTabs[tabIndex]);
+            
+            // 构建导出文件名
+            QFileInfo fileInfo(tab.filePath);
+            QString baseName = fileInfo.completeBaseName();
+            QString exportFileName = exportPath + "/" + baseName + "_Export.txt";
+            
+            // 显示正在导出的文件
+            showLogMessage(QString("正在导出: %1").arg(tab.fileName));
+            
+            // 显示正在导出的表信息
+            if (!tab.isCharTable && !tab.isWHM) {
+                for (const auto& table : tab.tables) {
+                    showLogMessage(QString("  导出表: %1").arg(QString::fromStdString(table.name)));
+                }
+            } else if (tab.isWHM) {
+                showLogMessage(QString("  导出WHM文件，共%1个条目").arg(tab.whmEntries.size()));
+            } else if (tab.isCharTable) {
+                showLogMessage("  导出CharTable文件");
+            }
+            
+            // 导出文件
+            bool success = exportTabToFile(tab, exportFileName);
+            
+            return {tabIndex, success};
+        });
+    
+    watcher->setFuture(future);
+}
+
+bool GXTStudio::exportTabToFile(FileTab& tab, const QString& filePath)
+{
+    try {
+        QFileInfo fileInfo(filePath);
+        QString baseName = fileInfo.completeBaseName();
+        QString folderPath = fileInfo.absolutePath() + "/" + baseName;
+        QDir dir;
+        if (!dir.exists(folderPath)) {
+            dir.mkpath(folderPath);
+        }
+        
+        GXTParser parser;
+        parser.setLogCallback([this](const std::string& msg) {
+            showLogMessage(QString::fromStdString(msg));
+        });
+        
+        // 处理CharTable文件导出
+        if (tab.isCharTable) {
+            if (!tab.charTableWidget) {
+                return false;
+            }
+            
+            QString text = tab.charTableWidget->toPlainText();
+            
+            // 计算实际字符数（不含换行符）- 在替换换行符之前计算
+            int charCount = text.length() - text.count('\n');
+            
+            // 将LF转换为CRLF（Windows换行符）
+            text.replace('\n', "\r\n");
+            
+            QFile file(filePath);
+            if (file.open(QIODevice::WriteOnly)) {
+                // 写入UTF16LE BOM (0xFF 0xFE)，让记事本正确识别编码
+                file.write("\xFF\xFE", 2);
+                
+                // 写入UTF16LE编码的文本
+                QTextStream stream(&file);
+                stream.setEncoding(QStringConverter::Utf16LE);
+                stream << text;
+                stream.flush();
+                file.close();
+                
+                showLogMessage(QString("CharTable已导出，共%1个字符").arg(charCount));
+                return true;
+            }
+            return false;
+        }
+        
+        if (tab.isWHM) {
+            // WHM文件导出 - 导出到汇总txt和文件夹中的各个文件
+            QFile allFile(filePath);
+            if (allFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QTextStream allStream(&allFile);
+                allStream.setEncoding(QStringConverter::Utf8);
+                
+                for (size_t i = 0; i < tab.whmEntries.size(); ++i) {
+                    // 安全检查
+                    if (i >= tab.whmEntries.size() || tab.whmEntries.empty()) break;
+                    
+                    const auto& entry = tab.whmEntries[i];
+                    QString hashStr = QString("0x%1").arg(entry.hash, 8, 16, QChar('0')).toUpper();
+                    QString line = QString("%1=%2").arg(hashStr, QString::fromStdString(entry.text));
+                    allStream << line << Qt::endl;
+                    
+                    // 同时保存到文件夹中的单个文件
+                    QString individualFile = folderPath + "/" + hashStr + ".txt";
+                    QFile indFile(individualFile);
+                    if (indFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                        QTextStream indStream(&indFile);
+                        indStream.setEncoding(QStringConverter::Utf8);
+                        indStream << QString::fromStdString(entry.text);
+                        indFile.close();
+                    }
+                }
+                allFile.close();
+            }
+            showLogMessage("WHM文件已导出: " + filePath + " 及分文件夹");
+            return true;
+        } else {
+            // GXT/GXT2文件导出
+            QFile allFile(filePath);
+            if (allFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                QTextStream allStream(&allFile);
+                allStream.setEncoding(QStringConverter::Utf8);
+                
+                // 导出所有表到汇总文件
+                for (const auto& table : tab.tables) {
+                    if (tab.tables.size() > 1 || table.name != "MAIN") {
+                        allStream << QString("[%1]").arg(QString::fromStdString(table.name)) << Qt::endl;
+                    }
+                    
+                    for (const auto& entry : table.entries) {
+                        QString keyStr;
+                        // 优先使用原始键值
+                        if (!entry.originalKey.empty()) {
+                            keyStr = QString::fromStdString(entry.originalKey);
+                        } else {
+                            // 尝试使用SATKEY/IVTKEY映射
+                            QString entryKey = QString::fromStdString(entry.key);
+                            bool foundInLst = false;
+                            
+                            if (tab.version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
+                                bool ok;
+                                uint32_t hash = entryKey.toUInt(&ok, 16);
+                                if (ok) {
+                                    QString lstKey;
+                                    if (GXTTableModel::findSATKey(hash, lstKey)) {
+                                        keyStr = lstKey;
+                                        foundInLst = true;
+                                    }
+                                }
+                            } else if (tab.version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                                bool ok;
+                                uint32_t hash = entryKey.toUInt(&ok, 16);
+                                if (ok) {
+                                    QString lstKey;
+                                    if (GXTTableModel::findIVTKey(hash, lstKey)) {
+                                        keyStr = lstKey;
+                                        foundInLst = true;
+                                    }
+                                }
+                            }
+                            
+                            if (!foundInLst) {
+                                keyStr = GXTStudio::formatKeyForDisplay(entryKey);
+                            }
+                        }
+                        QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
+                        allStream << line << Qt::endl;
+                    }
+                    
+                    if (tab.tables.size() > 1 || table.name != "MAIN") {
+                        allStream << Qt::endl; // 表之间空行
+                    }
+                }
+                allFile.close();
+                
+                // 导出各个表到文件夹
+                for (const auto& table : tab.tables) {
+                    QString tableFile = folderPath + "/" + QString::fromStdString(table.name) + ".txt";
+                    QFile file(tableFile);
+                    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                        QTextStream stream(&file);
+                        stream.setEncoding(QStringConverter::Utf8);
+                        
+                        if (tab.tables.size() > 1 || table.name != "MAIN") {
+                            stream << QString("[%1]").arg(QString::fromStdString(table.name)) << Qt::endl;
+                        }
+                        
+                        for (const auto& entry : table.entries) {
+                            QString keyStr;
+                            // 优先使用原始键值
+                            if (!entry.originalKey.empty()) {
+                                keyStr = QString::fromStdString(entry.originalKey);
+                            } else {
+                                // 尝试使用SATKEY/IVTKEY映射
+                                QString entryKey = QString::fromStdString(entry.key);
+                                bool foundInLst = false;
+                                
+                                if (tab.version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
+                                    bool ok;
+                                    uint32_t hash = entryKey.toUInt(&ok, 16);
+                                    if (ok) {
+                                        QString lstKey;
+                                        if (GXTTableModel::findSATKey(hash, lstKey)) {
+                                            keyStr = lstKey;
+                                            foundInLst = true;
+                                        }
+                                    }
+                                } else if (tab.version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                                    bool ok;
+                                    uint32_t hash = entryKey.toUInt(&ok, 16);
+                                    if (ok) {
+                                        QString lstKey;
+                                        if (GXTTableModel::findIVTKey(hash, lstKey)) {
+                                            keyStr = lstKey;
+                                            foundInLst = true;
+                                        }
+                                    }
+                                }
+                                
+                                if (!foundInLst) {
+                                    keyStr = GXTStudio::formatKeyForDisplay(entryKey);
+                                }
+                            }
+                            QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
+                            stream << line << Qt::endl;
+                        }
+                        file.close();
+                    }
+                }
+                showLogMessage("GXT文件已导出: " + filePath + " 及分文件夹");
+            }
+            return true;
+        }
+        
+    } catch (...) {
+        return false;
+    }
+}
+
 void GXTStudio::exportCurrentFile()
 {
     FileTab* currentTab = getCurrentTab();
@@ -2356,6 +2813,9 @@ void GXTStudio::showTableContextMenu(const QPoint& pos)
     // 获取点击的项目
     QListWidgetItem* item = currentTab->tableList->itemAt(pos);
     if (!item) return;
+
+    // 检查是否为"无表文件"项
+    if (item->text() == "无\n表\n文\n件") return;
 
     // 获取表索引
     int tableIndex = item->data(Qt::UserRole).toInt();
@@ -2716,7 +3176,7 @@ void GXTStudio::toggleReadOnly(bool readOnly)
         }
     }
     
-    m_readOnlyAction->setText("只读模式");
+    m_readOnlyAction->setText("只读模式(&R)");
     updateActions();
     
     if (m_codeTableButton) {
@@ -3370,6 +3830,11 @@ void GXTStudio::onTableSelectionChanged(QListWidgetItem* current, QListWidgetIte
     }
     
     if (!current) {
+        return;
+    }
+    
+    // 检查是否为"无表文件"项
+    if (current->text() == "无\n表\n文\n件") {
         return;
     }
     
@@ -4374,18 +4839,7 @@ void GXTStudio::updateCodeTableButtonText()
         return;
     }
 
-    if (!m_codeTableConverter->isTableMounted()) {
-        // 未挂载码表，显示"挂载码表"
-        m_codeTableButton->setText("挂载码表(&C)");
-    } else {
-        // 已挂载码表，根据当前状态显示相应的文本
-        CodeTableState state = m_codeTableConverter->getState();
-        if (state == CodeTableState::Original) {
-            m_codeTableButton->setText("码表→Unicode(&C)");
-        } else if (state == CodeTableState::Converted) {
-            m_codeTableButton->setText("Unicode→码表(&C)");
-        }
-    }
+    m_codeTableButton->setText("码表转换(&C)");
 }
 
 void GXTStudio::onSmartTranslate()
@@ -4830,6 +5284,7 @@ void GXTStudio::addNewTable()
     
     // 连接信号
     bool accepted = false;
+    
     connect(okButton, &QPushButton::clicked, [&]() {
         QString tableName = nameEdit->text().trimmed();
         
@@ -4864,9 +5319,38 @@ void GXTStudio::addNewTable()
     
     QString tableName = nameEdit->text().trimmed();
     
+    // 检查是否需要移动键值对
+    // 如果文件没有TABL块且noTablEntries有条目，询问用户是否移动
+    bool shouldMoveEntries = false;
+    bool isNoTablFile = (!currentTab->originalHasTABL && currentTab->tables.empty());
+    
+    if (isNoTablFile && !currentTab->noTablEntries.empty()) {
+        
+        int ret = QMessageBox::question(this, "移动键值对", 
+            QString("检测到当前有 %1 个键值对未归属任何表。\n是否将这些键值对移动到新表 '%2'？\n\n选择\"否\"将丢弃这些键值对。")
+            .arg(currentTab->noTablEntries.size())
+            .arg(tableName),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::Yes);
+        
+        if (ret == QMessageBox::Yes) {
+            shouldMoveEntries = true;
+        }
+    }
+    
     // 添加新表
     GXTTabl newTable;
     newTable.name = tableName.toStdString();
+    
+    // 如果需要移动，将noTablEntries的条目移动到新表
+    if (shouldMoveEntries) {
+        newTable.entries = std::move(currentTab->noTablEntries);
+    }
+    
+    // 清空noTablEntries（无论是否移动）
+    if (isNoTablFile) {
+        currentTab->noTablEntries.clear();
+    }
     currentTab->tables.push_back(newTable);
     
     currentTab->isModified = true;
@@ -4874,13 +5358,17 @@ void GXTStudio::addNewTable()
     updateEntryTable();
     updateWindowTitle();
     
-    // 切换到新添加的表
-    switchToTable(currentTab->tables.size() - 1);
+    // 切换到新添加的表（无表文件替换时切换到索引0，否则切换到最后一个）
+    switchToTable(isNoTablFile ? 0 : currentTab->tables.size() - 1);
 
     showLogMessage("已添加新表: " + tableName);
 
     // 显示成功提示
-    QMessageBox::information(this, "成功", QString("表 '%1' 已成功创建！").arg(tableName));
+    QString successMsg = QString("表 '%1' 已成功创建！").arg(tableName);
+    if (shouldMoveEntries) {
+        successMsg += "\n已将键值对移动到新表。";
+    }
+    QMessageBox::information(this, "成功", successMsg);
 
     // 触发自动保存
     if (m_autoSaveEnabled && m_autoSaveTimer) {
@@ -6237,7 +6725,28 @@ void GXTStudio::updateTableList()
                   .arg(tab->isWHM || tab->isDAT ? 1 : tab->tables.size()));
 
     // 极致性能优化：智能缓存系统
-    const size_t currentTableCount = (tab->isWHM || tab->isDAT) ? 1 : tab->tables.size();
+    // 检查是否为无TABL块的文件（没有TABL块且tables为空）
+    bool isNoTablFile = false;
+    
+    if (!tab->isWHM && !tab->isDAT) {
+        // 无TABL块文件检测：没有TABL块且tables为空
+        if (!tab->originalHasTABL && tab->tables.empty()) {
+            isNoTablFile = true;
+        }
+    }
+    
+    // 记录调试信息
+    showLogMessage(QString("isNoTablFile: %1, originalHasTABL: %2, tables.size(): %3, noTablEntries.size(): %4")
+                  .arg(isNoTablFile)
+                  .arg(tab->originalHasTABL)
+                  .arg(tab->tables.size())
+                  .arg(tab->noTablEntries.size()));
+    
+    // 强制刷新缓存
+    tab->listCache.needsRebuild = true;
+    
+    // 对于无TABL块的文件，不显示任何表
+    const size_t currentTableCount = isNoTablFile ? 0 : ((tab->isWHM || tab->isDAT) ? 1 : tab->tables.size());
     
     // 检查是否需要重建缓存
     bool needsRebuild = tab->listCache.needsRebuild || 
@@ -6268,7 +6777,7 @@ void GXTStudio::updateTableList()
             // 只显示表名，隐藏条目数
             tab->listCache.cachedDisplayTexts.push_back("DAT Entries");
             tab->listCache.cachedMainFlags.push_back(true);
-        } else {
+        } else if (!isNoTablFile) {
             for (size_t i = 0; i < tab->tables.size(); ++i) {
                 const auto& table = tab->tables[i];
                 QString tableName = QString::fromStdString(table.name);
@@ -6315,74 +6824,97 @@ void GXTStudio::updateTableList()
     tab->tableList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     tab->tableList->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
 
-    // 差量更新：在可能的情况下只插入/删除末端并更新变更项
-    int existingCount = tab->tableList->count();
-    if (existingCount != static_cast<int>(currentTableCount)) {
-        // 如果当前更短，则删除末尾多余的项目
-        if (existingCount > static_cast<int>(currentTableCount)) {
-            for (int k = existingCount - 1; k >= static_cast<int>(currentTableCount); --k) {
-                QListWidgetItem* it = tab->tableList->takeItem(k);
-                delete it;
-            }
+    // 处理无TABL块的文件（不显示任何表格列表项）
+    if (isNoTablFile) {
+        // 确保列表为空
+        while (tab->tableList->count() > 0) {
+            QListWidgetItem* item = tab->tableList->takeItem(0);
+            delete item;
         }
-
-        // 如果需要新增，则在末尾创建缺失的项
-        for (int i = existingCount; i < static_cast<int>(currentTableCount); ++i) {
-            QListWidgetItem* item = new QListWidgetItem();
-            item->setData(Qt::UserRole, i);
-            item->setSizeHint(QSize(tab->tableList->width() - 10, 36));
-            tab->tableList->addItem(item);
+        
+        // 启用添加表按钮（允许用户添加表）
+        if (tab->addTableButton) {
+            tab->addTableButton->setEnabled(!m_isReadOnly);
         }
-
-        // 更新所有现有项的数据（比完全重建更轻量）
-        for (int i = 0; i < static_cast<int>(currentTableCount); ++i) {
-            QListWidgetItem* item = tab->tableList->item(i);
-            if (item) {
-                item->setData(Qt::DisplayRole, tab->listCache.cachedDisplayTexts[i]);
-                item->setData(Qt::UserRole + 1, tab->listCache.cachedTableNames[i]);
-                item->setData(Qt::UserRole + 2, tab->listCache.cachedCounts[i]);
-                item->setData(Qt::UserRole + 3, static_cast<bool>(tab->listCache.cachedMainFlags[i]));
-            }
+        
+        // 重置currentTableIndex
+        tab->currentTableIndex = -1;
+        
+        // 强制刷新模型以显示noTablEntries
+        if (tab->entryTableModel) {
+            tab->entryTableModel->forceDataReset();
+            tab->entryTableModel->clearAllCache();
+        }
+        if (tab->entryTableView) {
+            tab->entryTableView->viewport()->update();
+            tab->entryTableView->update();
         }
     } else {
-        // 同样数量：仅更新发生变化的字段以减小工作量
-        for (int i = 0; i < existingCount; ++i) {
-            QListWidgetItem* item = tab->tableList->item(i);
-            if (!item) continue;
+        // 差量更新：在可能的情况下只插入/删除末端并更新变更项
+        int existingCount = tab->tableList->count();
+        if (existingCount != static_cast<int>(currentTableCount)) {
+            // 如果当前更短，则删除末尾多余的项目
+            if (existingCount > static_cast<int>(currentTableCount)) {
+                for (int k = existingCount - 1; k >= static_cast<int>(currentTableCount); --k) {
+                    QListWidgetItem* it = tab->tableList->takeItem(k);
+                    delete it;
+                }
+            }
 
-            // 仅在真实变化时设置数据
-            if (item->data(Qt::DisplayRole).toString() != tab->listCache.cachedDisplayTexts[i])
-                item->setData(Qt::DisplayRole, tab->listCache.cachedDisplayTexts[i]);
-            if (item->data(Qt::UserRole + 1).toString() != tab->listCache.cachedTableNames[i])
-                item->setData(Qt::UserRole + 1, tab->listCache.cachedTableNames[i]);
-            if (item->data(Qt::UserRole + 2).toString() != tab->listCache.cachedCounts[i])
-                item->setData(Qt::UserRole + 2, tab->listCache.cachedCounts[i]);
-            if (item->data(Qt::UserRole + 3).toBool() != tab->listCache.cachedMainFlags[i])
-                item->setData(Qt::UserRole + 3, static_cast<bool>(tab->listCache.cachedMainFlags[i]));
+            // 如果需要新增，则在末尾创建缺失的项
+            for (int i = existingCount; i < static_cast<int>(currentTableCount); ++i) {
+                QListWidgetItem* item = new QListWidgetItem();
+                item->setData(Qt::UserRole, i);
+                item->setSizeHint(QSize(tab->tableList->width() - 10, 36));
+                tab->tableList->addItem(item);
+            }
+
+            // 更新所有现有项的数据（比完全重建更轻量）
+            for (int i = 0; i < static_cast<int>(currentTableCount); ++i) {
+                QListWidgetItem* item = tab->tableList->item(i);
+                if (item) {
+                    item->setData(Qt::DisplayRole, tab->listCache.cachedDisplayTexts[i]);
+                    item->setData(Qt::UserRole + 1, tab->listCache.cachedTableNames[i]);
+                    item->setData(Qt::UserRole + 2, tab->listCache.cachedCounts[i]);
+                    item->setData(Qt::UserRole + 3, static_cast<bool>(tab->listCache.cachedMainFlags[i]));
+                }
+            }
+        } else {
+            // 同样数量：仅更新发生变化的字段以减小工作量
+            for (int i = 0; i < existingCount; ++i) {
+                QListWidgetItem* item = tab->tableList->item(i);
+                if (!item) continue;
+
+                // 仅在真实变化时设置数据
+                if (item->data(Qt::DisplayRole).toString() != tab->listCache.cachedDisplayTexts[i])
+                    item->setData(Qt::DisplayRole, tab->listCache.cachedDisplayTexts[i]);
+                if (item->data(Qt::UserRole + 1).toString() != tab->listCache.cachedTableNames[i])
+                    item->setData(Qt::UserRole + 1, tab->listCache.cachedTableNames[i]);
+                if (item->data(Qt::UserRole + 2).toString() != tab->listCache.cachedCounts[i])
+                    item->setData(Qt::UserRole + 2, tab->listCache.cachedCounts[i]);
+                if (item->data(Qt::UserRole + 3).toBool() != tab->listCache.cachedMainFlags[i])
+                    item->setData(Qt::UserRole + 3, static_cast<bool>(tab->listCache.cachedMainFlags[i]));
+            }
         }
-    }
-    
-    // 智能选择逻辑（使用缓存数据）
-    int targetIndex = 0;
-    if (!tab->isWHM) {
-        auto mainIt = std::find(tab->listCache.cachedMainFlags.begin(), 
-                              tab->listCache.cachedMainFlags.end(), true);
-        if (mainIt != tab->listCache.cachedMainFlags.end()) {
-            targetIndex = std::distance(tab->listCache.cachedMainFlags.begin(), mainIt);
-        } else if (tab->currentTableIndex >= 0 && tab->currentTableIndex < tab->tableList->count()) {
-            targetIndex = tab->currentTableIndex;
+        
+        // 智能选择逻辑（使用缓存数据）
+        int targetIndex = 0;
+        if (!tab->isWHM) {
+            auto mainIt = std::find(tab->listCache.cachedMainFlags.begin(), 
+                                  tab->listCache.cachedMainFlags.end(), true);
+            if (mainIt != tab->listCache.cachedMainFlags.end()) {
+                targetIndex = std::distance(tab->listCache.cachedMainFlags.begin(), mainIt);
+            } else if (tab->currentTableIndex >= 0 && tab->currentTableIndex < tab->tableList->count()) {
+                targetIndex = tab->currentTableIndex;
+            }
         }
-    }
-    
-    // 恢复更新
-    tab->tableList->setUpdatesEnabled(true);
-    tab->tableList->blockSignals(false);
-    
-    if (targetIndex >= 0 && targetIndex < tab->tableList->count()) {
+        
         // 阻塞信号，避免触发 onTableSelectionChanged 导致重复更新
         const bool wasBlocked = tab->tableList->blockSignals(true);
-        tab->currentTableIndex = targetIndex;
-        tab->tableList->setCurrentRow(targetIndex);
+        if (targetIndex >= 0 && targetIndex < tab->tableList->count()) {
+            tab->currentTableIndex = targetIndex;
+            tab->tableList->setCurrentRow(targetIndex);
+        }
         tab->tableList->blockSignals(wasBlocked);
 
         // 强制触发模型更新，确保在切换标签页后表格能正确显示数据
@@ -6394,18 +6926,22 @@ void GXTStudio::updateTableList()
                 tab->entryTableView->update();
             }
         }
+        
+        // 根据文件类型禁用/启用"添加表"按钮
+        // DAT和WHM文件不允许添加表
+        if (tab->addTableButton) {
+            tab->addTableButton->setEnabled(!tab->isWHM && !tab->isDAT);
+        }
     }
-
+    
+    // 恢复更新
+    tab->tableList->setUpdatesEnabled(true);
+    tab->tableList->blockSignals(false);
+    
     // 恢复视图更新并刷新状态栏
     if (tab->entryTableView) {
         tab->entryTableView->setUpdatesEnabled(true);
         tab->entryTableView->viewport()->update();
-    }
-    
-    // 根据文件类型禁用/启用"添加表"按钮
-    // DAT和WHM文件不允许添加表
-    if (tab->addTableButton) {
-        tab->addTableButton->setEnabled(!tab->isWHM && !tab->isDAT);
     }
     
     updateStatusBar();
@@ -6552,8 +7088,15 @@ void GXTStudio::updateStatusBar()
                 status += " (未知尺寸)";
             }
         } else {
+            // 显示当前表信息
             int tableIndex = currentTab->currentTableIndex;
-            if (tableIndex >= 0 && tableIndex < static_cast<int>(currentTab->tables.size())) {
+            // 判断是否为无表文件（没有TABL块且tables为空）
+            bool isNoTablFile = (!currentTab->originalHasTABL && currentTab->tables.empty());
+            
+            if (isNoTablFile) {
+                // 无表文件，显示noTablEntries的条目数
+                status += " | 条目: " + QString::number(currentTab->noTablEntries.size());
+            } else if (tableIndex >= 0 && tableIndex < static_cast<int>(currentTab->tables.size())) {
                 const auto& table = currentTab->tables[tableIndex];
                 status += " | 表: " + QString::fromStdString(table.name);
                 status += " | 条目: " + QString::number(table.entries.size());
@@ -6913,7 +7456,15 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
         tab.isWHM = result.isWHM;
         tab.isDAT = result.isDAT;  // 设置DAT标志
         tab.isWHMReadOnlyLocked = result.isWHM;  // WHM文件强制只读锁定
+        tab.originalHasTABL = result.originalHasTABL;  // 设置原始文件是否有TABL块
+        tab.noTablEntries = result.noTablEntries;  // 设置无表文件的键值对
         tab.version = result.version;  // 设置版本信息
+
+        // 调试日志：检查无表文件解析结果
+        qDebug() << QString("解析结果: originalHasTABL=%1, tables.size=%2, noTablEntries.size=%3")
+                    .arg(tab.originalHasTABL ? "true" : "false")
+                    .arg(tab.tables.size())
+                    .arg(tab.noTablEntries.size());
 
         // 插入到标签页列表
         if (result.tabIndex == static_cast<int>(m_fileTabs.size())) {
@@ -9338,7 +9889,7 @@ void GXTStudio::onAutoSaveToggle()
     // 更新按钮图标和提示
     if (m_autoSaveEnabled) {
         m_autoSaveButton->setText(QString(QChar(0xf205)));  // 开启状态图标 U+f205
-        m_autoSaveButton->setToolTip("自动保存（开启）");
+        m_autoSaveButton->setToolTip("自动保存（开启）(Ctrl+Shift+A)");
         // 启用状态使用蓝色 - 紧凑设计
         m_autoSaveButton->setStyleSheet(QString(R"(
             QToolButton {

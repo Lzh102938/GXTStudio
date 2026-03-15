@@ -210,6 +210,10 @@ void GXTTableModel::forceDataReset()
             m_cachedRowCount = static_cast<int>(m_tab->whmEntries.size());
         } else if (m_tab->isDAT) {
             m_cachedRowCount = static_cast<int>(m_tab->datEntries.size());
+        } else if (!m_tab->originalHasTABL && m_tab->tables.empty()) {
+            // 无表文件，使用noTablEntries
+            m_cachedRowCount = static_cast<int>(m_tab->noTablEntries.size());
+            qDebug() << "GXTTableModel::forceDataReset - 无表文件, noTablEntries.size=" << m_cachedRowCount;
         } else if (m_currentTableIndex >= 0 && m_currentTableIndex < static_cast<int>(m_tab->tables.size())) {
             m_cachedRowCount = static_cast<int>(m_tab->tables[m_currentTableIndex].entries.size());
         } else {
@@ -235,6 +239,10 @@ int GXTTableModel::rowCount(const QModelIndex&) const
             count = static_cast<int>(m_tab->whmEntries.size());
         } else if (m_tab->isDAT) {
             count = static_cast<int>(m_tab->datEntries.size());
+        } else if (!m_tab->originalHasTABL && m_tab->tables.empty()) {
+            // 无表文件，使用noTablEntries
+            count = static_cast<int>(m_tab->noTablEntries.size());
+            qDebug() << "GXTTableModel::rowCount - 无表文件, noTablEntries.size=" << count;
         } else if (!m_tab->tables.empty() && 
                    m_tab->currentTableIndex >= 0 && 
                    m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
@@ -406,6 +414,15 @@ void GXTTableModel::buildDisplayCache() const
             fillCacheRow(cache, entry.hash, entry.text);
             m_displayCache.append(cache);
         }
+    } else if (!m_tab->originalHasTABL && m_tab->tables.empty()) {
+        // 无表文件，使用noTablEntries
+        rowCount = static_cast<int>(m_tab->noTablEntries.size());
+        m_displayCache.reserve(rowCount);
+        for (const auto& entry : m_tab->noTablEntries) {
+            RowCache cache;
+            fillCacheRow(cache, entry.key, entry.originalKey, entry.value, m_tab->version, s_satKeyMap, s_ivtKeyMap);
+            m_displayCache.append(cache);
+        }
     } else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
         const auto& table = m_tab->tables[m_tab->currentTableIndex];
         rowCount = static_cast<int>(table.entries.size());
@@ -441,6 +458,14 @@ void GXTTableModel::buildPartialDisplayCache(int firstRow, int lastRow) const
             const auto& entry = m_tab->datEntries[row];
             RowCache cache;
             fillCacheRow(cache, entry.hash, entry.text);
+            m_displayCache[row] = cache;
+        }
+    } else if (!m_tab->originalHasTABL && m_tab->tables.empty()) {
+        // 无表文件，使用noTablEntries
+        for (int row = firstRow; row <= lastRow && row < static_cast<int>(m_tab->noTablEntries.size()); ++row) {
+            const auto& entry = m_tab->noTablEntries[row];
+            RowCache cache;
+            fillCacheRow(cache, entry.key, entry.originalKey, entry.value, m_tab->version, s_satKeyMap, s_ivtKeyMap);
             m_displayCache[row] = cache;
         }
     } else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
@@ -505,6 +530,19 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                 auto& entry = m_tab->datEntries[row];
                 if (entry.text != newValue) {
                     entry.text = newValue;
+                    success = true;
+                }
+            }
+        } else if (!m_tab->originalHasTABL && m_tab->tables.empty()) {
+            // 无表文件，使用noTablEntries
+            if (row >= 0 && row < static_cast<int>(m_tab->noTablEntries.size())) {
+                auto& entry = m_tab->noTablEntries[row];
+                if (col == KeyColumn && entry.key != newValue) {
+                    entry.key = newValue;
+                    entry.originalKey = newValue;
+                    success = true;
+                } else if (col == ValueColumn && entry.value != newValue) {
+                    entry.value = newValue;
                     success = true;
                 }
             }

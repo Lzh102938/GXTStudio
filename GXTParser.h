@@ -205,6 +205,7 @@ struct CHtmlDocument {
 class GXTParser {
 private:
     std::vector<GXTTabl> tables;
+    std::vector<GXTEntry> noTablEntries;  // 无表文件的键值对
     bool originalHasTABL = true;
     int encodingType = 0; // 0=auto, 1=UTF-8, 2=CP1252, 3=GBK, 4=UTF-16LE
     GXTVersion detectedVersion = GXTVersion::UNKNOWN; // 添加版本检测字段
@@ -240,10 +241,12 @@ public:
     bool parseDAT(const std::string& filePath, std::vector<DATEntry>& outEntries) const;
     void exportDATToTxt(const std::string& datPath, const std::string& txtPath) const;
     const std::vector<GXTTabl>& getTables() const { return tables; }
+    const std::vector<GXTEntry>& getNoTablEntries() const { return noTablEntries; }  // 获取无表文件的键值对
     void setLogCallback(std::function<void(const std::string&)> callback);
     void setProgressCallback(std::function<void(int, const std::string&)> callback);
     void setEncoding(int encoding) { encodingType = encoding; }
     GXTVersion getDetectedVersion() const { return detectedVersion; } // 添加获取检测版本的方法
+    bool getOriginalHasTABL() const { return originalHasTABL; } // 添加获取原始文件是否有TABL块的方法
 
     // zlib 压缩/解压方法 (x64)
 #ifdef HAVE_ZLIB

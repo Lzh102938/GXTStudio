@@ -16,6 +16,7 @@
 #include <QElapsedTimer>
 #include <QThread>
 #include <QRegularExpression>
+#include <QShortcut>
 #include <functional>
 #include <QtCore/QCache>  // 必须在 TextColorCalculator 类定义之前包含
 
@@ -278,8 +279,12 @@ struct FileTab {
     bool isCharTable = false;  // 字符表文件（VC/IV）
     bool isWHMReadOnlyLocked = false;  // WHM文件只读锁定标志，禁止用户解除只读
     bool isModified = false;
+    bool originalHasTABL = true;  // 原始文件是否有TABL块
     int currentTableIndex = 0;
     GXTVersion version = GXTVersion::UNKNOWN; // 文件版本信息
+    
+    // 无表文件的键值对（当originalHasTABL为false时使用）
+    std::vector<GXTEntry> noTablEntries;
     
     // Qt控件
     QListWidget* tableList = nullptr;
@@ -597,6 +602,8 @@ private slots:
     void saveFile();
     void saveAsFile();
     void exportFile();
+    void batchExport();
+    bool exportTabToFile(FileTab& tab, const QString& filePath);
     void closeFile();
     void exitApp();
     
@@ -776,6 +783,7 @@ private:
     QAction* m_saveAction;
     QAction* m_saveAsAction;
     QAction* m_exportAction;
+    QAction* m_batchExportAction;
     QAction* m_closeAction;
     QAction* m_exitAction;
     QAction* m_findAction;
@@ -793,7 +801,7 @@ private:
     QAction* m_executeTranslateAction; // 执行翻译
     QAction* m_setBackgroundAction;    // 设置背景图片
     QAction* m_clearBackgroundAction;  // 清除背景图片
-    
+      
     // 码表转换相关
     QToolButton* m_codeTableButton; // 码表转换下拉按钮
     QAction* m_mountCodeTableAction; // 挂载码表

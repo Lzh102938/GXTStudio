@@ -64,20 +64,34 @@ void SaveWorker::saveFile(const SaveTask& task)
             // 设置版本信息
             editor.setVersion(task.tabPtr->version);
 
-            // 直接添加表格和条目数据 - 使用批量添加提高性能
-            for (const auto& table : task.tabPtr->tables) {
-                if (!editor.addTable(table.name)) {
-                    continue; // 跳过无效的表
+            // 检查是否为无表文件（没有TABL块且tables为空）
+            if (!task.tabPtr->originalHasTABL && task.tabPtr->tables.empty() && !task.tabPtr->noTablEntries.empty()) {
+                // 无表文件：创建一个MAIN表存储键值对
+                if (editor.addTable("MAIN")) {
+                    size_t tableIndex = editor.getTableCount() - 1;
+                    std::vector<std::pair<std::string, std::string>> entriesBatch;
+                    entriesBatch.reserve(task.tabPtr->noTablEntries.size());
+                    for (const auto& entry : task.tabPtr->noTablEntries) {
+                        entriesBatch.emplace_back(entry.key, entry.value);
+                    }
+                    editor.addEntriesBatch(tableIndex, entriesBatch);
                 }
+            } else {
+                // 有表文件：直接添加表格和条目数据 - 使用批量添加提高性能
+                for (const auto& table : task.tabPtr->tables) {
+                    if (!editor.addTable(table.name)) {
+                        continue; // 跳过无效的表
+                    }
 
-                size_t tableIndex = editor.getTableCount() - 1;
-                // 批量添加条目（跳过重复检查，O(n) 复杂度）
-                std::vector<std::pair<std::string, std::string>> entriesBatch;
-                entriesBatch.reserve(table.entries.size());
-                for (const auto& entry : table.entries) {
-                    entriesBatch.emplace_back(entry.key, entry.value);
+                    size_t tableIndex = editor.getTableCount() - 1;
+                    // 批量添加条目（跳过重复检查，O(n) 复杂度）
+                    std::vector<std::pair<std::string, std::string>> entriesBatch;
+                    entriesBatch.reserve(table.entries.size());
+                    for (const auto& entry : table.entries) {
+                        entriesBatch.emplace_back(entry.key, entry.value);
+                    }
+                    editor.addEntriesBatch(tableIndex, entriesBatch);
                 }
-                editor.addEntriesBatch(tableIndex, entriesBatch);
             }
 
             // 执行保存 - 使用Qt的QFile处理路径
