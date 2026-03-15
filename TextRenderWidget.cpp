@@ -27,13 +27,13 @@ bool TextRenderWidget::s_fallbackLogged = false;
 static QColor getColorForToken(const QString& token, int gtaVersion) {
     // 定义颜色映射 - 所有颜色都设置90%不透明度(alpha=230/255 = 90%)
     static const QMap<QString, QColor> gta3Colors = {
-        {"~b~", QColor(0, 0, 255, 255)},      // blue
-        {"~g~", QColor(0, 255, 0, 255)},      // green
+        {"~b~", QColor(125, 163, 237, 255)},      // blue
+        {"~g~", QColor(69, 147, 111, 255)},      // green
         {"~h~", QColor(255, 255, 255, 255)},  // white (highlight)
-        {"~p~", QColor(128, 0, 128, 255)},    // purple
-        {"~r~", QColor(255, 0, 0, 255)},      // red
+        {"~p~", QColor(163, 107, 244, 255)},    // purple
+        {"~r~", QColor(110, 42, 17, 255)},      // red
         {"~w~", QColor(230, 230, 230, 255)},  // light gray - reset to default color
-        {"~y~", QColor(255, 255, 0, 255)},    // yellow
+        {"~y~", QColor(204, 190, 103, 255)},    // yellow
         {"~a~", QColor(255, 165, 0, 255)},    // area text (orange)
     };
 
@@ -302,6 +302,8 @@ void TextRenderWidget::loadViceCityFont()
     // 根据GTA版本选择字体
     if (m_gtaVersion == 0) {
         // GTA III 使用 Arial Black 和微软雅黑粗体，全部斜体
+        // GTA III 默认字号为15
+        m_fontSize = 15;
             qDebug() << "GTA III version selected, loading fonts:";
         // 主字体直接使用系统Arial Black，斜体
             m_mainFont = QFont("Arial Black", m_fontSize);
@@ -632,7 +634,8 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
         const LineFragments& line = m_parsedLinesCache[i];
         int xPos = textRect.left();
         int yPos = startY + i * m_cachedLineHeight;
-        int baseline = yPos + fm.ascent();
+        // 修复baseline计算：使用行高的一半加上ascent的一半，确保文字垂直居中
+        int baseline = yPos + m_cachedLineHeight - fm.descent();
 
         for (const TextFragment& fragment : line.fragments) {
             if (fragment.isHiddenToken) {
@@ -958,7 +961,8 @@ void TextRenderWidget::updateCachedPNG()
 
         for (const LineFragments& lineFrags : m_parsedLinesCache) {
             int xPos = margin;
-            int baseline = yPos + fm.ascent();
+            // 修复baseline计算：使用行高减去descent，确保文字垂直居中
+            int baseline = yPos + m_cachedLineHeight - fm.descent();
 
             for (const TextFragment& fragment : lineFrags.fragments) {
                 if (fragment.isHiddenToken) {
