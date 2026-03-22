@@ -6,6 +6,7 @@
 #include "GXTTableModel.h"
 #include "CharTableParser.h"
 #include "CharTableExportWorker.h"
+#include "BackgroundConfigDialog.h"
 #include <QApplication>
 #include <QGuiApplication>
 #include <QScreen>
@@ -47,6 +48,7 @@
 #include <QFontDialog>
 #include <QComboBox>
 #include <algorithm>
+#include <cmath>
 #include <QtConcurrent>
 #include <QFutureWatcher>
 #include <windows.h>
@@ -175,6 +177,10 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_backgroundOpacity(1.0)  // 默认透明度100%（完全不透明）
     , m_backgroundEnabled(false)  // 默认禁用背景
     , m_backgroundAspectRatioMode(Qt::KeepAspectRatioByExpanding)  // 填充模式：保持比例填充，可能裁剪边缘
+    , m_backgroundBlurRadius(0)  // 默认无模糊
+    , m_backgroundBrightness(0)  // 默认亮度不变
+    , m_resizeTimer(this)
+    , m_isResizing(false)
     , m_searchResultCache(nullptr)
     , m_cacheIndex(0)
     , m_tableListUpdateTimer(nullptr)
@@ -1096,11 +1102,13 @@ void GXTStudio::setupSaveThread()
 void GXTStudio::setupResizeOptimizations()
 {
     m_lastWindowSize = size();
-    
+
     m_cleanupTimer = new QTimer(this);
     m_cleanupTimer->setInterval(300000);  // 5分钟清理一次，减少干扰
     connect(m_cleanupTimer, &QTimer::timeout, this, &GXTStudio::cleanupDelegatesCache);
     m_cleanupTimer->start();
+
+    connect(&m_resizeTimer, &QTimer::timeout, this, &GXTStudio::onResizeTimerTimeout);
 }
 
 // 极致内存优化的缓存管理
@@ -9187,23 +9195,73 @@ QString DraggableTableList::createTempTableFile(int tableIndex, const QString& t
 void GXTStudio::resizeEvent(QResizeEvent* event)
 {
     QMainWindow::resizeEvent(event);
-    
+
     QSize newSize = event->size();
     QSize oldSize = event->oldSize();
-    
+
     m_lastWindowSize = newSize;
-    
+
+    if (!m_backgroundEnabled || m_originalBackgroundPixmap.isNull()) {
+        return;
+    }
+
     if (oldSize.isValid()) {
         int widthDiff = qAbs(newSize.width() - oldSize.width());
         int heightDiff = qAbs(newSize.height() - oldSize.height());
-        
+
         if (widthDiff < 5 && heightDiff < 5) {
             return;
         }
     }
-    
+
+    QWidget* centralWidget = this->centralWidget();
+    QSize targetSize = centralWidget ? centralWidget->size() : newSize;
+
+    m_isResizing = true;
+    QPixmap scaledPixmap = m_originalBackgroundPixmap.scaled(
+        targetSize,
+        Qt::KeepAspectRatio,
+        Qt::FastTransformation
+    );
+
+    m_backgroundPixmap = scaledPixmap;
     m_cachedBackgroundPixmap = QPixmap();
     m_cachedBackgroundSize = QSize();
+
+    update();
+    m_resizeTimer.start(100);
+}
+
+void GXTStudio::onResizeTimerTimeout()
+{
+    m_resizeTimer.stop();
+    m_isResizing = false;
+
+    if (m_backgroundPixmap.isNull()) {
+        return;
+    }
+
+    QWidget* centralWidget = this->centralWidget();
+    QSize targetSize = centralWidget ? centralWidget->size() : size();
+
+    QPixmap scaledPixmap = m_originalBackgroundPixmap.scaled(
+        targetSize,
+        Qt::KeepAspectRatio,
+        Qt::SmoothTransformation
+    );
+
+    m_backgroundPixmap = scaledPixmap;
+    m_cachedBackgroundPixmap = QPixmap();
+    m_cachedBackgroundSize = QSize();
+
+    applyBackgroundEffects();
+
+    QPixmap pixmapToUse = m_processedBackgroundPixmap.isNull() ? m_backgroundPixmap : m_processedBackgroundPixmap;
+    if (!pixmapToUse.isNull()) {
+        m_textColorCalculator.updateBackground(pixmapToUse, m_backgroundAspectRatioMode, m_backgroundOpacity);
+    }
+
+    update();
 }
 
 // ==================== 自定义背景相关方法 ====================
@@ -9220,7 +9278,9 @@ void GXTStudio::paintEvent(QPaintEvent* event)
 
 void GXTStudio::drawBackground(QPainter* painter)
 {
-    if (!painter || m_backgroundPixmap.isNull()) {
+    QPixmap pixmapToDraw = m_processedBackgroundPixmap.isNull() ? m_backgroundPixmap : m_processedBackgroundPixmap;
+    
+    if (!painter || pixmapToDraw.isNull()) {
         return;
     }
 
@@ -9237,13 +9297,13 @@ void GXTStudio::drawBackground(QPainter* painter)
 
     painter->setClipRect(targetRect);
 
-    // 【关键优化】缓存缩放后的背景图片，避免每次重绘都缩放
     QSize currentSize = targetRect.size();
     if (m_cachedBackgroundPixmap.isNull() || m_cachedBackgroundSize != currentSize) {
-        m_cachedBackgroundPixmap = m_backgroundPixmap.scaled(
+        Qt::TransformationMode mode = m_isResizing ? Qt::FastTransformation : Qt::SmoothTransformation;
+        m_cachedBackgroundPixmap = pixmapToDraw.scaled(
             currentSize,
             m_backgroundAspectRatioMode,
-            Qt::SmoothTransformation
+            mode
         );
         m_cachedBackgroundSize = currentSize;
     }
@@ -9380,15 +9440,24 @@ void GXTStudio::setBackgroundEnabled(bool enabled)
 
 void GXTStudio::clearBackground()
 {
+    m_originalBackgroundPixmap = QPixmap();
     m_backgroundPixmap = QPixmap();
+    m_processedBackgroundPixmap = QPixmap();
+    m_cachedBackgroundPixmap = QPixmap();
+    m_cachedBackgroundSize = QSize();
+    m_backgroundImagePath.clear();
     m_backgroundEnabled = false;
+    m_backgroundBlurRadius = 0;
+    m_backgroundBrightness = 0;
+    m_backgroundOpacity = 1.0;
     m_textColorCalculator.setEnabled(false);
     if (m_clearBackgroundAction) {
         m_clearBackgroundAction->setEnabled(false);
     }
-    update();  // 触发重绘
-    showLogMessage("已清除背景图片");
-    updateLabelColors();  // 恢复默认颜色
+    saveBackgroundSettings();
+    update();
+    showLogMessage(QString::fromUtf8("已清除背景图片"));
+    updateLabelColors();
 }
 
 bool GXTStudio::isBackgroundEnabled() const
@@ -9403,19 +9472,250 @@ qreal GXTStudio::backgroundOpacity() const
 
 void GXTStudio::onSetBackground()
 {
-    QString filePath = QFileDialog::getOpenFileName(
-        this,
-        "选择背景图片",
-        QString(),
-        "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif);;所有文件 (*.*)"
-    );
+    if (!m_backgroundEnabled || m_originalBackgroundPixmap.isNull()) {
+        QString filePath = QFileDialog::getOpenFileName(
+            this,
+            "选择背景图片",
+            QString(),
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif);;所有文件 (*.*)"
+        );
 
-    if (!filePath.isEmpty()) {
-        setBackgroundImage(filePath);
-        if (m_clearBackgroundAction) {
-            m_clearBackgroundAction->setEnabled(true);
+        if (filePath.isEmpty()) {
+            return;
+        }
+
+        QPixmap newPixmap(filePath);
+        if (newPixmap.isNull()) {
+            showLogMessage(QString("无法加载背景图片: %1").arg(filePath));
+            return;
+        }
+
+        m_backgroundImagePath = filePath;
+
+        QWidget* centralWidget = this->centralWidget();
+        QSize windowSize = centralWidget ? centralWidget->size() : this->size();
+        QPixmap scaledPixmap = newPixmap.scaled(
+            windowSize,
+            Qt::KeepAspectRatio,
+            Qt::SmoothTransformation
+        );
+
+        BackgroundConfigDialog dialog(this);
+        dialog.setWindowTitle(QString::fromUtf8("背景图片设置"));
+        dialog.setBackgroundImage(scaledPixmap);
+        dialog.setBlurRadius(m_backgroundBlurRadius);
+        dialog.setBrightness(m_backgroundBrightness);
+        dialog.setOpacity(static_cast<int>(m_backgroundOpacity * 100));
+
+        connect(&dialog, &BackgroundConfigDialog::settingsChanged,
+                this, &GXTStudio::onBackgroundSettingsChanged);
+
+        if (dialog.exec() == QDialog::Accepted) {
+            m_originalBackgroundPixmap = newPixmap;
+            m_backgroundPixmap = scaledPixmap;
+            m_processedBackgroundPixmap = dialog.getProcessedImage();
+            m_backgroundEnabled = true;
+            m_backgroundOpacity = dialog.getOpacity() / 100.0;
+            m_backgroundBlurRadius = dialog.getBlurRadius();
+            m_backgroundBrightness = dialog.getBrightness();
+
+            m_cachedBackgroundPixmap = QPixmap();
+            m_cachedBackgroundSize = QSize();
+
+            if (!m_processedBackgroundPixmap.isNull()) {
+                m_textColorCalculator.setEnabled(true);
+                m_textColorCalculator.updateBackground(m_processedBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+            } else {
+                m_textColorCalculator.setEnabled(true);
+                m_textColorCalculator.updateBackground(m_backgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+            }
+
+            if (m_clearBackgroundAction) {
+                m_clearBackgroundAction->setEnabled(true);
+            }
+
+            saveBackgroundSettings();
+            showLogMessage(QString::fromUtf8("已设置背景图片: %1").arg(filePath));
+            update();
+
+            QTimer::singleShot(100, this, &GXTStudio::updateLabelColors);
+        }
+    } else {
+        QWidget* centralWidget = this->centralWidget();
+        QSize windowSize = centralWidget ? centralWidget->size() : this->size();
+        QPixmap scaledPixmap = m_originalBackgroundPixmap.scaled(
+            windowSize,
+            Qt::KeepAspectRatio,
+            Qt::SmoothTransformation
+        );
+
+        BackgroundConfigDialog dialog(this);
+        dialog.setWindowTitle(QString::fromUtf8("背景图片设置"));
+        dialog.setBackgroundImage(scaledPixmap);
+        dialog.setBlurRadius(m_backgroundBlurRadius);
+        dialog.setBrightness(m_backgroundBrightness);
+        dialog.setOpacity(static_cast<int>(m_backgroundOpacity * 100));
+
+        connect(&dialog, &BackgroundConfigDialog::settingsChanged,
+                this, &GXTStudio::onBackgroundSettingsChanged);
+
+        if (dialog.exec() == QDialog::Accepted) {
+            m_backgroundPixmap = scaledPixmap;
+            m_processedBackgroundPixmap = dialog.getProcessedImage();
+            m_backgroundOpacity = dialog.getOpacity() / 100.0;
+            m_backgroundBlurRadius = dialog.getBlurRadius();
+            m_backgroundBrightness = dialog.getBrightness();
+
+            m_cachedBackgroundPixmap = QPixmap();
+            m_cachedBackgroundSize = QSize();
+
+            if (!m_processedBackgroundPixmap.isNull()) {
+                m_textColorCalculator.updateBackground(m_processedBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+            } else {
+                m_textColorCalculator.updateBackground(m_backgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+            }
+
+            saveBackgroundSettings();
+            update();
+            QTimer::singleShot(100, this, &GXTStudio::updateLabelColors);
         }
     }
+}
+
+void GXTStudio::onBackgroundSettingsChanged(int blurRadius, int brightness, int opacity)
+{
+    m_backgroundBlurRadius = blurRadius;
+    m_backgroundBrightness = brightness;
+    m_backgroundOpacity = opacity / 100.0;
+    
+    applyBackgroundEffects();
+    
+    m_cachedBackgroundPixmap = QPixmap();
+    m_cachedBackgroundSize = QSize();
+    
+    if (!m_processedBackgroundPixmap.isNull()) {
+        m_textColorCalculator.updateBackground(m_processedBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+    }
+    
+    saveBackgroundSettings();
+    update();
+}
+
+void GXTStudio::applyBackgroundEffects()
+{
+    if (m_backgroundPixmap.isNull()) {
+        return;
+    }
+    
+    if (m_backgroundBlurRadius == 0 && m_backgroundBrightness == 0) {
+        m_processedBackgroundPixmap = m_backgroundPixmap;
+        return;
+    }
+    
+    QImage sourceImage = m_backgroundPixmap.toImage();
+    QImage resultImage = sourceImage.convertToFormat(QImage::Format_ARGB32);
+    
+    if (m_backgroundBlurRadius > 0) {
+        int radius = qMin(m_backgroundBlurRadius, 25);
+        int w = resultImage.width();
+        int h = resultImage.height();
+        
+        int kernelSize = radius * 2 + 1;
+        QVector<float> kernel(kernelSize);
+        float sigma = radius / 3.0f;
+        float sum = 0.0f;
+        
+        for (int i = 0; i < kernelSize; ++i) {
+            float x = i - radius;
+            kernel[i] = std::exp(-(x * x) / (2.0f * sigma * sigma));
+            sum += kernel[i];
+        }
+        for (int i = 0; i < kernelSize; ++i) {
+            kernel[i] /= sum;
+        }
+        
+        QImage intermediate(w, h, QImage::Format_ARGB32);
+        const QRgb* srcBits = reinterpret_cast<const QRgb*>(resultImage.constBits());
+        QRgb* dstBits = reinterpret_cast<QRgb*>(intermediate.bits());
+        
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float r = 0, g = 0, b = 0, a = 0;
+                for (int k = 0; k < kernelSize; ++k) {
+                    int px = qBound(0, x + k - radius, w - 1);
+                    QRgb pixel = srcBits[y * w + px];
+                    float weight = kernel[k];
+                    r += qRed(pixel) * weight;
+                    g += qGreen(pixel) * weight;
+                    b += qBlue(pixel) * weight;
+                    a += qAlpha(pixel) * weight;
+                }
+                dstBits[y * w + x] = qRgba(
+                    static_cast<int>(r + 0.5f),
+                    static_cast<int>(g + 0.5f),
+                    static_cast<int>(b + 0.5f),
+                    static_cast<int>(a + 0.5f)
+                );
+            }
+        }
+        
+        srcBits = reinterpret_cast<const QRgb*>(intermediate.constBits());
+        dstBits = reinterpret_cast<QRgb*>(resultImage.bits());
+        
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float r = 0, g = 0, b = 0, a = 0;
+                for (int k = 0; k < kernelSize; ++k) {
+                    int py = qBound(0, y + k - radius, h - 1);
+                    QRgb pixel = srcBits[py * w + x];
+                    float weight = kernel[k];
+                    r += qRed(pixel) * weight;
+                    g += qGreen(pixel) * weight;
+                    b += qBlue(pixel) * weight;
+                    a += qAlpha(pixel) * weight;
+                }
+                dstBits[y * w + x] = qRgba(
+                    static_cast<int>(r + 0.5f),
+                    static_cast<int>(g + 0.5f),
+                    static_cast<int>(b + 0.5f),
+                    static_cast<int>(a + 0.5f)
+                );
+            }
+        }
+    }
+    
+    if (m_backgroundBrightness != 0) {
+        QRgb* bits = reinterpret_cast<QRgb*>(resultImage.bits());
+        int pixelCount = resultImage.width() * resultImage.height();
+        
+        for (int i = 0; i < pixelCount; ++i) {
+            QRgb pixel = bits[i];
+            int r = qBound(0, qRed(pixel) + m_backgroundBrightness, 255);
+            int g = qBound(0, qGreen(pixel) + m_backgroundBrightness, 255);
+            int b = qBound(0, qBlue(pixel) + m_backgroundBrightness, 255);
+            bits[i] = qRgba(r, g, b, qAlpha(pixel));
+        }
+    }
+    
+    m_processedBackgroundPixmap = QPixmap::fromImage(resultImage);
+}
+
+void GXTStudio::saveBackgroundSettings()
+{
+    QSettings settings;
+    settings.setValue("background/blurRadius", m_backgroundBlurRadius);
+    settings.setValue("background/brightness", m_backgroundBrightness);
+    settings.setValue("background/opacity", m_backgroundOpacity);
+    settings.setValue("background/enabled", m_backgroundEnabled);
+}
+
+void GXTStudio::loadBackgroundSettings()
+{
+    QSettings settings;
+    m_backgroundBlurRadius = settings.value("background/blurRadius", 0).toInt();
+    m_backgroundBrightness = settings.value("background/brightness", 0).toInt();
+    m_backgroundOpacity = settings.value("background/opacity", 1.0).toReal();
+    m_backgroundEnabled = settings.value("background/enabled", false).toBool();
 }
 
 void GXTStudio::onClearBackground()

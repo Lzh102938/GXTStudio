@@ -116,6 +116,8 @@ set(PROJECT_SOURCES
     ReplaceWorker.cpp
     AboutDialog.h
     AboutDialog.cpp
+    BackgroundConfigDialog.h
+    BackgroundConfigDialog.cpp
 )
 
 # 设置 Windows 资源文件（用于应用程序图标）

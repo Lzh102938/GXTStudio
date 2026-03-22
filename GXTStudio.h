@@ -253,6 +253,7 @@ class SmartTranslator;
 class TranslateConfigDialog;
 class TextRenderWidget;
 class CharTableWidget;
+class BackgroundConfigDialog;
 
 // TranslateResult结构体前向声明
 struct TranslateResult;
@@ -660,6 +661,7 @@ private slots:
     // 背景设置相关
     void onSetBackground();    // 设置背景图片
     void onClearBackground();  // 清除背景图片
+    void onBackgroundSettingsChanged(int blurRadius, int brightness, int opacity);  // 背景设置变化
 
     // 码表转换相关
     void onMountCodeTable(); // 挂载码表
@@ -754,17 +756,28 @@ private:
     Ui::GXTStudioClass ui;
 
     // 自定义背景相关
-    QPixmap m_backgroundPixmap;  // 背景图片
+    QPixmap m_originalBackgroundPixmap;  // 原始背景图片（未缩放）
+    QPixmap m_backgroundPixmap;  // 当前使用的背景图片（可能已缩放）
+    QPixmap m_processedBackgroundPixmap;  // 处理后的背景图片（模糊、亮度）
     QPixmap m_cachedBackgroundPixmap;  // 【关键优化】缓存的缩放背景图片
     QSize m_cachedBackgroundSize;  // 【关键优化】缓存时的尺寸
     qreal m_backgroundOpacity;   // 背景透明度 (0.0 - 1.0)
     bool m_backgroundEnabled;    // 是否启用背景
     Qt::AspectRatioMode m_backgroundAspectRatioMode;  // 图片缩放模式
+    int m_backgroundBlurRadius;  // 高斯模糊半径 (0-50)
+    int m_backgroundBrightness;  // 亮度调节 (-100 到 100)
+    QString m_backgroundImagePath;  // 背景图片路径（用于重新加载）
+    QTimer m_resizeTimer;  // 窗口缩放防抖定时器
+    bool m_isResizing;  // 是否正在缩放中
     TextColorCalculator m_textColorCalculator;  // 优化的文本颜色计算器
     void drawBackground(QPainter* painter);  // 绘制背景方法
     QColor getTextColorForPosition(const QPoint& pos);  // 根据背景位置获取文字颜色（包装方法）
     void updateLabelColors();  // 更新标签文字颜色
     void updateSearchUIColors(FileTab& tab);  // 更新搜索UI颜色
+    void applyBackgroundEffects();  // 应用背景效果（模糊、亮度）
+    void onResizeTimerTimeout();  // 窗口缩放防抖处理
+    void saveBackgroundSettings();  // 保存背景设置到配置
+    void loadBackgroundSettings();  // 从配置加载背景设置
 
     // 主要控件
     QTabWidget* m_tabWidget;
