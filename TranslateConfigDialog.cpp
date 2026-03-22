@@ -1,4 +1,5 @@
 #include "TranslateConfigDialog.h"
+#include "AppConfig.h"
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QFormLayout>
@@ -512,37 +513,33 @@ void TranslateConfigDialog::onTestConnection()
 }
 void TranslateConfigDialog::loadSettings()
 {
-    QSettings settings;
-    settings.beginGroup("Translate");
+    AppConfig& config = AppConfig::instance();
 
-    QString apiKey = settings.value("apiKey", "").toString();
+    QString apiKey = config.getTranslateApiKey();
     m_apiKeyEdit->setText(apiKey);
 
-    QString systemPrompt = settings.value("systemPrompt", "").toString();
-    QString userPrompt = settings.value("batchPrompt", "").toString();
+    QString systemPrompt = config.getTranslateSystemPrompt();
+    QString userPrompt = config.getTranslateBatchPrompt();
 
     m_systemPromptEdit->setPlainText(systemPrompt.isEmpty() ? DEFAULT_SYSTEM_PROMPT : systemPrompt);
     m_userPromptEdit->setPlainText(userPrompt.isEmpty() ? DEFAULT_USER_PROMPT : userPrompt);
 
-    m_batchSizeEdit->setValue(settings.value("batchSize", DEFAULT_BATCH_SIZE).toInt());
-    m_maxConcurrentEdit->setValue(settings.value("maxConcurrent", DEFAULT_MAX_CONCURRENT).toInt());
-    m_maxRetriesEdit->setValue(settings.value("maxRetries", DEFAULT_MAX_RETRIES).toInt());
-
-    settings.endGroup();
+    m_batchSizeEdit->setValue(config.getTranslateBatchSize());
+    m_maxConcurrentEdit->setValue(config.getTranslateMaxConcurrent());
+    m_maxRetriesEdit->setValue(config.getTranslateMaxRetries());
 }
 void TranslateConfigDialog::saveSettings()
 {
-    QSettings settings;
-    settings.beginGroup("Translate");
+    AppConfig& config = AppConfig::instance();
     
-    settings.setValue("apiKey", getApiKey());
-    settings.setValue("systemPrompt", getSystemPrompt());
-    settings.setValue("batchPrompt", getBatchPrompt());
-    settings.setValue("batchSize", getBatchSize());
-    settings.setValue("maxConcurrent", getMaxConcurrentRequests());
-    settings.setValue("maxRetries", getMaxRetries());
+    config.setTranslateApiKey(getApiKey());
+    config.setTranslateSystemPrompt(getSystemPrompt());
+    config.setTranslateBatchPrompt(getBatchPrompt());
+    config.setTranslateBatchSize(getBatchSize());
+    config.setTranslateMaxConcurrent(getMaxConcurrentRequests());
+    config.setTranslateMaxRetries(getMaxRetries());
     
-    settings.endGroup();
+    config.save();
 }
 void TranslateConfigDialog::accept()
 {

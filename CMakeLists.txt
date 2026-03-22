@@ -118,6 +118,8 @@ set(PROJECT_SOURCES
     AboutDialog.cpp
     BackgroundConfigDialog.h
     BackgroundConfigDialog.cpp
+    DebugConfigDialog.h
+    AppConfig.h
 )
 
 # 设置 Windows 资源文件（用于应用程序图标）

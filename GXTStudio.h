@@ -663,6 +663,9 @@ private slots:
     void onClearBackground();  // 清除背景图片
     void onBackgroundSettingsChanged(int blurRadius, int brightness, int opacity);  // 背景设置变化
 
+    // 调试相关
+    void onDebugConfig();  // 打开调试配置编辑器
+
     // 码表转换相关
     void onMountCodeTable(); // 挂载码表
     void onConvertCodeTable(); // 执行转换
@@ -810,6 +813,7 @@ private:
     QAction* m_executeTranslateAction; // 执行翻译
     QAction* m_setBackgroundAction;    // 设置背景图片
     QAction* m_clearBackgroundAction;  // 清除背景图片
+    QAction* m_debugConfigAction;      // 调试配置编辑器
       
     // 码表转换相关
     QToolButton* m_codeTableButton; // 码表转换下拉按钮

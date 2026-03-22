@@ -7,6 +7,8 @@
 #include "CharTableParser.h"
 #include "CharTableExportWorker.h"
 #include "BackgroundConfigDialog.h"
+#include "DebugConfigDialog.h"
+#include "AppConfig.h"
 #include <QApplication>
 #include <QGuiApplication>
 #include <QScreen>
@@ -140,6 +142,7 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_executeTranslateAction(nullptr)
     , m_setBackgroundAction(nullptr)
     , m_clearBackgroundAction(nullptr)
+    , m_debugConfigAction(nullptr)
     , m_smartTranslator(nullptr)
     , m_smartTranslatorThread(nullptr)
     , m_translateProgressDialog(nullptr)
@@ -275,10 +278,10 @@ GXTStudio::GXTStudio(QWidget *parent)
     connectSignals();
     
     // 加载设置
-    QSettings settings;
-    m_fontSize = settings.value("fontSize", 11).toInt();
-    m_isReadOnly = settings.value("readOnly", true).toBool();
-    m_autoSaveEnabled = settings.value("autoSaveEnabled", false).toBool();  // 加载自动保存设置
+    AppConfig& config = AppConfig::instance();
+    m_fontSize = config.getFontSize();
+    m_isReadOnly = config.isReadOnly();
+    m_autoSaveEnabled = config.isAutoSaveEnabled();
 
     // 更新自动保存按钮状态
     if (m_autoSaveButton) {
@@ -351,9 +354,10 @@ GXTStudio::~GXTStudio()
     }
 
     // 保存设置
-    QSettings settings;
-    settings.setValue("fontSize", m_fontSize);
-    settings.setValue("readOnly", m_isReadOnly);
+    AppConfig& config = AppConfig::instance();
+    config.setFontSize(m_fontSize);
+    config.setReadOnly(m_isReadOnly);
+    config.save();
 
     // 停止翻译线程
     if (m_codeTableConverter) {
@@ -738,6 +742,15 @@ void GXTStudio::setupMenus()
         ui.menuView->addAction(m_setBackgroundAction);
         ui.menuView->addAction(m_clearBackgroundAction);
     }
+
+    // 添加调试菜单项到帮助菜单
+    if (ui.menuHelp) {
+        ui.menuHelp->addSeparator();
+        m_debugConfigAction = new QAction(QString::fromUtf8("调试配置编辑器"), this);
+        m_debugConfigAction->setShortcut(QKeySequence("Ctrl+M"));
+        m_debugConfigAction->setToolTip(QString::fromUtf8("打开调试配置编辑器 (Ctrl+M)"));
+        ui.menuHelp->addAction(m_debugConfigAction);
+    }
 }
 
 void GXTStudio::setupToolBars()
@@ -804,8 +817,7 @@ void GXTStudio::setupToolBars()
     
     m_smartTranslateButton->setMenu(translateMenu);
     
-    QSettings settings;
-    QString apiKey = settings.value("Translate/apiKey", "").toString();
+    QString apiKey = AppConfig::instance().getTranslateApiKey();
     if (apiKey.trimmed().isEmpty()) {
         connect(m_smartTranslateButton, &QToolButton::clicked, this, &GXTStudio::onConfigTranslate);
     } else {
@@ -1029,6 +1041,11 @@ void GXTStudio::connectSignals()
         connect(m_clearBackgroundAction, &QAction::triggered, this, &GXTStudio::onClearBackground);
     }
 
+    // 调试菜单连接
+    if (m_debugConfigAction) {
+        connect(m_debugConfigAction, &QAction::triggered, this, &GXTStudio::onDebugConfig);
+    }
+
     // 标签页信号连接
     connect(m_tabWidget, &QTabWidget::currentChanged, this, &GXTStudio::onTabChanged);
     connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, &GXTStudio::closeTab);
@@ -1169,6 +1186,43 @@ void GXTStudio::initializeDeferredComponents()
     
     // 预计算表格度量
     precomputeTableMetrics();
+    
+    // 加载背景设置并恢复背景图片
+    loadBackgroundSettings();
+    if (m_backgroundEnabled && !m_backgroundImagePath.isEmpty()) {
+        QPixmap bgPixmap(m_backgroundImagePath);
+        if (!bgPixmap.isNull()) {
+            m_originalBackgroundPixmap = bgPixmap;
+            QWidget* centralWidget = this->centralWidget();
+            QSize windowSize = centralWidget ? centralWidget->size() : this->size();
+            m_backgroundPixmap = bgPixmap.scaled(
+                windowSize,
+                Qt::KeepAspectRatio,
+                Qt::SmoothTransformation
+            );
+            
+            if (m_backgroundBlurRadius > 0 || m_backgroundBrightness != 0) {
+                applyBackgroundEffects();
+            } else {
+                m_processedBackgroundPixmap = m_backgroundPixmap;
+            }
+            
+            if (!m_processedBackgroundPixmap.isNull()) {
+                m_textColorCalculator.setEnabled(true);
+                m_textColorCalculator.updateBackground(m_processedBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+            }
+            
+            if (m_clearBackgroundAction) {
+                m_clearBackgroundAction->setEnabled(true);
+            }
+            
+            showLogMessage(QString::fromUtf8("已恢复背景图片: %1").arg(m_backgroundImagePath));
+            update();
+            QTimer::singleShot(100, this, &GXTStudio::updateLabelColors);
+        } else {
+            showLogMessage(QString::fromUtf8("无法加载背景图片: %1").arg(m_backgroundImagePath));
+        }
+    }
     
     // 后台加载SATKEY和IVTKEY映射
     QThread *keyMapThread = new QThread();
@@ -5283,9 +5337,7 @@ void GXTStudio::updateCodeTableButtonText()
 
 void GXTStudio::onSmartTranslate()
 {
-    // 检查是否已配置API密钥
-    QSettings settings;
-    QString apiKey = settings.value("Translate/apiKey", "").toString();
+    QString apiKey = AppConfig::instance().getTranslateApiKey();
     if (apiKey.trimmed().isEmpty()) {
         onConfigTranslate();
     } else {
@@ -9702,28 +9754,38 @@ void GXTStudio::applyBackgroundEffects()
 
 void GXTStudio::saveBackgroundSettings()
 {
-    QSettings settings;
-    settings.setValue("background/blurRadius", m_backgroundBlurRadius);
-    settings.setValue("background/brightness", m_backgroundBrightness);
-    settings.setValue("background/opacity", m_backgroundOpacity);
-    settings.setValue("background/enabled", m_backgroundEnabled);
+    AppConfig& config = AppConfig::instance();
+    config.setBackgroundBlurRadius(m_backgroundBlurRadius);
+    config.setBackgroundBrightness(m_backgroundBrightness);
+    config.setBackgroundOpacity(m_backgroundOpacity);
+    config.setBackgroundEnabled(m_backgroundEnabled);
+    config.setBackgroundImagePath(m_backgroundImagePath);
+    config.save();
 }
 
 void GXTStudio::loadBackgroundSettings()
 {
-    QSettings settings;
-    m_backgroundBlurRadius = settings.value("background/blurRadius", 0).toInt();
-    m_backgroundBrightness = settings.value("background/brightness", 0).toInt();
-    m_backgroundOpacity = settings.value("background/opacity", 1.0).toReal();
-    m_backgroundEnabled = settings.value("background/enabled", false).toBool();
+    AppConfig& config = AppConfig::instance();
+    m_backgroundBlurRadius = config.getBackgroundBlurRadius();
+    m_backgroundBrightness = config.getBackgroundBrightness();
+    m_backgroundOpacity = config.getBackgroundOpacity();
+    m_backgroundEnabled = config.isBackgroundEnabled();
+    m_backgroundImagePath = config.getBackgroundImagePath();
 }
 
 void GXTStudio::onClearBackground()
 {
     clearBackground();
+    saveBackgroundSettings();
     if (m_clearBackgroundAction) {
         m_clearBackgroundAction->setEnabled(false);
     }
+}
+
+void GXTStudio::onDebugConfig()
+{
+    DebugConfigDialog dialog(this);
+    dialog.exec();
 }
 
 // ==================== 自定义背景方法结束 ====================
@@ -10899,8 +10961,8 @@ void GXTStudio::onAutoSaveToggle()
     }
 
     // 保存设置
-    QSettings settings;
-    settings.setValue("autoSaveEnabled", m_autoSaveEnabled);
+    AppConfig::instance().setAutoSaveEnabled(m_autoSaveEnabled);
+    AppConfig::instance().save();
 }
 
 void GXTStudio::onAutoSaveTimer()
@@ -11206,17 +11268,15 @@ void GXTStudio::setupTranslationProgress()
     m_smartTranslator = new SmartTranslator();
     
     // 立即加载配置应用到翻译器
-    QSettings settings;
-    settings.beginGroup("Translate");
+    AppConfig& config = AppConfig::instance();
     
     // 加载并应用配置 - 使用32并发优化配置
-    QString apiKey = settings.value("apiKey", "").toString();
-    QString systemPrompt = settings.value("systemPrompt", "").toString();
-    QString batchPrompt = settings.value("batchPrompt", "").toString();
-    int batchSize = settings.value("batchSize", SmartTranslator::DEFAULT_BATCH_SIZE).toInt();  // 32行每批次
-    int maxConcurrent = settings.value("maxConcurrent", SmartTranslator::DEFAULT_MAX_CONCURRENT_REQUESTS).toInt();  // 32并发
-    int maxRetries = settings.value("maxRetries", SmartTranslator::DEFAULT_MAX_RETRIES).toInt();  // 3次重试
-    settings.endGroup();
+    QString apiKey = config.getTranslateApiKey();
+    QString systemPrompt = config.getTranslateSystemPrompt();
+    QString batchPrompt = config.getTranslateBatchPrompt();
+    int batchSize = config.getTranslateBatchSize();
+    int maxConcurrent = config.getTranslateMaxConcurrent();
+    int maxRetries = config.getTranslateMaxRetries();
     
     // 应用配置到翻译器
     m_smartTranslator->setApiKey(apiKey);
@@ -11270,17 +11330,15 @@ void GXTStudio::onConfigTranslate()
     TranslateConfigDialog dialog(this);
     
     // 加载当前配置
-    QSettings settings;
-    settings.beginGroup("Translate");
-    QString apiKey = settings.value("apiKey", "").toString();
-    QString systemPrompt = settings.value("systemPrompt", "").toString();
-    QString batchPrompt = settings.value("batchPrompt", "").toString();
+    AppConfig& config = AppConfig::instance();
+    QString apiKey = config.getTranslateApiKey();
+    QString systemPrompt = config.getTranslateSystemPrompt();
+    QString batchPrompt = config.getTranslateBatchPrompt();
     
     // 加载性能配置 - 使用配置界面的默认值
-    int batchSize = settings.value("batchSize", SmartTranslator::DEFAULT_BATCH_SIZE).toInt();
-    int maxConcurrent = settings.value("maxConcurrent", SmartTranslator::DEFAULT_MAX_CONCURRENT_REQUESTS).toInt();
-    int maxRetries = settings.value("maxRetries", SmartTranslator::DEFAULT_MAX_RETRIES).toInt();
-    settings.endGroup();
+    int batchSize = config.getTranslateBatchSize();
+    int maxConcurrent = config.getTranslateMaxConcurrent();
+    int maxRetries = config.getTranslateMaxRetries();
     
     dialog.setApiKey(apiKey);
     dialog.setSystemPrompt(systemPrompt);
