@@ -818,6 +818,12 @@ private:
     // 异步解析相关
     QThread* m_parseThread;
     ParseWorker* m_parseWorker;
+    // 批量并行解析相关
+    QFutureWatcher<ParseResult>* m_batchParseWatcher;
+    QVector<ParseTask> m_pendingParseTasks;
+    int m_batchParseTotal;
+    int m_batchParseCompleted;
+    MultiThreadProgressDialog* m_batchParseProgressDialog;
     // 表格列表更新防抖定时器
     QTimer* m_tableListUpdateTimer;
     
@@ -1029,7 +1035,10 @@ private:
     // 异步解析方法
     void setupParseThread();
     void startAsyncParse(const QString& filePath);
+    void startBatchAsyncParse(const QStringList& filePaths);
     void onParseCompleted(const ParseResult& result);
+    void onBatchParseResultReadyAt(int index);
+    void onBatchParseFinished();
     void createTabContent(FileTab& tab, int tabIndex);
 };
 

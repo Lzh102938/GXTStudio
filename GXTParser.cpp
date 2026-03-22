@@ -12,6 +12,88 @@
 #include <functional>
 #include <set>
 #include <QByteArray>
+#include <list>
+#include <mutex>
+#include <unordered_map>
+
+// ============================================================================
+// FastFileReader 实现 - 高效文件读取
+// ============================================================================
+FastFileReader::FastFileReader(const std::string& path, Mode mode) {
+#ifdef _WIN32
+    if (mode == Mode::MemoryMapped) {
+        // 使用内存映射
+        m_fileHandle = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+        
+        if (m_fileHandle == INVALID_HANDLE_VALUE) return;
+        
+        LARGE_INTEGER fileSize;
+        if (!GetFileSizeEx(m_fileHandle, &fileSize)) {
+            CloseHandle(m_fileHandle);
+            m_fileHandle = INVALID_HANDLE_VALUE;
+            return;
+        }
+        m_size = static_cast<size_t>(fileSize.QuadPart);
+        
+        if (m_size == 0) {
+            CloseHandle(m_fileHandle);
+            m_fileHandle = INVALID_HANDLE_VALUE;
+            return;
+        }
+        
+        m_mapHandle = CreateFileMappingA(m_fileHandle, nullptr, PAGE_READONLY, 0, 0, nullptr);
+        if (!m_mapHandle) {
+            CloseHandle(m_fileHandle);
+            m_fileHandle = INVALID_HANDLE_VALUE;
+            return;
+        }
+        
+        m_data = static_cast<const uint8_t*>(MapViewOfFile(m_mapHandle, FILE_MAP_READ, 0, 0, 0));
+        if (!m_data) {
+            CloseHandle(m_mapHandle);
+            CloseHandle(m_fileHandle);
+            m_mapHandle = nullptr;
+            m_fileHandle = INVALID_HANDLE_VALUE;
+        }
+    } else
+#endif
+    {
+        // 使用缓冲读取
+        FILE* f = nullptr;
+        fopen_s(&f, path.c_str(), "rb");
+        if (!f) return;
+        
+        fseek(f, 0, SEEK_END);
+        m_size = static_cast<size_t>(_ftelli64(f));
+        fseek(f, 0, SEEK_SET);
+        
+        if (m_size > 0) {
+            m_buffer = std::make_unique<uint8_t[]>(m_size);
+            if (fread(m_buffer.get(), 1, m_size, f) == m_size) {
+                m_data = m_buffer.get();
+            } else {
+                m_size = 0;
+                m_buffer.reset();
+            }
+        }
+        fclose(f);
+    }
+}
+
+FastFileReader::~FastFileReader() {
+#ifdef _WIN32
+    if (m_data && !m_buffer) {
+        UnmapViewOfFile(const_cast<uint8_t*>(m_data));
+    }
+    if (m_mapHandle) {
+        CloseHandle(m_mapHandle);
+    }
+    if (m_fileHandle != INVALID_HANDLE_VALUE) {
+        CloseHandle(m_fileHandle);
+    }
+#endif
+}
 
 static std::function<void(const std::string&)> g_logCallback = nullptr;
 static std::function<void(int, const std::string&)> g_progressCallback = nullptr;
@@ -68,61 +150,44 @@ std::wstring GXTParser::read_wstring(FILE* f) const {
     return w;
 }
 
-std::string GXTParser::cp1252_to_utf8(const std::string& s) const {
+// 统一编码转换函数 - 减少约60行重复代码
+std::string GXTParser::convertEncoding(const std::string& s, unsigned int srcCodePage) const {
     if (s.empty()) return {};
     
-    // 首先尝试使用MultiByteToWideChar进行转换
-    int wide_len = MultiByteToWideChar(1252, 0, s.data(), (int)s.size(), nullptr, 0);
-    if (wide_len == 0) {
-        // 如果CP1252转换失败，尝试使用ISO-8859-1
-        wide_len = MultiByteToWideChar(28591, 0, s.data(), (int)s.size(), nullptr, 0);
-        if (wide_len == 0) return {};
-        
-        std::wstring w(wide_len, 0);
-        MultiByteToWideChar(28591, 0, s.data(), (int)s.size(), &w[0], wide_len);
-        int utf8_len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wide_len, nullptr, 0, nullptr, nullptr);
-        if (utf8_len == 0) return {};
-        std::string out(utf8_len, 0);
-        WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wide_len, &out[0], utf8_len, nullptr, nullptr);
-        return out;
-    }
+    int wide_len = MultiByteToWideChar(srcCodePage, 0, s.data(), (int)s.size(), nullptr, 0);
+    if (wide_len == 0) return {};
     
     std::wstring w(wide_len, 0);
-    MultiByteToWideChar(1252, 0, s.data(), (int)s.size(), &w[0], wide_len);
+    MultiByteToWideChar(srcCodePage, 0, s.data(), (int)s.size(), &w[0], wide_len);
+    
     int utf8_len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wide_len, nullptr, 0, nullptr, nullptr);
     if (utf8_len == 0) return {};
+    
     std::string out(utf8_len, 0);
     WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wide_len, &out[0], utf8_len, nullptr, nullptr);
     return out;
 }
 
+// 简化接口实现
+std::string GXTParser::cp1252_to_utf8(const std::string& s) const {
+    return convertEncoding(s, 1252);
+}
+
 std::string GXTParser::gbk_to_utf8(const std::string& s) const {
-    if (s.empty()) return {};
-    
-    int wide_len = MultiByteToWideChar(936, 0, s.data(), (int)s.size(), nullptr, 0);
-    if (wide_len == 0) return {};
-    
-    std::wstring w(wide_len, 0);
-    MultiByteToWideChar(936, 0, s.data(), (int)s.size(), &w[0], wide_len);
-    int utf8_len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wide_len, nullptr, 0, nullptr, nullptr);
-    if (utf8_len == 0) return {};
-    std::string out(utf8_len, 0);
-    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wide_len, &out[0], utf8_len, nullptr, nullptr);
-    return out;
+    return convertEncoding(s, 936);
 }
 
 std::string GXTParser::utf16le_to_utf8(const std::string& s) const {
     if (s.empty() || s.size() % 2 != 0) return {};
     
-    int wide_len = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
-    if (wide_len == 0) return {};
+    const wchar_t* wstr = reinterpret_cast<const wchar_t*>(s.data());
+    int wide_len = static_cast<int>(s.size() / 2);
     
-    std::wstring w(wide_len, 0);
-    MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), &w[0], wide_len);
-    int utf8_len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wide_len, nullptr, 0, nullptr, nullptr);
+    int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wstr, wide_len, nullptr, 0, nullptr, nullptr);
     if (utf8_len == 0) return {};
+    
     std::string out(utf8_len, 0);
-    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), wide_len, &out[0], utf8_len, nullptr, nullptr);
+    WideCharToMultiByte(CP_UTF8, 0, wstr, wide_len, &out[0], utf8_len, nullptr, nullptr);
     return out;
 }
 
@@ -858,6 +923,418 @@ bool GXTParser::parse(const std::string& filePath) {
     }
     reportProgress(100, "解析完成");
     // 无表文件：tables为空但noTablEntries不为空时也算成功
+    return !tables.empty() || !noTablEntries.empty();
+}
+
+
+// 内存映射文件解析 - 显著提升HDD和网络驱动器性能
+bool GXTParser::parseWithMemoryMap(const std::string& filePath) {
+    addParseLog("开始解析文件(内存映射) " + filePath);
+    reportProgress(0, "正在打开文件...");
+    
+    // 使用Windows API打开文件
+    HANDLE hFile = CreateFileA(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        addParseLog("无法打开文件");
+        return false;
+    }
+    
+    // 获取文件大小
+    LARGE_INTEGER fileSizeLI;
+    if (!GetFileSizeEx(hFile, &fileSizeLI)) {
+        CloseHandle(hFile);
+        addParseLog("无法获取文件大小");
+        return false;
+    }
+    size_t fileSize = static_cast<size_t>(fileSizeLI.QuadPart);
+    
+    if (fileSize < 8) {
+        CloseHandle(hFile);
+        addParseLog("文件太小");
+        return false;
+    }
+    
+    // 创建文件映射
+    HANDLE hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+    if (!hMap) {
+        CloseHandle(hFile);
+        addParseLog("无法创建文件映射");
+        return false;
+    }
+    
+    // 映射视图
+    const uint8_t* data = static_cast<const uint8_t*>(MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0));
+    if (!data) {
+        CloseHandle(hMap);
+        CloseHandle(hFile);
+        addParseLog("无法映射文件视图");
+        return false;
+    }
+    
+    tables.clear();
+    noTablEntries.clear();
+    detectedVersion = GXTVersion::UNKNOWN;
+    originalHasTABL = true;
+    
+    reportProgress(5, "正在检测文件格式...");
+    
+    size_t pos = 0;
+    const uint8_t* ptr = data;
+    const uint8_t* end = data + fileSize;
+    
+    // 检测GXT2格式
+    if (fileSize >= 8 && ptr[0] == '2' && ptr[1] == 'T' && ptr[2] == 'X' && ptr[3] == 'G') {
+        this->detectedVersion = GXTVersion::GXT2;
+        reportProgress(10, "检测到GXT2格式，正在解析...");
+        // GXT2格式需要特殊处理，回退到传统解析
+        UnmapViewOfFile(data);
+        CloseHandle(hMap);
+        CloseHandle(hFile);
+        FILE* f = nullptr;
+        fopen_s(&f, filePath.c_str(), "rb");
+        if (f) {
+            bool ok = parseGXT2(f, tables);
+            fclose(f);
+            if (ok) reportProgress(100, "解析完成");
+            return ok;
+        }
+        return false;
+    }
+    
+    // 检测版本
+    bool isSA = false;
+    int bitsPerChar = 8;
+    
+    if (fileSize >= 8) {
+        uint16_t version = ptr[0] | (ptr[1] << 8);
+        uint16_t bits = ptr[2] | (ptr[3] << 8);
+        if (version == 4 && bits == 16) {
+            isSA = true;
+            bitsPerChar = bits;
+            this->detectedVersion = GXTVersion::GTA_IV;
+        } else if (version == 4 && (bits == 8 || bits == 16) &&
+                   ptr[4] == 'T' && ptr[5] == 'A' && ptr[6] == 'B' && ptr[7] == 'L') {
+            isSA = true;
+            bitsPerChar = bits;
+            this->detectedVersion = GXTVersion::GTA_SA;
+        } else if (ptr[0] == 'T' && ptr[1] == 'A' && ptr[2] == 'B' && ptr[3] == 'L') {
+            this->detectedVersion = GXTVersion::GTA_VC;
+        } else if (ptr[0] == 'T' && ptr[1] == 'K' && ptr[2] == 'E' && ptr[3] == 'Y') {
+            this->detectedVersion = GXTVersion::GTA_III;
+        }
+    }
+    
+    pos = isSA ? 4 : 0;
+    ptr = data + pos;
+    
+    reportProgress(10, "正在解析数据块...");
+    
+    // 解析主循环
+    while (ptr + 8 <= end) {
+        char tag[5] = {static_cast<char>(ptr[0]), static_cast<char>(ptr[1]), 
+                       static_cast<char>(ptr[2]), static_cast<char>(ptr[3]), 0};
+        uint32_t size = *reinterpret_cast<const uint32_t*>(ptr + 4);
+        ptr += 8;
+        
+        const uint8_t* blockStart = ptr;
+        
+        if (strncmp(tag, "TKEY", 4) == 0 && !originalHasTABL) {
+            // 无TABL格式处理
+            this->originalHasTABL = false;
+            
+            bool isIV = (size % 8 == 0) && isSA && (bitsPerChar == 16);
+            bool isIII = !isIV && (size % 12 == 0);
+            
+            if (isIII && ptr + size <= end) {
+                this->detectedVersion = GXTVersion::GTA_III;
+                size_t entryCount = size / 12;
+                
+                // 查找TDAT块
+                const uint8_t* tdatPtr = blockStart + size;
+                if (tdatPtr + 8 <= end && tdatPtr[0] == 'T' && tdatPtr[1] == 'D' && 
+                    tdatPtr[2] == 'A' && tdatPtr[3] == 'T') {
+                    uint32_t tdatSize = *reinterpret_cast<const uint32_t*>(tdatPtr + 4);
+                    const uint8_t* tdatData = tdatPtr + 8;
+                    
+                    if (tdatData + tdatSize <= end) {
+                        const uint16_t* arr = reinterpret_cast<const uint16_t*>(tdatData);
+                        size_t arrLen = tdatSize / 2;
+                        
+                        std::vector<size_t> zeroIdx;
+                        for (size_t i = 0; i < arrLen; ++i) {
+                            if (arr[i] == 0) zeroIdx.push_back(i);
+                        }
+                        
+                        for (size_t i = 0; i < entryCount && ptr + 12 <= end; ++i, ptr += 12) {
+                            uint32_t offset = *reinterpret_cast<const uint32_t*>(ptr);
+                            std::string key(reinterpret_cast<const char*>(ptr + 4), 8);
+                            key.erase(std::find(key.begin(), key.end(), '\0'), key.end());
+                            
+                            size_t off = offset / 2;
+                            off = (off < arrLen) ? off : arrLen;
+                            
+                            size_t endPos = arrLen;
+                            for (size_t z : zeroIdx) {
+                                if (z > off) { endPos = z; break; }
+                            }
+                            
+                            std::string val;
+                            if (endPos > off) {
+                                int len = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)(arr + off),
+                                    (int)(endPos - off), nullptr, 0, nullptr, nullptr);
+                                if (len > 0) {
+                                    val.resize(len);
+                                    WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)(arr + off),
+                                        (int)(endPos - off), &val[0], len, nullptr, nullptr);
+                                }
+                            }
+                            noTablEntries.push_back({key, val, key});
+                        }
+                    }
+                }
+                break;
+            }
+            
+            if (isIV && ptr + size <= end) {
+                this->detectedVersion = GXTVersion::GTA_IV;
+                size_t entryCount = size / 8;
+                const uint32_t* tkeyData = reinterpret_cast<const uint32_t*>(ptr);
+                
+                const uint8_t* tdatPtr = blockStart + size;
+                if (tdatPtr + 8 <= end && tdatPtr[0] == 'T' && tdatPtr[1] == 'D' &&
+                    tdatPtr[2] == 'A' && tdatPtr[3] == 'T') {
+                    uint32_t tdatSize = *reinterpret_cast<const uint32_t*>(tdatPtr + 4);
+                    const uint16_t* data16 = reinterpret_cast<const uint16_t*>(tdatPtr + 8);
+                    size_t data16Len = tdatSize / 2;
+                    
+                    std::vector<size_t> nullPos;
+                    for (size_t i = 0; i < data16Len; ++i) {
+                        if (data16[i] == 0) nullPos.push_back(i);
+                    }
+                    
+                    for (size_t i = 0; i < entryCount; ++i) {
+                        uint32_t offset = tkeyData[i * 2];
+                        uint32_t crc = tkeyData[i * 2 + 1];
+                        
+                        size_t startIdx = offset / 2;
+                        if (startIdx >= data16Len) continue;
+                        
+                        size_t endIdx = data16Len;
+                        for (size_t p : nullPos) {
+                            if (p > startIdx) { endIdx = p; break; }
+                        }
+                        
+                        std::string text;
+                        if (endIdx > startIdx) {
+                            int len = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)(data16 + startIdx),
+                                (int)(endIdx - startIdx), nullptr, 0, nullptr, nullptr);
+                            if (len > 0) {
+                                text.resize(len);
+                                WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)(data16 + startIdx),
+                                    (int)(endIdx - startIdx), &text[0], len, nullptr, nullptr);
+                            }
+                        }
+                        noTablEntries.push_back({u32_to_hex(crc), text, u32_to_hex(crc)});
+                    }
+                }
+                break;
+            }
+            
+            ptr = blockStart + size;
+            continue;
+        }
+        
+        if (strncmp(tag, "TABL", 4) == 0) {
+            this->originalHasTABL = true;
+            
+            struct TblEntry { char name[8]; uint32_t offset; };
+            size_t tabCount = size / 12;
+            
+            std::vector<TblEntry> tabs;
+            for (size_t i = 0; i < tabCount && ptr + 12 <= end; ++i, ptr += 12) {
+                TblEntry t;
+                memcpy(t.name, ptr, 8);
+                t.offset = *reinterpret_cast<const uint32_t*>(ptr + 8);
+                tabs.push_back(t);
+            }
+            
+            for (size_t ti = 0; ti < tabs.size(); ++ti) {
+                const TblEntry& te = tabs[ti];
+                std::string name(te.name, 8);
+                name.erase(std::find(name.begin(), name.end(), '\0'), name.end());
+                
+                GXTTabl tabl;
+                tabl.name = name;
+                
+                int progress = 10 + static_cast<int>((ti + 1) * 80 / tabs.size());
+                reportProgress(progress, "正在解析表: " + name);
+                
+                const uint8_t* tablePtr = data + te.offset;
+                
+                // 跳过表名
+                if (tablePtr + 8 <= end && tablePtr[0] != 'T') {
+                    tablePtr += 8;
+                }
+                
+                // 读取TKEY
+                if (tablePtr + 8 > end || tablePtr[0] != 'T' || tablePtr[1] != 'K' ||
+                    tablePtr[2] != 'E' || tablePtr[3] != 'Y') {
+                    continue;
+                }
+                
+                uint32_t tkeySize = *reinterpret_cast<const uint32_t*>(tablePtr + 4);
+                const uint8_t* tkeyData = tablePtr + 8;
+                
+                bool isVC = (tkeySize % 12 == 0);
+                
+                if (isVC && detectedVersion == GXTVersion::GTA_VC) {
+                    size_t entryCount = tkeySize / 12;
+                    std::vector<uint32_t> offsets;
+                    std::vector<std::string> keys;
+                    
+                    for (size_t i = 0; i < entryCount && tkeyData + 12 <= end; ++i, tkeyData += 12) {
+                        offsets.push_back(*reinterpret_cast<const uint32_t*>(tkeyData));
+                        std::string key(reinterpret_cast<const char*>(tkeyData + 4), 8);
+                        key.erase(std::find(key.begin(), key.end(), '\0'), key.end());
+                        keys.push_back(key);
+                    }
+                    
+                    // 查找TDAT
+                    const uint8_t* tdatPtr = tablePtr + 8 + tkeySize;
+                    if (tdatPtr + 8 <= end && tdatPtr[0] == 'T' && tdatPtr[1] == 'D' &&
+                        tdatPtr[2] == 'A' && tdatPtr[3] == 'T') {
+                        uint32_t tdatSize = *reinterpret_cast<const uint32_t*>(tdatPtr + 4);
+                        const uint8_t* tdatData = tdatPtr + 8;
+                        
+                        std::vector<size_t> zeroIdx;
+                        for (size_t i = 0; i < tdatSize; ++i) {
+                            if (tdatData[i] == 0) zeroIdx.push_back(i);
+                        }
+                        
+                        for (size_t i = 0; i < offsets.size(); ++i) {
+                            size_t start = offsets[i];
+                            start = (start < tdatSize) ? start : tdatSize;
+                            
+                            size_t endPos = tdatSize;
+                            for (size_t z : zeroIdx) {
+                                if (z > start) { endPos = z; break; }
+                            }
+                            
+                            std::string val;
+                            if (endPos > start) {
+                                std::string raw(reinterpret_cast<const char*>(tdatData + start), endPos - start);
+                                val = cp1252_to_utf8(raw);
+                            }
+                            tabl.entries.push_back({keys[i], val, keys[i]});
+                        }
+                    }
+                } else {
+                    // SA/IV版本处理
+                    size_t entryCount = tkeySize / 8;
+                    std::vector<uint32_t> offsets, crcs;
+                    
+                    for (size_t i = 0; i < entryCount && tkeyData + 8 <= end; ++i, tkeyData += 8) {
+                        offsets.push_back(*reinterpret_cast<const uint32_t*>(tkeyData));
+                        crcs.push_back(*reinterpret_cast<const uint32_t*>(tkeyData + 4));
+                    }
+                    
+                    const uint8_t* tdatPtr = tablePtr + 8 + tkeySize;
+                    if (tdatPtr + 8 <= end && tdatPtr[0] == 'T' && tdatPtr[1] == 'D' &&
+                        tdatPtr[2] == 'A' && tdatPtr[3] == 'T') {
+                        uint32_t tdatSize = *reinterpret_cast<const uint32_t*>(tdatPtr + 4);
+                        const uint8_t* tdatData = tdatPtr + 8;
+                        
+                        if (bitsPerChar == 16) {
+                            this->detectedVersion = GXTVersion::GTA_IV;
+                            const uint16_t* arr = reinterpret_cast<const uint16_t*>(tdatData);
+                            size_t arrLen = tdatSize / 2;
+                            
+                            std::vector<size_t> zeroIdx;
+                            for (size_t i = 0; i < arrLen; ++i) {
+                                if (arr[i] == 0) zeroIdx.push_back(i);
+                            }
+                            
+                            for (size_t i = 0; i < offsets.size(); ++i) {
+                                size_t start = offsets[i] / 2;
+                                start = (start < arrLen) ? start : arrLen;
+                                
+                                size_t endPos = arrLen;
+                                for (size_t z : zeroIdx) {
+                                    if (z > start) { endPos = z; break; }
+                                }
+                                
+                                std::string val;
+                                if (endPos > start) {
+                                    int len = WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)(arr + start),
+                                        (int)(endPos - start), nullptr, 0, nullptr, nullptr);
+                                    if (len > 0) {
+                                        val.resize(len);
+                                        WideCharToMultiByte(CP_UTF8, 0, (LPCWCH)(arr + start),
+                                            (int)(endPos - start), &val[0], len, nullptr, nullptr);
+                                    }
+                                }
+                                tabl.entries.push_back({u32_to_hex(crcs[i]), val});
+                            }
+                        } else {
+                            this->detectedVersion = GXTVersion::GTA_SA;
+                            std::vector<size_t> zeroIdx;
+                            for (size_t i = 0; i < tdatSize; ++i) {
+                                if (tdatData[i] == 0) zeroIdx.push_back(i);
+                            }
+                            
+                            for (size_t i = 0; i < offsets.size(); ++i) {
+                                size_t start = offsets[i];
+                                start = (start < tdatSize) ? start : tdatSize;
+                                
+                                size_t endPos = tdatSize;
+                                auto it = std::upper_bound(zeroIdx.begin(), zeroIdx.end(), start);
+                                if (it != zeroIdx.end()) endPos = *it;
+                                
+                                std::string val;
+                                if (endPos > start) {
+                                    std::string raw(reinterpret_cast<const char*>(tdatData + start), endPos - start);
+                                    if (is_valid_utf8(raw.data(), raw.size())) {
+                                        val = raw;
+                                    } else {
+                                        val = cp1252_to_utf8(raw);
+                                    }
+                                }
+                                tabl.entries.push_back({u32_to_hex(crcs[i]), val});
+                            }
+                        }
+                    }
+                }
+                
+                tables.push_back(std::move(tabl));
+            }
+            break;
+        }
+        
+        ptr = blockStart + size;
+    }
+    
+    // 清理资源
+    UnmapViewOfFile(data);
+    CloseHandle(hMap);
+    CloseHandle(hFile);
+    
+    // 最终版本确定
+    if (this->detectedVersion == GXTVersion::UNKNOWN && !tables.empty()) {
+        if (this->originalHasTABL) {
+            this->detectedVersion = GXTVersion::GTA_VC;
+        } else {
+            this->detectedVersion = GXTVersion::GTA_SA;
+        }
+    }
+    
+    if (tables.empty() && !noTablEntries.empty()) {
+        addParseLog("文件解析完成，无表文件，共 " + std::to_string(noTablEntries.size()) + " 个条目");
+    } else {
+        addParseLog("文件解析完成，共解析 " + std::to_string(tables.size()) + " 个表");
+    }
+    reportProgress(100, "解析完成");
+    
     return !tables.empty() || !noTablEntries.empty();
 }
 

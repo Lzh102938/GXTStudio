@@ -7,11 +7,76 @@
 #include <QDebug>
 #include <cstdint>
 #include <QHash>
+#include <QCache>
+#include <QString>
+#include <mutex>
+#include <memory>
 
 // 前向声明
 struct FileTab;
 enum class GXTVersion;
 
+// ============================================================================
+// 全局缓存管理器 - 单例模式
+// ============================================================================
+class GlobalCache {
+public:
+    static GlobalCache& instance() {
+        static GlobalCache inst;
+        return inst;
+    }
+    
+    // SATKEY/IVTKEY 映射缓存
+    QHash<uint32_t, QString> satKeyMap;
+    QHash<QString, uint32_t> satKeyReverseMap;
+    QHash<uint32_t, QString> ivtKeyMap;
+    QHash<QString, uint32_t> ivtKeyReverseMap;
+    
+    // 映射是否已加载
+    bool satKeyLoaded = false;
+    bool ivtKeyLoaded = false;
+    
+    // 线程安全锁
+    std::mutex satKeyMutex;
+    std::mutex ivtKeyMutex;
+    
+    // 清除所有缓存
+    void clear() {
+        std::lock_guard<std::mutex> lock1(satKeyMutex);
+        std::lock_guard<std::mutex> lock2(ivtKeyMutex);
+        satKeyMap.clear();
+        satKeyReverseMap.clear();
+        ivtKeyMap.clear();
+        ivtKeyReverseMap.clear();
+        satKeyLoaded = false;
+        ivtKeyLoaded = false;
+    }
+    
+    // 获取缓存统计
+    size_t satKeyCount() const { return satKeyMap.size(); }
+    size_t ivtKeyCount() const { return ivtKeyMap.size(); }
+    
+private:
+    GlobalCache() = default;
+    GlobalCache(const GlobalCache&) = delete;
+    GlobalCache& operator=(const GlobalCache&) = delete;
+};
+
+// ============================================================================
+// 显示缓存项 - 用于缓存格式化后的显示数据
+// ============================================================================
+struct DisplayCacheItem {
+    QString key;
+    QString value;
+    bool valid = false;
+    
+    DisplayCacheItem() = default;
+    DisplayCacheItem(const QString& k, const QString& v) : key(k), value(v), valid(true) {}
+};
+
+// ============================================================================
+// 极简高效的表格模型 - 专为性能优化
+// ============================================================================
 /**
  * @brief 极简高效的表格模型 - 专为性能优化
  * 
@@ -21,6 +86,7 @@ enum class GXTVersion;
  * - 缓存显示数据，避免重复格式化
  * - 支持 SATKEY/IVTKEY 映射查找
  * - 支持 GTA SA/IV/GXT2 版本的哈希计算
+ * - 延迟初始化键映射，按需加载
  */
 class GXTTableModel : public QAbstractTableModel {
     Q_OBJECT
@@ -36,11 +102,25 @@ public:
     // 设置是否可编辑
     void setEditable(bool editable);
     
-    // 加载SATKEY映射（静态方法，全局只加载一次）
+    // 加载SATKEY映射（静态方法，延迟初始化）
     static void loadSATKeyMap();
     
-    // 加载IVTKEY映射（静态方法，全局只加载一次）
+    // 加载IVTKEY映射（静态方法，延迟初始化）
     static void loadIVTKeyMap();
+    
+    // 确保SATKEY已加载（延迟初始化入口）
+    static void ensureSATKeyLoaded() {
+        if (!GlobalCache::instance().satKeyLoaded) {
+            loadSATKeyMap();
+        }
+    }
+    
+    // 确保IVTKEY已加载（延迟初始化入口）
+    static void ensureIVTKeyLoaded() {
+        if (!GlobalCache::instance().ivtKeyLoaded) {
+            loadIVTKeyMap();
+        }
+    }
     
     // 查找SATKEY映射（静态方法）
     static bool findSATKey(uint32_t hash, QString& outKey);
@@ -114,11 +194,11 @@ private:
     // 缓存的版本信息，避免每次调用都从tab获取
     mutable int m_cachedVersion;
     
-    // SATKEY映射（静态，全局共享）
-    static QMap<uint32_t, QString> s_satKeyMap;
-    static QMap<QString, uint32_t> s_satKeyReverseMap;  // 反向映射：key -> hash
+    // SATKEY映射（静态，全局共享）- 使用QHash提升查找性能O(1)
+    static QHash<uint32_t, QString> s_satKeyMap;
+    static QHash<QString, uint32_t> s_satKeyReverseMap;
     
-    // IVTKEY映射（静态，全局共享）
-    static QMap<uint32_t, QString> s_ivtKeyMap;
-    static QMap<QString, uint32_t> s_ivtKeyReverseMap;  // 反向映射：key -> hash (小写)
+    // IVTKEY映射（静态，全局共享）- 使用QHash提升查找性能O(1)
+    static QHash<uint32_t, QString> s_ivtKeyMap;
+    static QHash<QString, uint32_t> s_ivtKeyReverseMap;
 };

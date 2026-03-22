@@ -47,7 +47,8 @@
 #include <QFontDialog>
 #include <QComboBox>
 #include <algorithm>
-
+#include <QtConcurrent>
+#include <QFutureWatcher>
 #include <windows.h>
 #include <fstream>
 
@@ -1038,6 +1039,17 @@ void GXTStudio::setupParseThread()
 
     m_parseThread = new QThread(this);
     m_parseWorker = new ParseWorker();
+    
+    // 初始化批量并行解析相关
+    m_batchParseWatcher = new QFutureWatcher<ParseResult>(this);
+    m_batchParseTotal = 0;
+    m_batchParseCompleted = 0;
+    m_batchParseProgressDialog = nullptr;
+    
+    connect(m_batchParseWatcher, &QFutureWatcher<ParseResult>::resultReadyAt,
+            this, &GXTStudio::onBatchParseResultReadyAt, Qt::QueuedConnection);
+    connect(m_batchParseWatcher, &QFutureWatcher<ParseResult>::finished,
+            this, &GXTStudio::onBatchParseFinished, Qt::QueuedConnection);
 
     showLogMessage("解析线程和工作对象已创建");
 
@@ -1447,14 +1459,32 @@ void GXTStudio::openFile()
         "打开GXT文件", "", 
         "GXT文件 (*.gxt *.gxt2 *.dat *.whm *.txt);;所有文件 (*.*)");
     
-    if (!fileNames.isEmpty()) {
-        for (const QString& fileName : fileNames) {
-            QFileInfo fi(fileName);
-            if (fi.suffix().toLower() == "txt") {
-                importTxtFile(fileName);
-            } else {
-                startAsyncParse(fileName);
-            }
+    if (fileNames.isEmpty()) return;
+    
+    // 分离TXT文件和GXT文件
+    QStringList txtFiles, gxtFiles;
+    for (const QString& fileName : fileNames) {
+        QFileInfo fi(fileName);
+        if (fi.suffix().toLower() == "txt") {
+            txtFiles.append(fileName);
+        } else {
+            gxtFiles.append(fileName);
+        }
+    }
+    
+    // TXT文件串行导入（通常较少）
+    for (const QString& txtFile : txtFiles) {
+        importTxtFile(txtFile);
+    }
+    
+    // GXT文件批量并行解析
+    if (!gxtFiles.isEmpty()) {
+        if (gxtFiles.size() == 1) {
+            // 单文件使用原有方式
+            startAsyncParse(gxtFiles.first());
+        } else {
+            // 多文件使用并行解析
+            startBatchAsyncParse(gxtFiles);
         }
     }
 }
@@ -7630,6 +7660,236 @@ void GXTStudio::onTranslationFinished(const QList<TranslateResult>& results)
 {
     Q_UNUSED(results)
     // 实现将在翻译功能完成后添加
+}
+
+// 并行解析单个文件的静态函数
+static ParseResult parseFileParallel(const ParseTask& task)
+{
+    QElapsedTimer timer;
+    timer.start();
+
+    ParseResult result;
+    result.filePath = task.filePath;
+    result.fileName = task.fileName;
+    result.isWHM = task.isWHM;
+    result.isDAT = task.isDAT;
+    result.isWHMRSC = task.isWHMRSC;
+    result.originalHasTABL = true;
+    result.tabIndex = task.tabIndex;
+    result.parseTime = timer;
+    result.success = false;
+
+    try {
+        GXTParser parser;
+        
+        if (task.isDAT) {
+            result.datEntries.clear();
+            result.success = parser.parseDAT(task.narrowPath, result.datEntries);
+            result.version = GXTVersion::UNKNOWN;
+            if (!result.success) {
+                result.errorMessage = "DAT解析失败";
+            }
+        } else if (task.isWHM) {
+            result.whmEntries.clear();
+            result.isWHM = true;
+            result.isWHMRSC = task.isWHMRSC;
+            result.version = GXTVersion::UNKNOWN;
+
+            if (task.isWHMRSC) {
+                result.success = parser.parseWHMEx(task.narrowPath, result.whmEntries);
+                if (!result.success) {
+                    result.success = parser.parseWHMRSC(task.narrowPath, result.whmEntries);
+                }
+            } else {
+                result.success = parser.parseWHM(task.narrowPath, result.whmEntries);
+            }
+
+            if (!result.success) {
+                result.errorMessage = result.isWHMRSC ? "WHM/RSC解析失败" : "WHM解析失败";
+            }
+        } else {
+            // 使用内存映射解析，显著提升HDD和网络驱动器性能
+            result.success = parser.parseWithMemoryMap(task.narrowPath);
+            result.version = parser.getDetectedVersion();
+            if (result.success) {
+                result.tables = parser.getTables();
+                result.noTablEntries = parser.getNoTablEntries();
+                result.originalHasTABL = parser.getOriginalHasTABL();
+            } else {
+                result.errorMessage = "GXT解析失败";
+            }
+        }
+    } catch (const std::exception& e) {
+        result.success = false;
+        result.errorMessage = QString("解析异常: %1").arg(e.what());
+    }
+
+    return result;
+}
+
+// 批量并行解析入口
+void GXTStudio::startBatchAsyncParse(const QStringList& filePaths)
+{
+    if (filePaths.isEmpty()) return;
+    
+    // 如果已有批量解析在进行，等待完成
+    if (m_batchParseWatcher->isRunning()) {
+        m_batchParseWatcher->waitForFinished();
+    }
+    
+    m_pendingParseTasks.clear();
+    m_batchParseTotal = filePaths.size();
+    m_batchParseCompleted = 0;
+    
+    // 构建解析任务列表
+    for (const QString& filePath : filePaths) {
+        QFileInfo fileInfo(filePath);
+        QString suffix = fileInfo.suffix().toLower();
+        
+        bool isWHM = (suffix == "whm");
+        bool isWHMRSC = false;
+        bool isDAT = (suffix == "dat");
+        
+        // 检测WHM格式
+        if (isWHM) {
+            FILE* f = nullptr;
+            fopen_s(&f, filePath.toLocal8Bit().constData(), "rb");
+            if (f) {
+                char magic[4];
+                fread(magic, 1, 4, f);
+                if (magic[0] == 'R' && magic[1] == 'S' && magic[2] == 'C') {
+                    isWHMRSC = true;
+                } else {
+                    rewind(f);
+                    uint32_t count = 0;
+                    fread(&count, 1, sizeof(count), f);
+                    fseek(f, 0, SEEK_END);
+                    long fileSize = ftell(f);
+                    fclose(f);
+                    if (count == 0 || count > 100000) {
+                        isWHMRSC = true;
+                    }
+                }
+                if (f) fclose(f);
+            }
+        }
+        
+        // 跳过字符表DAT文件
+        if (isDAT) {
+            qint64 fsize = fileInfo.size();
+            QString baseName = fileInfo.baseName().toLower();
+            bool isCharTableFile = false;
+            if (fsize == 0x10000 * 2) {
+                isCharTableFile = true;
+            } else if (baseName.contains("char_table") || baseName.contains("wm_vcchs") ||
+                       baseName.contains("chs") || baseName.contains("char")) {
+                isCharTableFile = true;
+            }
+            if (isCharTableFile) {
+                continue;
+            }
+        }
+        
+        ParseTask task;
+        task.filePath = filePath;
+        task.fileName = fileInfo.fileName();
+        task.narrowPath = filePath.toLocal8Bit().toStdString();
+        task.isWHM = isWHM;
+        task.isWHMRSC = isWHMRSC;
+        task.isDAT = isDAT;
+        task.tabIndex = static_cast<int>(m_fileTabs.size() + m_pendingParseTasks.size());
+        
+        m_pendingParseTasks.append(task);
+    }
+    
+    if (m_pendingParseTasks.isEmpty()) return;
+    
+    // 显示进度对话框
+    m_batchParseProgressDialog = new MultiThreadProgressDialog(this);
+    m_batchParseProgressDialog->setWindowTitle("批量解析文件");
+    m_batchParseProgressDialog->setTotalThreads(m_pendingParseTasks.size());
+    m_batchParseProgressDialog->show();
+    
+    showLogMessage(QString("开始批量并行解析 %1 个文件").arg(m_pendingParseTasks.size()));
+    
+    // 使用QtConcurrent并行解析
+    QFuture<ParseResult> future = QtConcurrent::mapped(m_pendingParseTasks, parseFileParallel);
+    m_batchParseWatcher->setFuture(future);
+}
+
+// 批量解析结果就绪
+void GXTStudio::onBatchParseResultReadyAt(int index)
+{
+    if (index < 0 || index >= m_pendingParseTasks.size()) return;
+    
+    ParseResult result = m_batchParseWatcher->resultAt(index);
+    m_batchParseCompleted++;
+    
+    // 更新进度
+    if (m_batchParseProgressDialog) {
+        m_batchParseProgressDialog->updateOverallProgress(m_batchParseCompleted, m_pendingParseTasks.size());
+    }
+    
+    // 处理解析结果
+    if (result.success) {
+        // 创建新的标签页结构
+        FileTab tab;
+        tab.fileName = result.fileName;
+        tab.filePath = result.filePath;
+        tab.tables = result.tables;
+        tab.whmEntries = result.whmEntries;
+        tab.datEntries = result.datEntries;
+        tab.isWHM = result.isWHM;
+        tab.isDAT = result.isDAT;
+        tab.isWHMReadOnlyLocked = result.isWHM;
+        tab.originalHasTABL = result.originalHasTABL;
+        tab.noTablEntries = result.noTablEntries;
+        tab.version = result.version;
+        tab.isModified = false;
+        
+        int tabIndex = static_cast<int>(m_fileTabs.size());
+        m_fileTabs.push_back(tab);
+        
+        createTabContent(m_fileTabs.back(), tabIndex);
+        
+        showLogMessage(QString("批量解析完成: %1 (表数: %2)")
+            .arg(result.fileName)
+            .arg(result.isWHM ? result.whmEntries.size() : 
+                 (result.isDAT ? result.datEntries.size() : result.tables.size())));
+    } else {
+        showLogMessage(QString("批量解析失败: %1 - %2")
+            .arg(result.fileName)
+            .arg(result.errorMessage));
+    }
+}
+
+// 批量解析完成
+void GXTStudio::onBatchParseFinished()
+{
+    showLogMessage(QString("批量解析完成: %1/%2 成功")
+        .arg(m_batchParseCompleted)
+        .arg(m_pendingParseTasks.size()));
+    
+    // 关闭进度对话框
+    if (m_batchParseProgressDialog) {
+        m_batchParseProgressDialog->hide();
+        m_batchParseProgressDialog->deleteLater();
+        m_batchParseProgressDialog = nullptr;
+    }
+    
+    // 更新UI
+    updateActions();
+    updateStatusBar();
+    updateWindowTitle();
+    
+    // 切换到第一个解析成功的标签页
+    if (!m_fileTabs.empty()) {
+        m_tabWidget->setCurrentIndex(0);
+    }
+    
+    m_pendingParseTasks.clear();
+    m_batchParseTotal = 0;
+    m_batchParseCompleted = 0;
 }
 
 void GXTStudio::startAsyncParse(const QString& filePath)

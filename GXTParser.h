@@ -5,11 +5,156 @@
 #include <vector>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <cstring>
+#include <mutex>
+#include <list>
+#include <unordered_map>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 // zlib support
 #ifdef HAVE_ZLIB
 #include <zlib.h>
 #endif
+
+// ============================================================================
+// 高效文件读取工具类 - 支持内存映射和缓冲读取
+// ============================================================================
+class FastFileReader {
+public:
+    enum class Mode { Buffered, MemoryMapped };
+    
+    explicit FastFileReader(const std::string& path, Mode mode = Mode::MemoryMapped);
+    ~FastFileReader();
+    
+    bool isOpen() const { return m_data != nullptr; }
+    bool isValid() const { return m_data != nullptr && m_size > 0; }
+    size_t size() const { return m_size; }
+    const uint8_t* data() const { return m_data; }
+    const uint8_t* begin() const { return m_data; }
+    const uint8_t* end() const { return m_data + m_size; }
+    
+    // 读取指定位置的数据
+    bool readAt(size_t offset, void* buffer, size_t length) const {
+        if (offset + length > m_size) return false;
+        std::memcpy(buffer, m_data + offset, length);
+        return true;
+    }
+    
+    // 获取指定位置的指针
+    template<typename T>
+    const T* getAt(size_t offset) const {
+        if (offset + sizeof(T) > m_size) return nullptr;
+        return reinterpret_cast<const T*>(m_data + offset);
+    }
+    
+    // 获取字符串视图
+    std::string_view getString(size_t offset, size_t length) const {
+        if (offset + length > m_size) return {};
+        return std::string_view(reinterpret_cast<const char*>(m_data + offset), length);
+    }
+    
+private:
+    const uint8_t* m_data = nullptr;
+    size_t m_size = 0;
+#ifdef _WIN32
+    HANDLE m_fileHandle = INVALID_HANDLE_VALUE;
+    HANDLE m_mapHandle = nullptr;
+#endif
+    std::unique_ptr<uint8_t[]> m_buffer;  // 用于缓冲模式
+};
+
+// ============================================================================
+// LRU缓存管理器 - 用于缓存已解析的文件
+// ============================================================================
+template<typename Key, typename Value>
+class LRUCache {
+public:
+    explicit LRUCache(size_t maxSize = 10) : m_maxSize(maxSize) {}
+    
+    bool get(const Key& key, Value& outValue) {
+        auto it = m_cache.find(key);
+        if (it == m_cache.end()) return false;
+        
+        // 移动到最前面（最近使用）
+        m_order.splice(m_order.begin(), m_order, it->second.second);
+        outValue = it->second.first;
+        return true;
+    }
+    
+    void put(const Key& key, const Value& value) {
+        auto it = m_cache.find(key);
+        if (it != m_cache.end()) {
+            it->second.first = value;
+            m_order.splice(m_order.begin(), m_order, it->second.second);
+            return;
+        }
+        
+        // 如果超过最大大小，删除最久未使用的
+        if (m_cache.size() >= m_maxSize) {
+            auto last = m_order.back();
+            m_cache.erase(last);
+            m_order.pop_back();
+        }
+        
+        m_order.push_front(key);
+        m_cache[key] = {value, m_order.begin()};
+    }
+    
+    bool contains(const Key& key) const {
+        return m_cache.find(key) != m_cache.end();
+    }
+    
+    void clear() {
+        m_cache.clear();
+        m_order.clear();
+    }
+    
+    size_t size() const { return m_cache.size(); }
+    
+private:
+    size_t m_maxSize;
+    std::list<Key> m_order;
+    std::unordered_map<Key, std::pair<Value, typename std::list<Key>::iterator>> m_cache;
+};
+
+// ============================================================================
+// 延迟初始化模板 - 按需加载资源
+// ============================================================================
+template<typename T>
+class LazyInit {
+public:
+    template<typename Func>
+    explicit LazyInit(Func&& initFunc) : m_initFunc(std::forward<Func>(initFunc)) {}
+    
+    T& get() {
+        std::call_once(m_onceFlag, [this]() {
+            m_value = m_initFunc();
+            m_initialized = true;
+        });
+        return m_value;
+    }
+    
+    const T& get() const {
+        return const_cast<LazyInit*>(this)->get();
+    }
+    
+    bool isInitialized() const { return m_initialized; }
+    
+    void reset() {
+        m_initialized = false;
+        m_value = T{};
+    }
+    
+private:
+    std::function<T()> m_initFunc;
+    mutable std::once_flag m_onceFlag;
+    mutable T m_value{};
+    mutable bool m_initialized = false;
+};
 
 // 添加GXT版本枚举
 enum class GXTVersion {
@@ -213,6 +358,11 @@ private:
     uint16_t read_u16(FILE* f) const;
     uint32_t read_u32(FILE* f) const;
     std::wstring read_wstring(FILE* f) const;
+    
+    // 统一编码转换函数 - 减少重复代码
+    std::string convertEncoding(const std::string& s, unsigned int srcCodePage) const;
+    
+    // 简化接口（内部调用convertEncoding）
     std::string cp1252_to_utf8(const std::string& s) const;
     std::string gbk_to_utf8(const std::string& s) const;
     std::string utf16le_to_utf8(const std::string& s) const;
@@ -234,6 +384,7 @@ public:
     bool isValidTextString(const std::string& str) const;
     
     bool parse(const std::string& filePath);
+    bool parseWithMemoryMap(const std::string& filePath);
     void exportToTxt(const std::string& outDir) const;
     bool parseWHM(const std::string& filePath, std::vector<WHMEntry>& outEntries) const;
     void exportWHMToTxt(const std::string& whmPath, const std::string& txtPath) const;

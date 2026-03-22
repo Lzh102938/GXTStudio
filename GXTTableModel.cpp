@@ -7,11 +7,11 @@
 #include <QDir>
 #include <QRegularExpression>
 
-// 初始化静态成员变量
-QMap<uint32_t, QString> GXTTableModel::s_satKeyMap;
-QMap<QString, uint32_t> GXTTableModel::s_satKeyReverseMap;
-QMap<uint32_t, QString> GXTTableModel::s_ivtKeyMap;
-QMap<QString, uint32_t> GXTTableModel::s_ivtKeyReverseMap;
+// 静态成员变量现在使用全局缓存管理器
+QHash<uint32_t, QString> GXTTableModel::s_satKeyMap;
+QHash<QString, uint32_t> GXTTableModel::s_satKeyReverseMap;
+QHash<uint32_t, QString> GXTTableModel::s_ivtKeyMap;
+QHash<QString, uint32_t> GXTTableModel::s_ivtKeyReverseMap;
 
 // FileTab结构体需要在某个地方定义，这里我们使用外部定义
 // 在GXTStudio.h中定义的FileTab
@@ -34,7 +34,6 @@ void GXTTableModel::setTab(FileTab* tab)
     m_tab = tab;
     m_cachedRowCount = -1;
     m_displayCacheValid = false;
-    // 总是从tab获取最新的currentTableIndex，确保与标签页状态同步
     m_currentTableIndex = tab ? tab->currentTableIndex : -1;
     m_cachedVersion = tab ? static_cast<int>(tab->version) : -1;
     endResetModel();
@@ -52,7 +51,8 @@ void GXTTableModel::setEditable(bool editable)
 }
 
 namespace {
-    int loadKeyMapInternal(const QString& fileName, QMap<uint32_t, QString>& keyMap, QMap<QString, uint32_t>& reverseMap, bool caseInsensitive) {
+    // 高效的键映射加载函数 - 使用移动语义和预分配
+    int loadKeyMapInternal(const QString& fileName, QHash<uint32_t, QString>& keyMap, QHash<QString, uint32_t>& reverseMap, bool caseInsensitive) {
         QString keylistPath = QDir::current().filePath(fileName);
         
         if (!QFile::exists(keylistPath)) {
@@ -65,6 +65,12 @@ namespace {
             qWarning() << "无法打开文件:" << keylistPath;
             return 0;
         }
+        
+        // 预估大小以减少重新分配
+        qint64 fileSize = file.size();
+        int estimatedCount = static_cast<int>(fileSize / 30);  // 平均每行约30字节
+        keyMap.reserve(estimatedCount);
+        reverseMap.reserve(estimatedCount);
         
         QTextStream stream(&file);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -98,22 +104,52 @@ namespace {
     }
 }
 
+// 延迟加载SATKEY映射 - 线程安全
 void GXTTableModel::loadSATKeyMap()
 {
-    if (!s_satKeyMap.isEmpty()) return;
-    int count = loadKeyMapInternal("keylist/SATKEY.lst", s_satKeyMap, s_satKeyReverseMap, false);
+    GlobalCache& cache = GlobalCache::instance();
+    if (cache.satKeyLoaded) return;
+    
+    std::lock_guard<std::mutex> lock(cache.satKeyMutex);
+    if (cache.satKeyLoaded) return;  // 双重检查
+    
+    int count = loadKeyMapInternal("keylist/SATKEY.lst", cache.satKeyMap, cache.satKeyReverseMap, false);
+    s_satKeyMap = cache.satKeyMap;
+    s_satKeyReverseMap = cache.satKeyReverseMap;
+    cache.satKeyLoaded = true;
     qDebug() << "加载SATKEY映射" << count << "条";
 }
 
+// 延迟加载IVTKEY映射 - 线程安全
 void GXTTableModel::loadIVTKeyMap()
 {
-    if (!s_ivtKeyMap.isEmpty()) return;
-    int count = loadKeyMapInternal("keylist/IVTKEY.lst", s_ivtKeyMap, s_ivtKeyReverseMap, true);
+    GlobalCache& cache = GlobalCache::instance();
+    if (cache.ivtKeyLoaded) return;
+    
+    std::lock_guard<std::mutex> lock(cache.ivtKeyMutex);
+    if (cache.ivtKeyLoaded) return;  // 双重检查
+    
+    int count = loadKeyMapInternal("keylist/IVTKEY.lst", cache.ivtKeyMap, cache.ivtKeyReverseMap, true);
+    s_ivtKeyMap = cache.ivtKeyMap;
+    s_ivtKeyReverseMap = cache.ivtKeyReverseMap;
+    cache.ivtKeyLoaded = true;
     qDebug() << "加载IVTKEY映射" << count << "条";
 }
 
 bool GXTTableModel::findSATKey(uint32_t hash, QString& outKey)
 {
+    // 先检查全局缓存
+    GlobalCache& cache = GlobalCache::instance();
+    if (cache.satKeyLoaded) {
+        auto it = cache.satKeyMap.find(hash);
+        if (it != cache.satKeyMap.end()) {
+            outKey = it.value();
+            return true;
+        }
+        return false;
+    }
+    
+    // 回退到静态成员
     auto it = s_satKeyMap.find(hash);
     if (it != s_satKeyMap.end()) {
         outKey = it.value();
@@ -124,6 +160,18 @@ bool GXTTableModel::findSATKey(uint32_t hash, QString& outKey)
 
 bool GXTTableModel::findIVTKey(uint32_t hash, QString& outKey)
 {
+    // 先检查全局缓存
+    GlobalCache& cache = GlobalCache::instance();
+    if (cache.ivtKeyLoaded) {
+        auto it = cache.ivtKeyMap.find(hash);
+        if (it != cache.ivtKeyMap.end()) {
+            outKey = it.value();
+            return true;
+        }
+        return false;
+    }
+    
+    // 回退到静态成员
     auto it = s_ivtKeyMap.find(hash);
     if (it != s_ivtKeyMap.end()) {
         outKey = it.value();
@@ -134,6 +182,17 @@ bool GXTTableModel::findIVTKey(uint32_t hash, QString& outKey)
 
 bool GXTTableModel::findSATHash(const QString& key, uint32_t& outHash)
 {
+    // 先检查全局缓存
+    GlobalCache& cache = GlobalCache::instance();
+    if (cache.satKeyLoaded) {
+        auto it = cache.satKeyReverseMap.find(key);
+        if (it != cache.satKeyReverseMap.end()) {
+            outHash = it.value();
+            return true;
+        }
+        return false;
+    }
+    
     auto it = s_satKeyReverseMap.find(key);
     if (it != s_satKeyReverseMap.end()) {
         outHash = it.value();
@@ -144,8 +203,20 @@ bool GXTTableModel::findSATHash(const QString& key, uint32_t& outHash)
 
 bool GXTTableModel::findIVTHash(const QString& key, uint32_t& outHash)
 {
-    if (s_ivtKeyReverseMap.isEmpty()) {
+    // 确保已加载
+    GlobalCache& cache = GlobalCache::instance();
+    if (!cache.ivtKeyLoaded && s_ivtKeyReverseMap.isEmpty()) {
         loadIVTKeyMap();
+    }
+    
+    // 先检查全局缓存
+    if (cache.ivtKeyLoaded) {
+        auto it = cache.ivtKeyReverseMap.find(key.toLower());
+        if (it != cache.ivtKeyReverseMap.end()) {
+            outHash = it.value();
+            return true;
+        }
+        return false;
     }
     
     auto it = s_ivtKeyReverseMap.find(key.toLower());
@@ -357,7 +428,7 @@ namespace {
     
     void fillCacheRow(GXTTableModel::RowCache& cache, const std::string& key, const std::string& originalKey, 
                       const std::string& value, GXTVersion version, 
-                      const QMap<uint32_t, QString>& satMap, const QMap<uint32_t, QString>& ivtMap) {
+                      const QHash<uint32_t, QString>& satMap, const QHash<uint32_t, QString>& ivtMap) {
         if (version == GXTVersion::GTA_III || version == GXTVersion::GTA_VC) {
             cache.key = QString::fromStdString(key);
         } else if (!originalKey.empty()) {
@@ -401,40 +472,52 @@ void GXTTableModel::buildDisplayCache() const
     
     if (!m_tab) return;
     
+    // 延迟初始化键映射 - 按需加载
+    if (m_tab->version == GXTVersion::GTA_SA) {
+        ensureSATKeyLoaded();
+    } else if (m_tab->version == GXTVersion::GTA_IV) {
+        ensureIVTKeyLoaded();
+    }
+    
+    // 使用全局缓存
+    GlobalCache& cache = GlobalCache::instance();
+    const QHash<uint32_t, QString>& satMap = cache.satKeyLoaded ? cache.satKeyMap : s_satKeyMap;
+    const QHash<uint32_t, QString>& ivtMap = cache.ivtKeyLoaded ? cache.ivtKeyMap : s_ivtKeyMap;
+    
     int rowCount = 0;
     if (m_tab->isWHM) {
         rowCount = static_cast<int>(m_tab->whmEntries.size());
         m_displayCache.reserve(rowCount);
         for (const auto& entry : m_tab->whmEntries) {
-            RowCache cache;
-            fillCacheRow(cache, entry.hash, entry.text);
-            m_displayCache.append(cache);
+            RowCache cacheItem;
+            fillCacheRow(cacheItem, entry.hash, entry.text);
+            m_displayCache.append(cacheItem);
         }
     } else if (m_tab->isDAT) {
         rowCount = static_cast<int>(m_tab->datEntries.size());
         m_displayCache.reserve(rowCount);
         for (const auto& entry : m_tab->datEntries) {
-            RowCache cache;
-            fillCacheRow(cache, entry.hash, entry.text);
-            m_displayCache.append(cache);
+            RowCache cacheItem;
+            fillCacheRow(cacheItem, entry.hash, entry.text);
+            m_displayCache.append(cacheItem);
         }
     } else if (!m_tab->originalHasTABL && m_tab->tables.empty()) {
         // 无表文件，使用noTablEntries
         rowCount = static_cast<int>(m_tab->noTablEntries.size());
         m_displayCache.reserve(rowCount);
         for (const auto& entry : m_tab->noTablEntries) {
-            RowCache cache;
-            fillCacheRow(cache, entry.key, entry.originalKey, entry.value, m_tab->version, s_satKeyMap, s_ivtKeyMap);
-            m_displayCache.append(cache);
+            RowCache cacheItem;
+            fillCacheRow(cacheItem, entry.key, entry.originalKey, entry.value, m_tab->version, satMap, ivtMap);
+            m_displayCache.append(cacheItem);
         }
     } else if (m_tab->currentTableIndex >= 0 && m_tab->currentTableIndex < static_cast<int>(m_tab->tables.size())) {
         const auto& table = m_tab->tables[m_tab->currentTableIndex];
         rowCount = static_cast<int>(table.entries.size());
         m_displayCache.reserve(rowCount);
         for (const auto& entry : table.entries) {
-            RowCache cache;
-            fillCacheRow(cache, entry.key, entry.originalKey, entry.value, m_tab->version, s_satKeyMap, s_ivtKeyMap);
-            m_displayCache.append(cache);
+            RowCache cacheItem;
+            fillCacheRow(cacheItem, entry.key, entry.originalKey, entry.value, m_tab->version, satMap, ivtMap);
+            m_displayCache.append(cacheItem);
         }
     }
     
