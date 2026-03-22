@@ -63,7 +63,10 @@ public:
     
     // 【关键修复】清除所有缓存，避免切换表时残留
     void clearAllCache();
-    
+
+    // 检查缓存是否有效（用于避免不必要的刷新）
+    bool cacheValid() const { return m_displayCacheValid && !m_displayCache.isEmpty(); }
+
     // 检查映射是否为空（静态方法）
     static bool isSATKeyMapEmpty();
     static bool isIVTKeyMapEmpty();

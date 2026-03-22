@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QDir>
+#include <QRegularExpression>
 
 // 初始化静态成员变量
 QMap<uint32_t, QString> GXTTableModel::s_satKeyMap;
@@ -168,7 +169,7 @@ bool GXTTableModel::isIVTKeyMapEmpty()
 void GXTTableModel::resetModel()
 {
     if (!m_tab) return;
-    
+
     // 总是执行重置以确保表格切换时无内容残留
     beginResetModel();
     m_currentTableIndex = m_tab->currentTableIndex;
@@ -176,6 +177,9 @@ void GXTTableModel::resetModel()
         m_cachedRowCount = static_cast<int>(m_tab->whmEntries.size());
     } else if (m_tab->isDAT) {
         m_cachedRowCount = static_cast<int>(m_tab->datEntries.size());
+    } else if (!m_tab->originalHasTABL && m_tab->tables.empty()) {
+        // 无表文件，使用noTablEntries
+        m_cachedRowCount = static_cast<int>(m_tab->noTablEntries.size());
     } else if (m_currentTableIndex >= 0 && m_currentTableIndex < static_cast<int>(m_tab->tables.size())) {
         m_cachedRowCount = static_cast<int>(m_tab->tables[m_currentTableIndex].entries.size());
     } else {
@@ -504,12 +508,29 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
     
     const int row = index.row();
     const int col = index.column();
+    QString newValueStr = value.toString();
     std::string newValue;
     try {
-        newValue = value.toString().toStdString();
+        newValue = newValueStr.toStdString();
     } catch (const std::exception& e) {
         qWarning() << "String conversion failed in setData:" << e.what();
         return false;
+    }
+    
+    // GTA III/VC 键名格式验证（编辑键列时）
+    if (col == KeyColumn && (m_tab->version == GXTVersion::GTA_III || m_tab->version == GXTVersion::GTA_VC)) {
+        QString keyText = newValueStr.trimmed();
+        // 检查长度
+        if (keyText.length() > 7) {
+            qWarning() << "GTA III/VC 键名长度超过7个字符: " << keyText;
+            return false;
+        }
+        // 检查字符范围
+        QRegularExpression validKeyRegex("^[0-9A-Z_]+$");
+        if (!validKeyRegex.match(keyText).hasMatch()) {
+            qWarning() << "GTA III/VC 键名包含非法字符: " << keyText;
+            return false;
+        }
     }
     
     bool success = false;
@@ -574,28 +595,29 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                             processedKey = inputKey;
                             qDebug() << "[Hash转换] VC版本: 输入=" << inputKey << " -> 保持原样=" << processedKey;
                         } else if (m_tab->version == GXTVersion::GTA_SA) {
-                            // GTA SA: 使用CKeyGen计算hash
-                            std::string upperKey = inputKey.toUpper().toStdString();
-                            uint32_t hash = CKeyGen::GetUppercaseKey(upperKey.c_str());
-                            processedKey = QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
-                            qDebug() << "[Hash转换] SA版本: 输入=" << inputKey << " -> Hash=0x" << processedKey;
-                        } else if (m_tab->version == GXTVersion::GTA_IV) {
-                            // GTA IV: 使用GTA4 hash算法
+                            // GTA SA: 先查找映射表，找不到再计算hash
                             uint32_t hash = 0;
-                            std::string str = inputKey.toLower().toStdString();
-                            for (char c : str) {
-                                if (c >= 'A' && c <= 'Z') c += 32; // 转小写
-                                else if (c == '\\') c = '/'; // 反斜杠替换
-                                uint32_t cVal = static_cast<uint32_t>(static_cast<unsigned char>(c)) & 0xFF;
-                                uint32_t tmp = (hash + cVal) & 0xFFFFFFFF;
-                                uint32_t mult = (1025 * tmp) & 0xFFFFFFFF;
-                                hash = ((mult >> 6) ^ mult) & 0xFFFFFFFF;
+                            if (findSATHash(inputKey, hash)) {
+                                processedKey = "0x" + QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
+                                qDebug() << "[Hash转换] SA版本从映射表: 输入=" << inputKey << " -> Hash=" << processedKey;
+                            } else {
+                                std::string upperKey = inputKey.toUpper().toStdString();
+                                hash = CKeyGen::GetUppercaseKey(upperKey.c_str());
+                                processedKey = "0x" + QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
+                                qDebug() << "[Hash转换] SA版本计算: 输入=" << inputKey << " -> Hash=" << processedKey;
                             }
-                            uint32_t a = (9 * hash) & 0xFFFFFFFF;
-                            uint32_t aXor = (a ^ (a >> 11)) & 0xFFFFFFFF;
-                            hash = (32769 * aXor) & 0xFFFFFFFF;
-                            processedKey = QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
-                            qDebug() << "[Hash转换] IV版本: 输入=" << inputKey << " -> Hash=0x" << processedKey;
+                        } else if (m_tab->version == GXTVersion::GTA_IV) {
+                            // GTA IV: 先查找映射表，找不到再计算hash
+                            uint32_t hash = 0;
+                            if (findIVTHash(inputKey, hash)) {
+                                processedKey = "0x" + QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
+                                qDebug() << "[Hash转换] IV版本从映射表: 输入=" << inputKey << " -> Hash=" << processedKey;
+                            } else {
+                                std::string str = inputKey.toLower().toStdString();
+                                hash = GXTEditor::calculateGTA4Hash(str);
+                                processedKey = "0x" + QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
+                                qDebug() << "[Hash转换] IV版本计算: 输入=" << inputKey << " -> Hash=" << processedKey;
+                            }
                         } else if (m_tab->version == GXTVersion::GXT2) {
                             // GXT2: 使用JOAAT hash - 简化实现
                             uint32_t hash = 0;
@@ -612,15 +634,15 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                             hash ^= (hash >> 11);
                             hash += (hash << 15);
                             hash &= 0xFFFFFFFF;
-                            processedKey = QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
-                            qDebug() << "[Hash转换] GXT2版本: 输入=" << inputKey << " -> Hash=0x" << processedKey;
+                            processedKey = "0x" + QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
+                            qDebug() << "[Hash转换] GXT2版本: 输入=" << inputKey << " -> Hash=" << processedKey;
                         } else {
                             // 其他版本: 尝试解析为hex，如果失败则计算hash
                             bool isHex = false;
                             uint32_t hexValue = inputKey.toUInt(&isHex, 16);
                             if (isHex && inputKey.length() == 8) {
-                                // 已经是合法的8位hex，保持原样
-                                processedKey = inputKey.toUpper();
+                                // 已经是合法的8位hex，添加0x前缀
+                                processedKey = "0x" + inputKey.toUpper();
                                 qDebug() << "[Hash转换] Hex格式: 输入=" << inputKey << " -> 保持=" << processedKey;
                             } else {
                                 // 不是hex，计算JOAAT hash
@@ -638,8 +660,8 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                                 hash ^= (hash >> 11);
                                 hash += (hash << 15);
                                 hash &= 0xFFFFFFFF;
-                                processedKey = QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
-                                qDebug() << "[Hash转换] 默认JOAAT: 输入=" << inputKey << " -> Hash=0x" << processedKey;
+                                processedKey = "0x" + QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
+                                qDebug() << "[Hash转换] 默认JOAAT: 输入=" << inputKey << " -> Hash=" << processedKey;
                             }
                         }
                         
@@ -670,6 +692,9 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
     
     if (success) {
         m_tab->isModified = true;
+        // 清除显示缓存，确保下次访问时重新构建
+        m_displayCacheValid = false;
+        m_displayCache.clear();
         // 精确的数据更新信号 - 只更新修改的单元格
         emit dataChanged(index, index, {Qt::DisplayRole, Qt::EditRole});
         // 发出数据修改信号，用于触发自动保存

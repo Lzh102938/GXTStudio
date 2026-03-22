@@ -525,7 +525,16 @@ bool GXTEditor::saveAsGXT2Format(const std::string& path) {
         std::vector<std::pair<const std::string*, const std::string*>> entries;
         entries.reserve(totalEntries);
         
-        // 先收集MAIN表
+        // 先收集GXT2表（GXT2格式的标准表名）
+        for (const auto& table : tables) {
+            if (table.name == "GXT2") {
+                for (const auto& entry : table.entries) {
+                    entries.emplace_back(&entry.key, &entry.value);
+                }
+                break;
+            }
+        }
+        // 再收集MAIN表（兼容旧格式）
         for (const auto& table : tables) {
             if (table.name == "MAIN") {
                 for (const auto& entry : table.entries) {
@@ -536,7 +545,7 @@ bool GXTEditor::saveAsGXT2Format(const std::string& path) {
         }
         // 再收集其他表
         for (const auto& table : tables) {
-            if (table.name != "MAIN") {
+            if (table.name != "GXT2" && table.name != "MAIN") {
                 for (const auto& entry : table.entries) {
                     entries.emplace_back(&entry.key, &entry.value);
                 }
@@ -1102,6 +1111,197 @@ bool GXTEditor::saveAsGTA_III(const std::string& path) {
     }
     catch (...) {
         std::cerr << "Unknown exception in saveAsGTA_III" << std::endl;
+        return false;
+    }
+}
+
+// 保存无表文件格式 (如GTA III) - 直接保存 entries 到 TKEY/TDAT 块
+bool GXTEditor::saveAsNoTable(const std::string& path, const std::vector<GXTEntry>& entries) {
+    try {
+        // 转换路径以支持中文
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+        if (wideLen == 0) {
+            std::cerr << "Error: Invalid path encoding" << std::endl;
+            return false;
+        }
+
+        std::vector<wchar_t> widePath(wideLen);
+        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, widePath.data(), wideLen);
+
+        FILE* outputFile = _wfopen(widePath.data(), L"wb");
+        if (outputFile == nullptr) {
+            std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
+            return false;
+        }
+
+        const int SizeOfTKEY = 12;  // 4字节偏移 + 8字节键
+
+        // 收集所有条目并按键排序
+        std::vector<std::pair<std::string, std::string>> all_entries;
+        for (const auto& entry : entries) {
+            all_entries.push_back({entry.key, entry.value});
+        }
+
+        std::sort(all_entries.begin(), all_entries.end(),
+            [](const auto& a, const auto& b) {
+                return a.first < b.first;
+            });
+
+        if (all_entries.empty()) {
+            fclose(outputFile);
+            return true;
+        }
+
+        // 计算块大小
+        uint32_t keyBlockSize = static_cast<uint32_t>(all_entries.size() * SizeOfTKEY);
+        uint32_t dataBlockSize = 0;
+        for (const auto& [key, value] : all_entries) {
+            dataBlockSize += static_cast<uint32_t>(utf8_to_utf16le_vector(value).size() * 2);
+        }
+
+        // 写TKEY块头
+        long fpKeyBlock = 8;
+        long fpDataBlock = keyBlockSize + 8;
+
+        fwrite("TKEY", 4, 1, outputFile);
+        fwrite(&keyBlockSize, 4, 1, outputFile);
+
+        // 定位到TDAT块头
+        fseek(outputFile, fpDataBlock, SEEK_SET);
+        fwrite("TDAT", 4, 1, outputFile);
+        fwrite(&dataBlockSize, 4, 1, outputFile);
+        fpDataBlock += 8;
+
+        // 处理每个条目
+        for (const auto& [key, value] : all_entries) {
+            // 回填TKEY条目
+            fseek(outputFile, fpKeyBlock, SEEK_SET);
+            uint32_t offset = static_cast<uint32_t>(fpDataBlock - keyBlockSize - 16);
+            fwrite(&offset, 4, 1, outputFile);
+
+            char keyName[8] = {0};
+            strncpy(keyName, key.c_str(), 7);
+            fwrite(keyName, 8, 1, outputFile);
+            fpKeyBlock += SizeOfTKEY;
+
+            // 写入TDAT数据
+            fseek(outputFile, fpDataBlock, SEEK_SET);
+            auto utf16Data = utf8_to_utf16le_vector(value);
+            fwrite(utf16Data.data(), 2, utf16Data.size(), outputFile);
+            fpDataBlock += static_cast<long>(utf16Data.size() * 2);
+        }
+
+        fclose(outputFile);
+        return true;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Exception in saveAsNoTable: " << e.what() << std::endl;
+        return false;
+    }
+    catch (...) {
+        std::cerr << "Unknown exception in saveAsNoTable" << std::endl;
+        return false;
+    }
+}
+
+// 保存GTA IV无表格式 - 有文件头，TKEY条目为8字节（偏移+CRC32）
+bool GXTEditor::saveAsNoTableIV(const std::string& path, const std::vector<GXTEntry>& entries) {
+    try {
+        int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+        if (wideLen == 0) {
+            std::cerr << "Error: Invalid path encoding" << std::endl;
+            return false;
+        }
+
+        std::vector<wchar_t> widePath(wideLen);
+        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, widePath.data(), wideLen);
+
+        FILE* outputFile = _wfopen(widePath.data(), L"wb");
+        if (outputFile == nullptr) {
+            std::cerr << "Error: Cannot open file for writing: " << path << std::endl;
+            return false;
+        }
+
+        // 写入文件头：版本号4，字符位数16（UTF-16）
+        uint16_t version = 4;
+        uint16_t bitsPerChar = 16;
+        fwrite(&version, 2, 1, outputFile);
+        fwrite(&bitsPerChar, 2, 1, outputFile);
+
+        if (entries.empty()) {
+            fclose(outputFile);
+            return true;
+        }
+
+        // 收集所有条目并按CRC32排序
+        std::vector<std::pair<uint32_t, std::string>> all_entries;
+        for (const auto& entry : entries) {
+            std::string keyStr = entry.key;
+            if (keyStr.size() > 2 && (keyStr.substr(0, 2) == "0x" || keyStr.substr(0, 2) == "0X")) {
+                keyStr = keyStr.substr(2);
+            }
+            uint32_t hash = static_cast<uint32_t>(std::stoul(keyStr, nullptr, 16));
+            all_entries.push_back({hash, entry.value});
+        }
+
+        std::sort(all_entries.begin(), all_entries.end(),
+            [](const auto& a, const auto& b) {
+                return a.first < b.first;
+            });
+
+        // 计算块大小
+        uint32_t keyBlockSize = static_cast<uint32_t>(all_entries.size() * 8);  // 每条目8字节
+        uint32_t dataBlockSize = 0;
+        for (const auto& [hash, value] : all_entries) {
+            dataBlockSize += static_cast<uint32_t>(utf8_to_utf16le_vector(value).size() * 2 + 2);  // +2 for null terminator
+        }
+
+        // 写TKEY块头
+        fwrite("TKEY", 4, 1, outputFile);
+        fwrite(&keyBlockSize, 4, 1, outputFile);
+
+        // 计算TDAT块位置
+        long tdatStart = 4 + 8 + keyBlockSize;  // 文件头(4) + TKEY头(8) + TKEY数据(keyBlockSize)
+        
+        // 写TDAT块头
+        fseek(outputFile, tdatStart, SEEK_SET);
+        fwrite("TDAT", 4, 1, outputFile);
+        fwrite(&dataBlockSize, 4, 1, outputFile);
+
+        // 写入TKEY条目和TDAT数据
+        uint32_t dataOffset = 0;  // 相对于TDAT数据起始位置的偏移
+        long tkeyDataPos = 12;  // TKEY数据起始位置（文件头4 + TKEY头8）
+        long tdatDataPos = tdatStart + 8;  // TDAT数据起始位置
+
+        for (const auto& [hash, value] : all_entries) {
+            // 写TKEY条目
+            fseek(outputFile, tkeyDataPos, SEEK_SET);
+            fwrite(&dataOffset, 4, 1, outputFile);
+            fwrite(&hash, 4, 1, outputFile);
+            tkeyDataPos += 8;
+
+            // 写TDAT数据
+            fseek(outputFile, tdatDataPos, SEEK_SET);
+            auto utf16Data = utf8_to_utf16le_vector(value);
+            fwrite(utf16Data.data(), 2, utf16Data.size(), outputFile);
+            // 写入null终止符
+            uint16_t nullTerm = 0;
+            fwrite(&nullTerm, 2, 1, outputFile);
+            
+            // 更新偏移
+            dataOffset += static_cast<uint32_t>(utf16Data.size() * 2 + 2);
+            tdatDataPos += static_cast<long>(utf16Data.size() * 2 + 2);
+        }
+
+        fclose(outputFile);
+        return true;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Exception in saveAsNoTableIV: " << e.what() << std::endl;
+        return false;
+    }
+    catch (...) {
+        std::cerr << "Unknown exception in saveAsNoTableIV" << std::endl;
         return false;
     }
 }

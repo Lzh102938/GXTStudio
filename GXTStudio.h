@@ -286,6 +286,9 @@ struct FileTab {
     // 无表文件的键值对（当originalHasTABL为false时使用）
     std::vector<GXTEntry> noTablEntries;
     
+    // 标签页Widget（用于CharTable等特殊标签页）
+    QWidget* pageWidget = nullptr;
+    
     // Qt控件
     QListWidget* tableList = nullptr;
     QTableView* entryTableView = nullptr;  // 改为QTableView
@@ -596,6 +599,7 @@ public:
 
 private slots:
     // 文件操作
+    void newFile();
     void openFile();
     // 从文本文件导入（自动判断键值对或字符表）
     void importTxtFile(const QString& filePath);
@@ -631,14 +635,7 @@ private slots:
     
     // 后台替换功能
     void replaceAllMatchesInEntry(FileTab* tab, int tableIndex, int entryIndex, const QString& findText, const QString& replaceText, bool caseSensitive);
-    
-    // 视图操作
-    void increaseFont();
-    void decreaseFont();
-    
-    // 内部方法
-    void updateFontSizes();
-    
+
     // 帮助
     void showAbout();
     
@@ -779,6 +776,7 @@ private:
     QStatusBar* m_statusBar;
     
     // 动作
+    QAction* m_newAction;
     QAction* m_openAction;
     QAction* m_saveAction;
     QAction* m_saveAsAction;
@@ -791,8 +789,6 @@ private:
     QAction* m_readOnlyAction;
     QAction* m_loopSearchAction;  // 循环搜索动作
     ReplaceDialog* m_replaceDialog;
-    QAction* m_increaseFontAction;
-    QAction* m_decreaseFontAction;
     QAction* m_aboutAction;
     QAction* m_codeTableAction;    // 码表转换（已弃用，改为下拉按钮）
     QAction* m_smartTranslateAction; // 智能翻译
@@ -818,7 +814,7 @@ private:
     int m_currentTabIndex;
     bool m_isReadOnly;
     int m_fontSize;
-    
+
     // 异步解析相关
     QThread* m_parseThread;
     ParseWorker* m_parseWorker;
@@ -980,6 +976,14 @@ private:
     GXTVersion selectVersionDialog(); // 版本选择对话框
     int calculateKeyColumnWidth(); // 计算键列宽度
     
+    // 新建文件相关
+    struct NewFileOptions {
+        QString fileType;       // "GXT", "DAT_VC", "DAT_IV", "GXT2"
+        GXTVersion version;     // 对应的GXT版本
+        QString defaultName;    // 默认文件名
+    };
+    NewFileOptions showNewFileDialog(); // 显示新建文件对话框
+    
     // 重构的保存逻辑 - 版本感知保存系统
     // SaveStrategy结构体已在前面定义
     
@@ -1080,10 +1084,8 @@ public:
         } else {
             m_regexValid = false;
         }
-        
-        updateFontSizes();
     }
-    
+
     // 设置是否为哈希键列（使用等宽字体）
     void setHashKeyColumn(bool isHashKey) { 
         m_isHashKeyColumn = isHashKey;
@@ -1128,14 +1130,7 @@ public:
         // 使用 QFontMetrics::elidedText 每次都要计算文本宽度，非常耗时
         painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, text);
     }
-    
-    // 更新字体大小
-    void updateFontSizes() {
-        const int pointSize = QApplication::font().pointSize();
-        m_monospaceFont.setPointSize(pointSize);
-        m_yaheiFont.setPointSize(pointSize);
-    }
-    
+
     // 简化的编辑器创建
     QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
         QLineEdit* editor = new QLineEdit(parent);

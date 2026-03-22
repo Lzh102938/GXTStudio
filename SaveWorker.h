@@ -36,8 +36,11 @@ struct AutoSaveData {
     bool isWHM;
     bool isWHMRSC;
     bool isDAT;
+    bool originalHasTABL;  // 原始文件是否有TABL块（用于区分无表文件）
     // GXT/GXT2 数据 (使用GXTTabl与FileTab一致)
     std::vector<GXTTabl> tables;
+    // 无表文件的键值对数据
+    std::vector<GXTEntry> noTablEntries;
     // WHM 数据
     std::vector<WHMEntry> whmEntries;
     // DAT 数据

@@ -70,7 +70,8 @@
     <property name="title">
      <string>文件(&amp;F)</string>
     </property>
-    <addaction name="actionOpen"/>
+    <addaction name="actionNew"/>
+   <addaction name="actionOpen"/>
    <addaction name="actionSave"/>
    <addaction name="actionSaveAs"/>
    <addaction name="separator"/>
@@ -94,8 +95,6 @@
     <property name="title">
      <string>视图(&amp;V)</string>
     </property>
-    <addaction name="actionIncreaseFont"/>
-    <addaction name="actionDecreaseFont"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title">
@@ -233,28 +232,6 @@
     <string>切换只读模式</string>
    </property>
   </action>
-  <action name="actionIncreaseFont">
-   <property name="text">
-    <string>增大字体(&amp;I)</string>
-   </property>
-   <property name="shortcut">
-    <string>Ctrl++</string>
-   </property>
-   <property name="toolTip">
-    <string>增大显示字体</string>
-   </property>
-  </action>
-  <action name="actionDecreaseFont">
-   <property name="text">
-    <string>减小字体(&amp;D)</string>
-   </property>
-   <property name="shortcut">
-    <string>Ctrl+-</string>
-   </property>
-   <property name="toolTip">
-    <string>减小显示字体</string>
-   </property>
-  </action>
   <action name="actionAbout">
    <property name="text">
     <string>关于(&amp;A)...</string>
@@ -297,6 +274,17 @@
    </property>
    <property name="toolTip">
     <string>生成字符表DAT文件（仅GTA_VC和GTA_IV版本）</string>
+   </property>
+  </action>
+  <action name="actionNew">
+   <property name="text">
+    <string>新建(&amp;N)...</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+N</string>
+   </property>
+   <property name="toolTip">
+    <string>新建GXT/DAT/GXT2文件</string>
    </property>
   </action>
  </widget>

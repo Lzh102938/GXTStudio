@@ -65,26 +65,47 @@ void SaveWorker::saveFile(const SaveTask& task)
             editor.setVersion(task.tabPtr->version);
 
             // 检查是否为无表文件（没有TABL块且tables为空）
-            if (!task.tabPtr->originalHasTABL && task.tabPtr->tables.empty() && !task.tabPtr->noTablEntries.empty()) {
-                // 无表文件：创建一个MAIN表存储键值对
-                if (editor.addTable("MAIN")) {
-                    size_t tableIndex = editor.getTableCount() - 1;
-                    std::vector<std::pair<std::string, std::string>> entriesBatch;
-                    entriesBatch.reserve(task.tabPtr->noTablEntries.size());
-                    for (const auto& entry : task.tabPtr->noTablEntries) {
-                        entriesBatch.emplace_back(entry.key, entry.value);
+            bool isNoTableFile = !task.tabPtr->originalHasTABL && task.tabPtr->tables.empty();
+            
+            if (isNoTableFile) {
+                // 无表文件：根据版本选择保存方法
+                if (task.tabPtr->version == GXTVersion::GTA_IV) {
+                    // GTA IV 无表文件
+                    QFile qfile(task.filePath);
+                    if (!qfile.open(QIODevice::WriteOnly)) {
+                        result.errorMessage = QString("无法打开GXT文件: %1").arg(qfile.errorString());
+                        success = false;
+                    } else {
+                        std::string stdPath = task.filePath.toStdString();
+                        success = editor.saveAsNoTableIV(stdPath, task.tabPtr->noTablEntries);
+                        qfile.close();
+                        if (!success) {
+                            result.errorMessage = "GTA IV 无表GXT文件保存失败";
+                        }
                     }
-                    editor.addEntriesBatch(tableIndex, entriesBatch);
+                } else {
+                    // GTA III 无表文件
+                    QFile qfile(task.filePath);
+                    if (!qfile.open(QIODevice::WriteOnly)) {
+                        result.errorMessage = QString("无法打开GXT文件: %1").arg(qfile.errorString());
+                        success = false;
+                    } else {
+                        std::string stdPath = task.filePath.toStdString();
+                        success = editor.saveAsNoTable(stdPath, task.tabPtr->noTablEntries);
+                        qfile.close();
+                        if (!success) {
+                            result.errorMessage = "无表GXT文件保存失败";
+                        }
+                    }
                 }
-            } else {
-                // 有表文件：直接添加表格和条目数据 - 使用批量添加提高性能
+            } else if (!task.tabPtr->tables.empty()) {
+                // 有表文件：直接添加表格和条目数据
                 for (const auto& table : task.tabPtr->tables) {
                     if (!editor.addTable(table.name)) {
-                        continue; // 跳过无效的表
+                        continue;
                     }
 
                     size_t tableIndex = editor.getTableCount() - 1;
-                    // 批量添加条目（跳过重复检查，O(n) 复杂度）
                     std::vector<std::pair<std::string, std::string>> entriesBatch;
                     entriesBatch.reserve(table.entries.size());
                     for (const auto& entry : table.entries) {
@@ -92,25 +113,28 @@ void SaveWorker::saveFile(const SaveTask& task)
                     }
                     editor.addEntriesBatch(tableIndex, entriesBatch);
                 }
-            }
 
-            // 执行保存 - 使用Qt的QFile处理路径
-            QFile qfile(task.filePath);
-            if (!qfile.open(QIODevice::WriteOnly)) {
-                result.errorMessage = QString("无法打开GXT文件: %1").arg(qfile.errorString());
-                success = false;
-            } else {
-                std::string stdPath = task.filePath.toStdString();
-                // 如果用户选择保存为 .txt，则使用文本导出，保持内容为纯文本
-                if (task.filePath.endsWith(".txt", Qt::CaseInsensitive)) {
-                    success = editor.saveAsText(stdPath);
+                // 执行保存
+                QFile qfile(task.filePath);
+                if (!qfile.open(QIODevice::WriteOnly)) {
+                    result.errorMessage = QString("无法打开GXT文件: %1").arg(qfile.errorString());
+                    success = false;
                 } else {
-                    success = editor.saveToFile(stdPath);
+                    std::string stdPath = task.filePath.toStdString();
+                    if (task.filePath.endsWith(".txt", Qt::CaseInsensitive)) {
+                        success = editor.saveAsText(stdPath);
+                    } else {
+                        success = editor.saveToFile(stdPath);
+                    }
+                    qfile.close();
+                    if (!success) {
+                        result.errorMessage = "GXT文件保存失败";
+                    }
                 }
-                qfile.close();
-                if (!success) {
-                    result.errorMessage = "GXT文件保存失败";
-                }
+            } else {
+                // 空文件
+                result.errorMessage = "文件内容为空，无法保存";
+                success = false;
             }
         }
         

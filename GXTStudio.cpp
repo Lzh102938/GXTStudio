@@ -130,8 +130,6 @@ GXTStudio::GXTStudio(QWidget *parent)
 
     , m_readOnlyAction(nullptr)
     , m_replaceDialog(nullptr)
-    , m_increaseFontAction(nullptr)
-    , m_decreaseFontAction(nullptr)
     , m_aboutAction(nullptr)
     , m_codeTableAction(nullptr)
     , m_smartTranslateAction(nullptr)
@@ -151,7 +149,7 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_codeTableConverter(nullptr)
     , m_currentTabIndex(-1)
     , m_isReadOnly(true)
-    , m_fontSize(11)  // 表格字体大小
+    , m_fontSize(11)
     , m_parseThread(nullptr)
     , m_parseWorker(nullptr)
     , m_saveThread(nullptr)
@@ -271,7 +269,7 @@ GXTStudio::GXTStudio(QWidget *parent)
     
     // 加载设置
     QSettings settings;
-    m_fontSize = settings.value("fontSize", 11).toInt();  // 表格默认字体大小
+    m_fontSize = settings.value("fontSize", 11).toInt();
     m_isReadOnly = settings.value("readOnly", true).toBool();
     m_autoSaveEnabled = settings.value("autoSaveEnabled", false).toBool();  // 加载自动保存设置
 
@@ -691,6 +689,7 @@ void GXTStudio::setupMenus()
     m_menuBar = ui.menuBar;
 
     // 获取动作指针
+    m_newAction = ui.actionNew;
     m_openAction = ui.actionOpen;
     m_saveAction = ui.actionSave;
     m_saveAsAction = ui.actionSaveAs;
@@ -701,8 +700,6 @@ void GXTStudio::setupMenus()
     m_findAction = ui.actionFind;
     m_replaceAction = ui.actionReplace;
     m_readOnlyAction = ui.actionReadOnly;
-    m_increaseFontAction = ui.actionIncreaseFont;
-    m_decreaseFontAction = ui.actionDecreaseFont;
     m_aboutAction = ui.actionAbout;
     m_codeTableAction = ui.actionCodeTable;
     m_smartTranslateAction = ui.actionSmartTranslate;
@@ -999,6 +996,7 @@ void GXTStudio::keyPressEvent(QKeyEvent* event)
 void GXTStudio::connectSignals()
 {
     // 菜单动作连接
+    connect(m_newAction, &QAction::triggered, this, &GXTStudio::newFile);
     connect(m_openAction, &QAction::triggered, this, &GXTStudio::openFile);
     connect(m_saveAction, &QAction::triggered, this, &GXTStudio::saveFile);
     connect(m_saveAsAction, &QAction::triggered, this, &GXTStudio::saveAsFile);
@@ -1013,9 +1011,7 @@ void GXTStudio::connectSignals()
     connect(m_smartTranslateAction, &QAction::triggered, this, &GXTStudio::onSmartTranslate);
     connect(m_generateCharTableAction, &QAction::triggered, this, &GXTStudio::onGenerateCharTable);
     connect(m_readOnlyAction, &QAction::toggled, this, &GXTStudio::toggleReadOnly);
-    
-    connect(m_increaseFontAction, &QAction::triggered, this, &GXTStudio::increaseFont);
-    connect(m_decreaseFontAction, &QAction::triggered, this, &GXTStudio::decreaseFont);
+
     connect(m_aboutAction, &QAction::triggered, this, &GXTStudio::showAbout);
 
     // 背景设置菜单连接
@@ -1195,6 +1191,254 @@ void GXTStudio::cleanupDelegatesCache()
 // 预加载方法已删除 - Qt模型视图架构已优化
 
 // preloadVisibleArea 函数已定义在前面，删除重复定义
+
+// 新建文件对话框
+GXTStudio::NewFileOptions GXTStudio::showNewFileDialog()
+{
+    NewFileOptions result;
+    result.fileType = "";
+    result.version = GXTVersion::UNKNOWN;
+    result.defaultName = "";
+    
+    QDialog dialog(this);
+    dialog.setWindowTitle("新建文件");
+    dialog.setModal(true);
+    dialog.resize(400, 300);
+    
+    QVBoxLayout* layout = new QVBoxLayout(&dialog);
+    
+    QLabel* label = new QLabel("请选择要新建的文件类型：", &dialog);
+    label->setStyleSheet("font-weight: bold; font-size: 14px; color: #333;");
+    layout->addWidget(label);
+    
+    QButtonGroup* buttonGroup = new QButtonGroup(&dialog);
+    
+    QRadioButton* gxtButton = new QRadioButton("GXT 文件 (GTA III/VC/SA)", &dialog);
+    QRadioButton* gxt2Button = new QRadioButton("GXT2 文件 (GTA V)", &dialog);
+    QRadioButton* datVcButton = new QRadioButton("DAT 文件 - GTA VC 格式", &dialog);
+    QRadioButton* datIvButton = new QRadioButton("DAT 文件 - GTA IV 格式", &dialog);
+    
+    gxtButton->setToolTip("GXT 文件支持 GTA III、GTA Vice City、GTA San Andreas 版本");
+    gxt2Button->setToolTip("GXT2 文件用于 GTA V");
+    datVcButton->setToolTip("DAT 文件用于 GTA Vice City，使用 VC 格式哈希");
+    datIvButton->setToolTip("DAT 文件用于 GTA IV，使用 IV 格式哈希");
+    
+    buttonGroup->addButton(gxtButton, 0);
+    buttonGroup->addButton(gxt2Button, 1);
+    buttonGroup->addButton(datVcButton, 2);
+    buttonGroup->addButton(datIvButton, 3);
+    
+    layout->addWidget(gxtButton);
+    layout->addWidget(gxt2Button);
+    layout->addWidget(datVcButton);
+    layout->addWidget(datIvButton);
+    
+    gxtButton->setChecked(true);
+    
+    QLabel* versionLabel = new QLabel("\nGXT 版本选择：", &dialog);
+    versionLabel->setStyleSheet("font-weight: bold; font-size: 12px; color: #555;");
+    layout->addWidget(versionLabel);
+    
+    QComboBox* versionCombo = new QComboBox(&dialog);
+    versionCombo->addItem("GTA III", static_cast<int>(GXTVersion::GTA_III));
+    versionCombo->addItem("GTA Vice City", static_cast<int>(GXTVersion::GTA_VC));
+    versionCombo->addItem("GTA San Andreas", static_cast<int>(GXTVersion::GTA_SA));
+    versionCombo->addItem("GTA IV", static_cast<int>(GXTVersion::GTA_IV));
+    versionCombo->setCurrentIndex(2);
+    versionCombo->setToolTip("选择 GXT 文件的版本（仅对 GXT 类型有效）");
+    layout->addWidget(versionCombo);
+    
+    layout->addStretch();
+    
+    QHBoxLayout* buttonLayout = new QHBoxLayout();
+    QPushButton* okButton = new QPushButton("确定", &dialog);
+    QPushButton* cancelButton = new QPushButton("取消", &dialog);
+    okButton->setDefault(true);
+    
+    QString buttonStyle = R"(
+        QPushButton {
+            padding: 8px 20px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            background-color: #e0e0e0;
+        }
+    )";
+    okButton->setStyleSheet(buttonStyle + "QPushButton { background-color: #4a90e2; color: white; } QPushButton:hover { background-color: #3a80d2; }");
+    cancelButton->setStyleSheet(buttonStyle);
+    
+    buttonLayout->addStretch();
+    buttonLayout->addWidget(okButton);
+    buttonLayout->addWidget(cancelButton);
+    layout->addLayout(buttonLayout);
+    
+    connect(okButton, &QPushButton::clicked, &dialog, &QDialog::accept);
+    connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
+    
+    auto updateVersionCombo = [&](int buttonId) {
+        bool isGxt = (buttonId == 0);
+        versionLabel->setVisible(isGxt);
+        versionCombo->setVisible(isGxt);
+    };
+    updateVersionCombo(0);
+    
+    connect(buttonGroup, &QButtonGroup::idClicked, updateVersionCombo);
+    
+    if (dialog.exec() == QDialog::Accepted) {
+        int selectedId = buttonGroup->checkedId();
+        
+        switch (selectedId) {
+            case 0: {
+                result.fileType = "GXT";
+                result.version = static_cast<GXTVersion>(versionCombo->currentData().toInt());
+                result.defaultName = "未命名.gxt";
+                break;
+            }
+            case 1: {
+                result.fileType = "GXT2";
+                result.version = GXTVersion::GXT2;
+                result.defaultName = "未命名.gxt2";
+                break;
+            }
+            case 2: {
+                result.fileType = "DAT_VC";
+                result.version = GXTVersion::GTA_VC;
+                result.defaultName = "未命名.dat";
+                break;
+            }
+            case 3: {
+                result.fileType = "DAT_IV";
+                result.version = GXTVersion::GTA_IV;
+                result.defaultName = "未命名.dat";
+                break;
+            }
+        }
+    }
+    
+    return result;
+}
+
+// 新建文件
+void GXTStudio::newFile()
+{
+    NewFileOptions options = showNewFileDialog();
+    
+    if (options.fileType.isEmpty()) {
+        return;
+    }
+    
+    showLogMessage(QString("新建文件: 类型=%1, 版本=%2")
+        .arg(options.fileType)
+        .arg(getVersionString(options.version)));
+    
+    FileTab newTab;
+    newTab.filePath = "";
+    newTab.fileName = options.defaultName;
+    newTab.version = options.version;
+    newTab.isModified = false;
+    newTab.originalHasTABL = true;
+    
+    if (options.fileType == "GXT" || options.fileType == "GXT2") {
+        newTab.isWHM = false;
+        newTab.isDAT = false;
+        
+        if (options.version == GXTVersion::GXT2) {
+            // GXT2格式：使用固定表名 "GXT2"
+            GXTTabl gxt2Table;
+            gxt2Table.name = "GXT2";
+            newTab.tables.push_back(gxt2Table);
+            newTab.currentTableIndex = 0;
+        } else if (options.version == GXTVersion::GTA_III) {
+            // GTA III 是无表格式
+            newTab.originalHasTABL = false;
+            newTab.currentTableIndex = 0;
+        } else if (options.version == GXTVersion::GTA_IV) {
+            // GTA IV 支持无表格式
+            newTab.originalHasTABL = false;
+            newTab.currentTableIndex = 0;
+        } else {
+            // GTA VC/SA 是有表格式
+            GXTTabl mainTable;
+            mainTable.name = "MAIN";
+            newTab.tables.push_back(mainTable);
+            newTab.currentTableIndex = 0;
+        }
+        
+    } else if (options.fileType == "DAT_VC" || options.fileType == "DAT_IV") {
+        // DAT文件使用CharTableWidget标签页（字符表）
+        CharTableData charData;
+        if (options.fileType == "DAT_VC") {
+            charData.type = CharTableData::GTA_VC;
+            charData.rows = 16;
+            charData.cols = 16;
+        } else {
+            charData.type = CharTableData::GTA_IV;
+            charData.rows = 16;
+            charData.cols = 16;
+        }
+        charData.cells.fill(0, charData.rows * charData.cols);
+        
+        // 创建CharTable标签页
+        CharTableWidget* charWidget = createCharTableTab(options.defaultName, charData);
+        if (charWidget) {
+            newTab.isCharTable = true;
+            newTab.isWHM = false;
+            newTab.isDAT = true;
+            newTab.charTableData = charData;
+            newTab.charTableWidget = charWidget;
+            newTab.isModified = true;
+            
+            // 获取parentPage用于添加到tabWidget
+            QWidget* parentPage = charWidget->property("parentPage").value<QWidget*>();
+            if (!parentPage) parentPage = charWidget->parentWidget();
+            if (parentPage) {
+                newTab.pageWidget = parentPage;
+            }
+        }
+    }
+    
+    int tabIndex = static_cast<int>(m_fileTabs.size());
+    m_fileTabs.push_back(newTab);
+    
+    // CharTable类型标签页已经有完整的界面，直接添加到tabWidget
+    if (newTab.isCharTable && newTab.pageWidget) {
+        m_tabWidget->insertTab(tabIndex, newTab.pageWidget, newTab.fileName);
+        // 连接修改信号
+        if (newTab.charTableWidget) {
+            connect(newTab.charTableWidget, &CharTableWidget::textModified, [this, tabIndex]() {
+                if (tabIndex >= 0 && tabIndex < static_cast<int>(m_fileTabs.size())) {
+                    FileTab& tab = m_fileTabs[tabIndex];
+                    if (!tab.isModified) {
+                        tab.isModified = true;
+                        updateWindowTitle();
+                    }
+                    if (m_autoSaveEnabled && m_autoSaveTimer) {
+                        m_autoSaveTimer->stop();
+                        m_autoSaveTimer->start();
+                    }
+                }
+            });
+        }
+    } else {
+        createTabContent(m_fileTabs[tabIndex], tabIndex);
+    }
+    
+    m_tabWidget->setCurrentIndex(tabIndex);
+    m_currentTabIndex = tabIndex;
+    
+    if (!newTab.tables.empty()) {
+        switchToTable(0);
+    }
+    
+    updateActions();
+    updateStatusBar();
+    updateWindowTitle();
+    
+    showLogMessage(QString("已创建新文件: %1 (%2)")
+        .arg(options.defaultName)
+        .arg(getVersionString(options.version)));
+}
 
 // 文件操作槽函数
 void GXTStudio::openFile()
@@ -1379,41 +1623,66 @@ void GXTStudio::importTxtFile(const QString& filePath)
         else if (verChoice == "GTA_IV") version = GXTVersion::GTA_IV;
         else if (verChoice == "GXT2") version = GXTVersion::GXT2;
 
+        // 检查是否为无表文件：GTA_IV版本且没有表头
+        bool isNoTableFile = (version == GXTVersion::GTA_IV && !hasTableHeader);
+
         // 解析为表格（支持可选的 [TableName] 分节）
         std::vector<GXTTabl> tables;
-        GXTTabl currentTable;
-        if (!hasTableHeader) {
-            currentTable.name = "Imported";
-        }
+        std::vector<GXTEntry> noTablEntries;
 
-        for (const QString& ln : lines) {
-            QString s = ln.trimmed();
-            if (s.isEmpty()) continue;
-            if (s.startsWith('[') && s.endsWith(']')) {
-                // 新表头
-                if (!currentTable.name.empty() || !currentTable.entries.empty()) {
-                    tables.push_back(currentTable);
-                    currentTable = GXTTabl();
+        if (isNoTableFile) {
+            // GTA IV无表文件：直接存储到noTablEntries
+            for (const QString& ln : lines) {
+                QString s = ln.trimmed();
+                if (s.isEmpty()) continue;
+                if (s.startsWith('[') && s.endsWith(']')) continue;
+                int idx = s.indexOf('=');
+                if (idx > 0) {
+                    QString key = s.left(idx).trimmed();
+                    QString val = s.mid(idx + 1).trimmed();
+                    GXTEntry entry;
+                    entry.key = key.toUtf8().toStdString();
+                    entry.value = val.toUtf8().toStdString();
+                    entry.originalKey = entry.key;
+                    noTablEntries.push_back(entry);
                 }
-                QString name = s.mid(1, s.size() - 2).trimmed();
-                currentTable.name = name.toUtf8().toStdString();
-                continue;
             }
-            int idx = s.indexOf('=');
-            if (idx > 0) {
-                QString key = s.left(idx).trimmed();
-                QString val = s.mid(idx + 1).trimmed();
-                GXTEntry entry;
-                entry.key = key.toUtf8().toStdString();
-                entry.value = val.toUtf8().toStdString();
-                entry.originalKey = entry.key;
-                currentTable.entries.push_back(entry);
+        } else {
+            // 普通GXT文件：解析为表格
+            GXTTabl currentTable;
+            if (!hasTableHeader) {
+                currentTable.name = "Imported";
             }
-        }
-        if (!currentTable.name.empty() || !currentTable.entries.empty()) {
-            // 如果表名为空，设置默认名
-            if (currentTable.name.empty()) currentTable.name = "Imported";
-            tables.push_back(currentTable);
+
+            for (const QString& ln : lines) {
+                QString s = ln.trimmed();
+                if (s.isEmpty()) continue;
+                if (s.startsWith('[') && s.endsWith(']')) {
+                    // 新表头
+                    if (!currentTable.name.empty() || !currentTable.entries.empty()) {
+                        tables.push_back(currentTable);
+                        currentTable = GXTTabl();
+                    }
+                    QString name = s.mid(1, s.size() - 2).trimmed();
+                    currentTable.name = name.toUtf8().toStdString();
+                    continue;
+                }
+                int idx = s.indexOf('=');
+                if (idx > 0) {
+                    QString key = s.left(idx).trimmed();
+                    QString val = s.mid(idx + 1).trimmed();
+                    GXTEntry entry;
+                    entry.key = key.toUtf8().toStdString();
+                    entry.value = val.toUtf8().toStdString();
+                    entry.originalKey = entry.key;
+                    currentTable.entries.push_back(entry);
+                }
+            }
+            if (!currentTable.name.empty() || !currentTable.entries.empty()) {
+                // 如果表名为空，设置默认名
+                if (currentTable.name.empty()) currentTable.name = "Imported";
+                tables.push_back(currentTable);
+            }
         }
 
         // 构建解析结果并复用现有 UI 创建流程
@@ -1425,12 +1694,15 @@ void GXTStudio::importTxtFile(const QString& filePath)
         result.isWHMRSC = false;
         result.isDAT = false;
         result.tables = tables;
+        result.noTablEntries = noTablEntries;
+        result.originalHasTABL = !isNoTableFile;
         result.tabIndex = static_cast<int>(m_fileTabs.size());
         result.version = version;
 
         // 使用 onParseCompleted 处理（复用现有创建标签页逻辑）
         onParseCompleted(result);
-        showLogMessage(QString("已导入键值对TXT: %1 (表数: %2)").arg(result.fileName).arg(result.tables.size()));
+        showLogMessage(QString("已导入键值对TXT: %1 (表数: %2, 无表条目: %3)")
+                       .arg(result.fileName).arg(result.tables.size()).arg(result.noTablEntries.size()));
         return;
     }
 
@@ -1592,26 +1864,27 @@ void GXTStudio::saveFile()
     bool isWHM = currentTab->isWHM;
     bool isDAT = currentTab->isDAT;
     bool isWHMRSC = currentTab->isWHMRSC;
-    
+    bool originalHasTABL = currentTab->originalHasTABL;
+
     // 使用状态栏进度条
     m_saveProgressBar->setFormat("正在保存 %p%");
     m_saveProgressBar->show();
     m_saveProgressBar->setValue(10);
-    
+
     showLogMessage("正在后台保存: " + fileName);
-    
+
     // 在后台线程中执行数据复制和保存
-        QFuture<SaveResult> future = QtConcurrent::run([this, filePath, fileName, version, isWHM, isDAT, isWHMRSC]() -> SaveResult {
+        QFuture<SaveResult> future = QtConcurrent::run([this, filePath, fileName, version, isWHM, isDAT, isWHMRSC, originalHasTABL]() -> SaveResult {
         SaveResult result;
         result.filePath = filePath;
         result.fileName = fileName;
         result.isNewPath = false;
         result.isAutoSave = false;
         result.success = false;
-        
+
         QElapsedTimer timer;
         timer.start();
-        
+
         // 在主线程中获取数据副本（线程安全）
         AutoSaveData saveData;
         saveData.filePath = filePath;
@@ -1619,6 +1892,7 @@ void GXTStudio::saveFile()
         saveData.isWHM = isWHM;
         saveData.isWHMRSC = isWHMRSC;
         saveData.isDAT = isDAT;
+        saveData.originalHasTABL = originalHasTABL;
 
         QMetaObject::invokeMethod(this, [this, &saveData]() {
             FileTab* tab = getCurrentTab();
@@ -1627,6 +1901,9 @@ void GXTStudio::saveFile()
                     saveData.whmEntries = tab->whmEntries;
                 } else if (saveData.isDAT) {
                     saveData.datEntries = tab->datEntries;
+                } else if (!saveData.originalHasTABL && tab->tables.empty()) {
+                    // 无表文件
+                    saveData.noTablEntries = tab->noTablEntries;
                 } else {
                     saveData.tables = tab->tables;
                 }
@@ -1645,6 +1922,10 @@ void GXTStudio::saveFile()
                 success = editor.saveAsWHM(saveData.filePath.toStdString(), saveData.whmEntries);
             } else if (isDAT) {
                 success = editor.saveAsDAT(saveData.filePath.toStdString(), saveData.datEntries);
+            } else if (!saveData.originalHasTABL) {
+                // 无表文件 - 直接保存 noTablEntries
+                editor.setVersion(saveData.version);
+                success = editor.saveAsNoTable(saveData.filePath.toStdString(), saveData.noTablEntries);
             } else {
                 // GXT/GXT2 文件 - 使用批量添加提高性能
                 editor.setVersion(saveData.version);
@@ -1884,6 +2165,7 @@ void GXTStudio::saveAsFile()
         bool isWHM = currentTab->isWHM;
         bool isWHMRSC = currentTab->isWHMRSC;
         bool isDAT = currentTab->isDAT;
+        bool originalHasTABL = currentTab->originalHasTABL;
 
         // 使用状态栏进度条
         m_saveProgressBar->setFormat("正在另存为 %p%");
@@ -1893,7 +2175,7 @@ void GXTStudio::saveAsFile()
         showLogMessage("正在后台另存为: " + newFileName);
 
         // 在后台线程中执行
-        QFuture<SaveResult> future = QtConcurrent::run([this, newFilePath, newFileName, version, isWHM, isDAT, isWHMRSC]() -> SaveResult {
+        QFuture<SaveResult> future = QtConcurrent::run([this, newFilePath, newFileName, version, isWHM, isDAT, isWHMRSC, originalHasTABL]() -> SaveResult {
             SaveResult result;
             result.filePath = newFilePath;
             result.fileName = newFileName;
@@ -1903,7 +2185,7 @@ void GXTStudio::saveAsFile()
             
             QElapsedTimer timer;
             timer.start();
-            
+
             // 在主线程中获取数据副本
             AutoSaveData saveData;
             saveData.filePath = newFilePath;
@@ -1911,6 +2193,7 @@ void GXTStudio::saveAsFile()
             saveData.isWHM = isWHM;
             saveData.isWHMRSC = isWHMRSC;
             saveData.isDAT = isDAT;
+            saveData.originalHasTABL = originalHasTABL;
 
             QMetaObject::invokeMethod(this, [this, &saveData]() {
                 FileTab* tab = getCurrentTab();
@@ -1919,6 +2202,9 @@ void GXTStudio::saveAsFile()
                         saveData.whmEntries = tab->whmEntries;
                     } else if (saveData.isDAT) {
                         saveData.datEntries = tab->datEntries;
+                    } else if (!saveData.originalHasTABL && tab->tables.empty()) {
+                        // 无表文件
+                        saveData.noTablEntries = tab->noTablEntries;
                     } else {
                         saveData.tables = tab->tables;
                     }
@@ -1937,13 +2223,12 @@ void GXTStudio::saveAsFile()
                     success = editor.saveAsWHM(saveData.filePath.toStdString(), saveData.whmEntries);
                 } else if (isDAT) {
                     success = editor.saveAsDAT(saveData.filePath.toStdString(), saveData.datEntries);
-                } else {
-                    // GXT/GXT2 文件 - 使用批量添加提高性能
+                } else if (!saveData.tables.empty()) {
+                    // 有表文件 - 使用批量添加提高性能
                     editor.setVersion(saveData.version);
                     for (const auto& table : saveData.tables) {
                         if (!editor.addTable(table.name)) continue;
                         size_t tableIndex = editor.getTableCount() - 1;
-                        // 批量添加条目（跳过重复检查，O(n) 复杂度）
                         std::vector<std::pair<std::string, std::string>> entriesBatch;
                         entriesBatch.reserve(table.entries.size());
                         for (const auto& entry : table.entries) {
@@ -1952,6 +2237,17 @@ void GXTStudio::saveAsFile()
                         editor.addEntriesBatch(tableIndex, entriesBatch);
                     }
                     success = editor.saveToFile(saveData.filePath.toStdString());
+                } else if (!saveData.originalHasTABL) {
+                    // 无表文件 - 根据版本选择保存方法
+                    editor.setVersion(saveData.version);
+                    if (saveData.version == GXTVersion::GTA_IV) {
+                        success = editor.saveAsNoTableIV(saveData.filePath.toStdString(), saveData.noTablEntries);
+                    } else {
+                        success = editor.saveAsNoTable(saveData.filePath.toStdString(), saveData.noTablEntries);
+                    }
+                } else {
+                    // 空文件
+                    success = false;
                 }
             } catch (...) {
                 success = false;
@@ -2360,34 +2656,21 @@ bool GXTStudio::exportTabToFile(FileTab& tab, const QString& filePath)
             if (allFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
                 QTextStream allStream(&allFile);
                 allStream.setEncoding(QStringConverter::Utf8);
-                
+
+                // 检查是否为无表文件（tables为空但noTablEntries不为空）
+                bool isNoTableFile = tab.tables.empty() && !tab.noTablEntries.empty();
+
                 // 导出所有表到汇总文件
-                for (const auto& table : tab.tables) {
-                    if (tab.tables.size() > 1 || table.name != "MAIN") {
-                        allStream << QString("[%1]").arg(QString::fromStdString(table.name)) << Qt::endl;
-                    }
-                    
-                    for (const auto& entry : table.entries) {
+                if (isNoTableFile) {
+                    // 无表文件：直接导出noTablEntries
+                    for (const auto& entry : tab.noTablEntries) {
                         QString keyStr;
-                        // 优先使用原始键值
                         if (!entry.originalKey.empty()) {
                             keyStr = QString::fromStdString(entry.originalKey);
                         } else {
-                            // 尝试使用SATKEY/IVTKEY映射
                             QString entryKey = QString::fromStdString(entry.key);
                             bool foundInLst = false;
-                            
-                            if (tab.version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
-                                bool ok;
-                                uint32_t hash = entryKey.toUInt(&ok, 16);
-                                if (ok) {
-                                    QString lstKey;
-                                    if (GXTTableModel::findSATKey(hash, lstKey)) {
-                                        keyStr = lstKey;
-                                        foundInLst = true;
-                                    }
-                                }
-                            } else if (tab.version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                            if (tab.version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
                                 bool ok;
                                 uint32_t hash = entryKey.toUInt(&ok, 16);
                                 if (ok) {
@@ -2398,7 +2681,6 @@ bool GXTStudio::exportTabToFile(FileTab& tab, const QString& filePath)
                                     }
                                 }
                             }
-                            
                             if (!foundInLst) {
                                 keyStr = GXTStudio::formatKeyForDisplay(entryKey);
                             }
@@ -2406,25 +2688,13 @@ bool GXTStudio::exportTabToFile(FileTab& tab, const QString& filePath)
                         QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
                         allStream << line << Qt::endl;
                     }
-                    
-                    if (tab.tables.size() > 1 || table.name != "MAIN") {
-                        allStream << Qt::endl; // 表之间空行
-                    }
-                }
-                allFile.close();
-                
-                // 导出各个表到文件夹
-                for (const auto& table : tab.tables) {
-                    QString tableFile = folderPath + "/" + QString::fromStdString(table.name) + ".txt";
-                    QFile file(tableFile);
-                    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                        QTextStream stream(&file);
-                        stream.setEncoding(QStringConverter::Utf8);
-                        
+                } else {
+                    // 普通GXT文件：导出tables
+                    for (const auto& table : tab.tables) {
                         if (tab.tables.size() > 1 || table.name != "MAIN") {
-                            stream << QString("[%1]").arg(QString::fromStdString(table.name)) << Qt::endl;
+                            allStream << QString("[%1]").arg(QString::fromStdString(table.name)) << Qt::endl;
                         }
-                        
+
                         for (const auto& entry : table.entries) {
                             QString keyStr;
                             // 优先使用原始键值
@@ -2434,7 +2704,7 @@ bool GXTStudio::exportTabToFile(FileTab& tab, const QString& filePath)
                                 // 尝试使用SATKEY/IVTKEY映射
                                 QString entryKey = QString::fromStdString(entry.key);
                                 bool foundInLst = false;
-                                
+
                                 if (tab.version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
                                     bool ok;
                                     uint32_t hash = entryKey.toUInt(&ok, 16);
@@ -2456,7 +2726,49 @@ bool GXTStudio::exportTabToFile(FileTab& tab, const QString& filePath)
                                         }
                                     }
                                 }
-                                
+
+                                if (!foundInLst) {
+                                    keyStr = GXTStudio::formatKeyForDisplay(entryKey);
+                                }
+                            }
+                            QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
+                            allStream << line << Qt::endl;
+                        }
+
+                        if (tab.tables.size() > 1 || table.name != "MAIN") {
+                            allStream << Qt::endl; // 表之间空行
+                        }
+                    }
+                }
+                allFile.close();
+
+                // 导出各个表到文件夹
+                if (isNoTableFile) {
+                    // 无表文件：导出noTablEntries到单个文件夹
+                    QString tableFile = folderPath + "/NO_TABLE.txt";
+                    QFile file(tableFile);
+                    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                        QTextStream stream(&file);
+                        stream.setEncoding(QStringConverter::Utf8);
+
+                        for (const auto& entry : tab.noTablEntries) {
+                            QString keyStr;
+                            if (!entry.originalKey.empty()) {
+                                keyStr = QString::fromStdString(entry.originalKey);
+                            } else {
+                                QString entryKey = QString::fromStdString(entry.key);
+                                bool foundInLst = false;
+                                if (tab.version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                                    bool ok;
+                                    uint32_t hash = entryKey.toUInt(&ok, 16);
+                                    if (ok) {
+                                        QString lstKey;
+                                        if (GXTTableModel::findIVTKey(hash, lstKey)) {
+                                            keyStr = lstKey;
+                                            foundInLst = true;
+                                        }
+                                    }
+                                }
                                 if (!foundInLst) {
                                     keyStr = GXTStudio::formatKeyForDisplay(entryKey);
                                 }
@@ -2465,6 +2777,60 @@ bool GXTStudio::exportTabToFile(FileTab& tab, const QString& filePath)
                             stream << line << Qt::endl;
                         }
                         file.close();
+                    }
+                } else {
+                    for (const auto& table : tab.tables) {
+                        QString tableFile = folderPath + "/" + QString::fromStdString(table.name) + ".txt";
+                        QFile file(tableFile);
+                        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                            QTextStream stream(&file);
+                            stream.setEncoding(QStringConverter::Utf8);
+
+                            if (tab.tables.size() > 1 || table.name != "MAIN") {
+                                stream << QString("[%1]").arg(QString::fromStdString(table.name)) << Qt::endl;
+                            }
+
+                            for (const auto& entry : table.entries) {
+                                QString keyStr;
+                                // 优先使用原始键值
+                                if (!entry.originalKey.empty()) {
+                                    keyStr = QString::fromStdString(entry.originalKey);
+                                } else {
+                                    // 尝试使用SATKEY/IVTKEY映射
+                                    QString entryKey = QString::fromStdString(entry.key);
+                                    bool foundInLst = false;
+
+                                    if (tab.version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
+                                        bool ok;
+                                        uint32_t hash = entryKey.toUInt(&ok, 16);
+                                        if (ok) {
+                                            QString lstKey;
+                                            if (GXTTableModel::findSATKey(hash, lstKey)) {
+                                                keyStr = lstKey;
+                                                foundInLst = true;
+                                            }
+                                        }
+                                    } else if (tab.version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                                        bool ok;
+                                        uint32_t hash = entryKey.toUInt(&ok, 16);
+                                        if (ok) {
+                                            QString lstKey;
+                                            if (GXTTableModel::findIVTKey(hash, lstKey)) {
+                                                keyStr = lstKey;
+                                                foundInLst = true;
+                                            }
+                                        }
+                                    }
+
+                                    if (!foundInLst) {
+                                        keyStr = GXTStudio::formatKeyForDisplay(entryKey);
+                                    }
+                                }
+                                QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
+                                stream << line << Qt::endl;
+                            }
+                            file.close();
+                        }
                     }
                 }
                 showLogMessage("GXT文件已导出: " + filePath + " 及分文件夹");
@@ -2590,34 +2956,21 @@ void GXTStudio::exportCurrentFile()
             if (allFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
                 QTextStream allStream(&allFile);
                 allStream.setEncoding(QStringConverter::Utf8);
-                
+
+                // 检查是否为无表文件（tables为空但noTablEntries不为空）
+                bool isNoTableFile = currentTab->tables.empty() && !currentTab->noTablEntries.empty();
+
                 // 导出所有表到汇总文件
-                for (const auto& table : currentTab->tables) {
-                    if (currentTab->tables.size() > 1 || table.name != "MAIN") {
-                        allStream << QString("[%1]").arg(QString::fromStdString(table.name)) << Qt::endl;
-                    }
-                    
-                    for (const auto& entry : table.entries) {
+                if (isNoTableFile) {
+                    // 无表文件：直接导出noTablEntries
+                    for (const auto& entry : currentTab->noTablEntries) {
                         QString keyStr;
-                        // 优先使用原始键值
                         if (!entry.originalKey.empty()) {
                             keyStr = QString::fromStdString(entry.originalKey);
                         } else {
-                            // 尝试使用SATKEY/IVTKEY映射
                             QString entryKey = QString::fromStdString(entry.key);
                             bool foundInLst = false;
-                            
-                            if (currentTab->version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
-                                bool ok;
-                                uint32_t hash = entryKey.toUInt(&ok, 16);
-                                if (ok) {
-                                    QString lstKey;
-                                    if (GXTTableModel::findSATKey(hash, lstKey)) {
-                                        keyStr = lstKey;
-                                        foundInLst = true;
-                                    }
-                                }
-                            } else if (currentTab->version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                            if (currentTab->version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
                                 bool ok;
                                 uint32_t hash = entryKey.toUInt(&ok, 16);
                                 if (ok) {
@@ -2628,7 +2981,6 @@ void GXTStudio::exportCurrentFile()
                                     }
                                 }
                             }
-                            
                             if (!foundInLst) {
                                 keyStr = GXTStudio::formatKeyForDisplay(entryKey);
                             }
@@ -2636,25 +2988,13 @@ void GXTStudio::exportCurrentFile()
                         QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
                         allStream << line << Qt::endl;
                     }
-                    
-                    if (currentTab->tables.size() > 1 || table.name != "MAIN") {
-                        allStream << Qt::endl; // 表之间空行
-                    }
-                }
-                allFile.close();
-                
-                // 导出各个表到文件夹
-                for (const auto& table : currentTab->tables) {
-                    QString tableFile = folderPath + "/" + QString::fromStdString(table.name) + ".txt";
-                    QFile file(tableFile);
-                    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-                        QTextStream stream(&file);
-                        stream.setEncoding(QStringConverter::Utf8);
-                        
+                } else {
+                    // 普通GXT文件：导出tables
+                    for (const auto& table : currentTab->tables) {
                         if (currentTab->tables.size() > 1 || table.name != "MAIN") {
-                            stream << QString("[%1]").arg(QString::fromStdString(table.name)) << Qt::endl;
+                            allStream << QString("[%1]").arg(QString::fromStdString(table.name)) << Qt::endl;
                         }
-                        
+
                         for (const auto& entry : table.entries) {
                             QString keyStr;
                             // 优先使用原始键值
@@ -2664,7 +3004,7 @@ void GXTStudio::exportCurrentFile()
                                 // 尝试使用SATKEY/IVTKEY映射
                                 QString entryKey = QString::fromStdString(entry.key);
                                 bool foundInLst = false;
-                                
+
                                 if (currentTab->version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
                                     bool ok;
                                     uint32_t hash = entryKey.toUInt(&ok, 16);
@@ -2686,7 +3026,49 @@ void GXTStudio::exportCurrentFile()
                                         }
                                     }
                                 }
-                                
+
+                                if (!foundInLst) {
+                                    keyStr = GXTStudio::formatKeyForDisplay(entryKey);
+                                }
+                            }
+                            QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
+                            allStream << line << Qt::endl;
+                        }
+
+                        if (currentTab->tables.size() > 1 || table.name != "MAIN") {
+                            allStream << Qt::endl; // 表之间空行
+                        }
+                    }
+                }
+                allFile.close();
+
+                // 导出各个表到文件夹
+                if (isNoTableFile) {
+                    // 无表文件：导出noTablEntries到单个文件夹
+                    QString tableFile = folderPath + "/NO_TABLE.txt";
+                    QFile file(tableFile);
+                    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                        QTextStream stream(&file);
+                        stream.setEncoding(QStringConverter::Utf8);
+
+                        for (const auto& entry : currentTab->noTablEntries) {
+                            QString keyStr;
+                            if (!entry.originalKey.empty()) {
+                                keyStr = QString::fromStdString(entry.originalKey);
+                            } else {
+                                QString entryKey = QString::fromStdString(entry.key);
+                                bool foundInLst = false;
+                                if (currentTab->version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                                    bool ok;
+                                    uint32_t hash = entryKey.toUInt(&ok, 16);
+                                    if (ok) {
+                                        QString lstKey;
+                                        if (GXTTableModel::findIVTKey(hash, lstKey)) {
+                                            keyStr = lstKey;
+                                            foundInLst = true;
+                                        }
+                                    }
+                                }
                                 if (!foundInLst) {
                                     keyStr = GXTStudio::formatKeyForDisplay(entryKey);
                                 }
@@ -2695,6 +3077,60 @@ void GXTStudio::exportCurrentFile()
                             stream << line << Qt::endl;
                         }
                         file.close();
+                    }
+                } else {
+                    for (const auto& table : currentTab->tables) {
+                        QString tableFile = folderPath + "/" + QString::fromStdString(table.name) + ".txt";
+                        QFile file(tableFile);
+                        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                            QTextStream stream(&file);
+                            stream.setEncoding(QStringConverter::Utf8);
+
+                            if (currentTab->tables.size() > 1 || table.name != "MAIN") {
+                                stream << QString("[%1]").arg(QString::fromStdString(table.name)) << Qt::endl;
+                            }
+
+                            for (const auto& entry : table.entries) {
+                                QString keyStr;
+                                // 优先使用原始键值
+                                if (!entry.originalKey.empty()) {
+                                    keyStr = QString::fromStdString(entry.originalKey);
+                                } else {
+                                    // 尝试使用SATKEY/IVTKEY映射
+                                    QString entryKey = QString::fromStdString(entry.key);
+                                    bool foundInLst = false;
+
+                                    if (currentTab->version == GXTVersion::GTA_SA && !GXTTableModel::isSATKeyMapEmpty()) {
+                                        bool ok;
+                                        uint32_t hash = entryKey.toUInt(&ok, 16);
+                                        if (ok) {
+                                            QString lstKey;
+                                            if (GXTTableModel::findSATKey(hash, lstKey)) {
+                                                keyStr = lstKey;
+                                                foundInLst = true;
+                                            }
+                                        }
+                                    } else if (currentTab->version == GXTVersion::GTA_IV && !GXTTableModel::isIVTKeyMapEmpty()) {
+                                        bool ok;
+                                        uint32_t hash = entryKey.toUInt(&ok, 16);
+                                        if (ok) {
+                                            QString lstKey;
+                                            if (GXTTableModel::findIVTKey(hash, lstKey)) {
+                                                keyStr = lstKey;
+                                                foundInLst = true;
+                                            }
+                                        }
+                                    }
+
+                                    if (!foundInLst) {
+                                        keyStr = GXTStudio::formatKeyForDisplay(entryKey);
+                                    }
+                                }
+                                QString line = QString("%1=%2").arg(keyStr, QString::fromStdString(entry.value));
+                                stream << line << Qt::endl;
+                            }
+                            file.close();
+                        }
                     }
                 }
             }
@@ -3166,7 +3602,7 @@ void GXTStudio::toggleReadOnly(bool readOnly)
             tab.entryTableModel->setEditable(!m_isReadOnly);
         }
         if (tab.addTableButton) {
-            tab.addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM && !tab.isDAT);
+            tab.addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM && !tab.isDAT && tab.version != GXTVersion::GTA_III);
         }
         if (tab.addEntryButton) {
             tab.addEntryButton->setEnabled(!m_isReadOnly);
@@ -3591,21 +4027,6 @@ void GXTStudio::replaceEntry(FileTab* tab, int tableIndex, int entryIndex, const
     }
 }
 
-// 视图操作槽函数
-void GXTStudio::increaseFont()
-{
-    m_fontSize = qMin(m_fontSize + 1, 16);  // 使用更小的步长和合理的最大值
-    updateFontSizes();
-    showLogMessage(QString("字体大小: %1").arg(m_fontSize));
-}
-
-void GXTStudio::decreaseFont()
-{
-    m_fontSize = qMax(m_fontSize - 1, 8);   // 使用更小的步长和合理的最小值
-    updateFontSizes();
-    showLogMessage(QString("字体大小: %1").arg(m_fontSize));
-}
-
 // 帮助槽函数
 void GXTStudio::showAbout()
 {
@@ -3860,102 +4281,76 @@ void GXTStudio::switchToTable(int newTableIndex)
     if (!tab) {
         return;
     }
-    
+
     if (tab->isWHM || tab->isCharTable) {
         return;
     }
-    
-    if (newTableIndex < 0 || newTableIndex >= static_cast<int>(tab->tables.size())) {
+
+    // 无表文件使用不同的检查
+    bool isNoTablFile = (!tab->originalHasTABL && tab->tables.empty());
+    if (!isNoTablFile && (newTableIndex < 0 || newTableIndex >= static_cast<int>(tab->tables.size()))) {
         return;
     }
-    
-    // 【关键修复】立即更新当前表格索引
+
+    // 如果是同一张表且模型已正确设置，直接返回避免不必要的刷新
+    if (tab->currentTableIndex == newTableIndex && tab->entryTableModel && tab->entryTableModel->cacheValid()) {
+        return;
+    }
+
+    // 立即更新当前表格索引
     tab->currentTableIndex = newTableIndex;
-    
-    // 【关键修复】立即重新设置模型，确保模型指向正确的表格索引
-    if (tab->entryTableModel) {
-        tab->entryTableModel->setTab(tab);
-    }
-    
-    // 不检查是否已切换到相同表格，总是更新模型以确保数据正确显示
-    if (tab->entryTableView) {
-        // 禁用重绘以减少闪烁
-        tab->entryTableView->setUpdatesEnabled(false);
-        
-        // 清除委托缓存
-        if (auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab->entryTableView->itemDelegate())) {
-            delegate->clearCache();
-        }
-        
-        // 【关键修复】确保模型正确
-        if (tab->entryTableView->model() != tab->entryTableModel) {
-            tab->entryTableView->setModel(tab->entryTableModel);
-        }
-        
-        // 清除视口
-        tab->entryTableView->viewport()->update();
-    }
-    
-    // 同步更新侧边栏选择
+
+    // 清除模型缓存但不触发完整的resetModel
+     if (tab->entryTableModel) {
+         tab->entryTableModel->clearAllCache();
+     }
+
+    // 同步更新侧边栏选择（阻塞信号防止递归）
     if (tab->tableList) {
-        // 阻塞信号防止递归调用
         const bool wasBlocked = tab->tableList->blockSignals(true);
         tab->tableList->setCurrentRow(newTableIndex);
         tab->tableList->blockSignals(wasBlocked);
     }
 
-    // 【性能优化】减少延迟从50ms到10ms，加快响应速度
-    // 【关键修复】捕获索引而不是指针，避免标签页移动后指针失效
-    int currentTabIndex = m_currentTabIndex;
-    QTimer::singleShot(10, this, [this, currentTabIndex, newTableIndex]() {
-        // 【关键修复】每次都通过索引重新获取指针，避免指针失效
-        FileTab* tab = (currentTabIndex >= 0 && currentTabIndex < static_cast<int>(m_fileTabs.size()))
-                         ? &m_fileTabs[currentTabIndex] : nullptr;
+    // 更新视图 - 使用高效的更新方式
+    if (tab->entryTableView) {
+        // 禁用更新避免重复绘制
+        tab->entryTableView->setUpdatesEnabled(false);
 
-        // 验证标签页和索引仍然有效
-        if (!tab || currentTabIndex != m_currentTabIndex) return;
-        if (newTableIndex < 0 || newTableIndex >= static_cast<int>(tab->tables.size())) return;
-
-        try {
-            if (tab->entryTableModel) {
-                // 【关键修复】强制重置模型以清除所有缓存
-                tab->entryTableModel->forceDataReset();
-
-                // 重新启用表格视图更新
-                if (tab->entryTableView) {
-                    tab->entryTableView->setUpdatesEnabled(true);
-
-                    // 【关键修复】确保模型正确
-                    if (tab->entryTableView->model() != tab->entryTableModel) {
-                        tab->entryTableView->setModel(tab->entryTableModel);
-                    }
-
-                    tab->entryTableView->viewport()->update();
-                    tab->entryTableView->update();
-
-                    // 【关键修复】强制立即重绘，确保内容立即显示
-                    tab->entryTableView->viewport()->repaint();
-                    tab->entryTableView->repaint();
-
-                    // 【性能优化】立即处理事件，确保UI立即更新显示
-                    QCoreApplication::processEvents();
-                }
-
-                updateStatusBar();
-
-                // 记录切换日志
-                QString newTableName = QString::fromStdString(tab->tables[newTableIndex].name);
-                showLogMessage("切换到表格: " + newTableName + " (条目数: " +
-                               QString::number(tab->tables[newTableIndex].entries.size()) + ")");
-            }
-        } catch (...) {
-            qWarning() << "Exception occurred during table switching";
-            // 确保视图更新被重新启用
-            if (tab && tab->entryTableView) {
-                tab->entryTableView->setUpdatesEnabled(true);
-            }
+        // 清除委托缓存
+        if (auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab->entryTableView->itemDelegate())) {
+            delegate->clearCache();
         }
-    });
+
+        // 重置视图位置到顶部，避免显示错误的数据
+        if (tab->entryTableView->verticalScrollBar()) {
+            tab->entryTableView->verticalScrollBar()->setValue(0);
+        }
+        if (tab->entryTableView->horizontalScrollBar()) {
+            tab->entryTableView->horizontalScrollBar()->setValue(0);
+        }
+
+        // 使用模型的resetModel方法重置数据
+        tab->entryTableModel->resetModel();
+
+        // 重新启用更新并立即刷新
+        tab->entryTableView->setUpdatesEnabled(true);
+    }
+
+    // 更新状态栏
+    updateStatusBar();
+
+    // 记录切换日志（仅在真正切换时）
+    QString tableName;
+    int entryCount = 0;
+    if (isNoTablFile) {
+        tableName = "无表文件";
+        entryCount = tab->noTablEntries.size();
+    } else {
+        tableName = QString::fromStdString(tab->tables[newTableIndex].name);
+        entryCount = tab->tables[newTableIndex].entries.size();
+    }
+    showLogMessage("切换到表格: " + tableName + " (条目数: " + QString::number(entryCount) + ")");
 }
 
 // 处理添加表格的请求
@@ -3963,6 +4358,12 @@ void GXTStudio::onAddTableClicked(const QModelIndex& index)
 {
     FileTab* currentTab = getCurrentTab();
     if (!currentTab || currentTab->isWHM || currentTab->isDAT || currentTab->isCharTable) return;
+    
+    // GTA SA 表格数量限制：最多200个
+    if (currentTab->version == GXTVersion::GTA_SA && currentTab->tables.size() >= 200) {
+        QMessageBox::warning(this, "错误", "GTA SA 最多只能有200个表格（TABL）！");
+        return;
+    }
     
     // 获取当前表名并建议一个新表名
     QString baseName = "新表";
@@ -5595,7 +5996,11 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
         return;
     }
 
-    if (currentTab->currentTableIndex < 0 || currentTab->currentTableIndex >= static_cast<int>(currentTab->tables.size())) {
+    // 检查是否为无表文件（如GTA III）
+    bool isNoTableFile = (!currentTab->originalHasTABL && currentTab->tables.empty());
+
+    // 无表文件不需要选择表格，普通GXT文件才需要
+    if (!isNoTableFile && (currentTab->currentTableIndex < 0 || currentTab->currentTableIndex >= static_cast<int>(currentTab->tables.size()))) {
         QMessageBox::warning(this, "错误", "请先选择一个表格");
         return;
     }
@@ -5609,18 +6014,32 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
         return;
     }
 
-    qInfo() << "开始添加条目，输入键: " << keyText << ", 值: " << valueText;
+    // GTA III/VC 键名格式验证：只能包含 [0-9A-Z_]，长度1-7
+    if (currentTab->version == GXTVersion::GTA_III || currentTab->version == GXTVersion::GTA_VC) {
+        // 检查长度
+        if (keyText.length() > 7) {
+            QMessageBox::warning(this, "输入错误", "GTA III/VC 的键名长度不能超过7个字符！\n有效格式：[0-9A-Z_]{1,7}");
+            keyEdit->setFocus();
+            return;
+        }
+        // 检查字符范围
+        QRegularExpression validKeyRegex("^[0-9A-Z_]+$");
+        if (!validKeyRegex.match(keyText).hasMatch()) {
+            QMessageBox::warning(this, "输入错误", "GTA III/VC 的键名只能包含大写字母(A-Z)、数字(0-9)和下划线(_)！\n有效格式：[0-9A-Z_]{1,7}");
+            keyEdit->setFocus();
+            return;
+        }
+    }
 
-    // 检查键是否已存在
-    GXTTabl& currentTable = currentTab->tables[currentTab->currentTableIndex];
+    qInfo() << "开始添加条目，输入键: " << keyText << ", 值: " << valueText;
 
     // 标准化输入的键用于比较
     std::string normalizedInputKey = normalizeKeyStdString(keyText.toStdString());
     qInfo() << "标准化后的键: " << QString::fromStdString(normalizedInputKey);
-    
+
     // 判断输入的是hash还是原始字符串（只检查是否有0x前缀）
     bool isHashFormat = keyText.startsWith("0x", Qt::CaseInsensitive);
-    
+
     // 如果输入的不是hash格式，需要计算hash进行比较
     std::string compareKey = normalizedInputKey;
     if (!isHashFormat) {
@@ -5629,13 +6048,13 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
             uint32_t inputHash;
             // 尝试在IVTKEY映射中反向查找（GTA IV）
             if (currentTab->version == GXTVersion::GTA_IV && GXTTableModel::findIVTHash(keyText, inputHash)) {
-                compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
-                qInfo() << "从IVTKEY映射中找到: " << keyText << " -> 0x" << QString::number(inputHash, 16);
+                compareKey = ("0x" + QString("%1").arg(inputHash, 8, 16, QChar('0')).toUpper()).toStdString();
+                qInfo() << "从IVTKEY映射中找到: " << keyText << " -> " << QString::fromStdString(compareKey);
             }
             // 尝试在SATKEY映射中反向查找（GTA SA）
             else if (currentTab->version == GXTVersion::GTA_SA && GXTTableModel::findSATHash(keyText, inputHash)) {
-                compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
-                qInfo() << "从SATKEY映射中找到: " << keyText << " -> 0x" << QString::number(inputHash, 16);
+                compareKey = ("0x" + QString("%1").arg(inputHash, 8, 16, QChar('0')).toUpper()).toStdString();
+                qInfo() << "从SATKEY映射中找到: " << keyText << " -> " << QString::fromStdString(compareKey);
             }
             // 否则计算对应的哈希值
             else {
@@ -5653,21 +6072,12 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
                     inputHash = CKeyGen::GetUppercaseKey(upperKey.c_str());
                     qWarning() << "计算SA hash: " << keyText << " (大写: " << QString::fromStdString(upperKey) << ") -> 0x" << QString::number(inputHash, 16);
                 }
-                compareKey = QString("%1").arg(inputHash, 8, 16, QChar('0')).toStdString();
+                compareKey = ("0x" + QString("%1").arg(inputHash, 8, 16, QChar('0')).toUpper()).toStdString();
                 qWarning() << "最终使用compareKey: " << QString::fromStdString(compareKey);
             }
         } else {
             // GTA_III、GTA_VC、GXT2等版本使用明文
             compareKey = normalizedInputKey;
-        }
-    }
-    
-    for (const auto& entry : currentTable.entries) {
-        if (QString::fromStdString(entry.key).toLower() == QString::fromStdString(compareKey).toLower()) {
-            QMessageBox::warning(this, "输入错误", QString("键 '%1' 已存在，请使用不同的键！").arg(keyText));
-            keyEdit->selectAll();
-            keyEdit->setFocus();
-            return;
         }
     }
 
@@ -5676,7 +6086,31 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
     newEntry.key = compareKey;  // 使用计算/查找后的hash值（用于保存）
     newEntry.value = valueText.toStdString();
     newEntry.originalKey = keyText.toStdString();  // 保存原始输入（用于显示）
-    currentTable.entries.push_back(newEntry);
+
+    if (isNoTableFile) {
+        // 无表文件：检查键是否已存在
+        for (const auto& entry : currentTab->noTablEntries) {
+            if (QString::fromStdString(entry.key).toLower() == QString::fromStdString(compareKey).toLower()) {
+                QMessageBox::warning(this, "输入错误", QString("键 '%1' 已存在，请使用不同的键！").arg(keyText));
+                keyEdit->selectAll();
+                keyEdit->setFocus();
+                return;
+            }
+        }
+        currentTab->noTablEntries.push_back(newEntry);
+    } else {
+        // 普通GXT文件：检查键是否已存在
+        GXTTabl& currentTable = currentTab->tables[currentTab->currentTableIndex];
+        for (const auto& entry : currentTable.entries) {
+            if (QString::fromStdString(entry.key).toLower() == QString::fromStdString(compareKey).toLower()) {
+                QMessageBox::warning(this, "输入错误", QString("键 '%1' 已存在，请使用不同的键！").arg(keyText));
+                keyEdit->selectAll();
+                keyEdit->setFocus();
+                return;
+            }
+        }
+        currentTable.entries.push_back(newEntry);
+    }
 
     // 更新UI
     currentTab->isModified = true;
@@ -5698,7 +6132,12 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
 
     // 滚动到新添加的条目
     if (currentTab->entryTableView) {
-        int newRow = static_cast<int>(currentTable.entries.size()) - 1;
+        int newRow;
+        if (isNoTableFile) {
+            newRow = static_cast<int>(currentTab->noTablEntries.size()) - 1;
+        } else {
+            newRow = static_cast<int>(currentTab->tables[currentTab->currentTableIndex].entries.size()) - 1;
+        }
         currentTab->entryTableView->scrollToBottom();
         QModelIndex newIndex = currentTab->entryTableModel->index(newRow, 0);
         currentTab->entryTableView->selectRow(newRow);
@@ -6834,7 +7273,7 @@ void GXTStudio::updateTableList()
         
         // 启用添加表按钮（允许用户添加表）
         if (tab->addTableButton) {
-            tab->addTableButton->setEnabled(!m_isReadOnly);
+            tab->addTableButton->setEnabled(!m_isReadOnly && tab->version != GXTVersion::GTA_III);
         }
         
         // 重置currentTableIndex
@@ -6928,9 +7367,9 @@ void GXTStudio::updateTableList()
         }
         
         // 根据文件类型禁用/启用"添加表"按钮
-        // DAT和WHM文件不允许添加表
+        // DAT和WHM文件不允许添加表，GTA III版本也不允许添加表
         if (tab->addTableButton) {
-            tab->addTableButton->setEnabled(!tab->isWHM && !tab->isDAT);
+            tab->addTableButton->setEnabled(!tab->isWHM && !tab->isDAT && tab->version != GXTVersion::GTA_III);
         }
     }
     
@@ -7143,10 +7582,10 @@ void GXTStudio::updateActions()
     m_replaceAction->setEnabled(hasFile && !m_isReadOnly);
     
     // 【修复】更新添加新表按钮状态（确保在只读模式下按钮是禁用的）
-    // CharTable文件不需要添加表功能，普通DAT和WHM文件也不支持
+    // CharTable文件不需要添加表功能，普通DAT和WHM文件也不支持，GTA III版本也不支持
     if (currentTab && currentTab->addTableButton) {
-        // 只有GXT文件（非WHM、非DAT、非CharTable）才支持添加表功能
-        bool canAddTable = !m_isReadOnly && !currentTab->isWHM && !currentTab->isDAT && !currentTab->isCharTable;
+        // 只有GXT文件（非WHM、非DAT、非CharTable、非GTA III）才支持添加表功能
+        bool canAddTable = !m_isReadOnly && !currentTab->isWHM && !currentTab->isDAT && !currentTab->isCharTable && currentTab->version != GXTVersion::GTA_III;
         currentTab->addTableButton->setEnabled(canAddTable);
     }
     
@@ -7548,41 +7987,6 @@ std::string GXTStudio::getVersionName(GXTVersion version)
     }
 }
 
-void GXTStudio::updateFontSizes()
-{
-    // 创建表格专用字体
-    QFont tableFont;
-    tableFont.setFamily("Microsoft YaHei");
-    tableFont.setPointSize(m_fontSize);
-    tableFont.setHintingPreference(QFont::PreferFullHinting);
-    tableFont.setStyleStrategy(QFont::PreferAntialias);
-    
-    // 创建左表专用字体（稍小一些，保持比例协调）
-    QFont leftTableFont = tableFont;
-    leftTableFont.setPointSize(qMax(m_fontSize - 1, 8));  // 左表字体稍小但可调节
-    
-    // 只更新表格相关的字体，不影响其他UI元素
-    for (auto& tab : m_fileTabs) {
-        if (tab.entryTableView) {
-            // 右侧主表格使用标准字体
-            tab.entryTableView->setFont(tableFont);
-            tab.entryTableView->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);  // 增加行高适应更大字体
-            tab.cache.layoutNeedsUpdate = true;
-            
-            // 【性能优化】字体大小变化时清理委托缓存
-            auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab.entryTableView->itemDelegate());
-            if (delegate) {
-                delegate->clearCache();
-            }
-        }
-        
-        if (tab.tableList) {
-            // 左侧表列表使用稍小的字体
-            tab.tableList->setFont(leftTableFont);
-        }
-    }
-}
-
 // 工具方法
 FileTab* GXTStudio::getCurrentTab()
 {
@@ -7782,7 +8186,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     addTableButton->setFixedSize(40, 40);  // 设置固定大小为40x40，与右侧文本渲染控件40px高度对齐
     addTableButton->setCursor(Qt::PointingHandCursor);
     addTableButton->setToolTip("创建新的表格");
-    addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM && !tab.isDAT);
+    addTableButton->setEnabled(!m_isReadOnly && !tab.isWHM && !tab.isDAT && tab.version != GXTVersion::GTA_III);
     
     // 保存按钮指针到tab结构中
     tab.addTableButton = addTableButton;
@@ -11409,11 +11813,13 @@ void GXTStudio::onTranslationCancelled()
             showLogMessage("翻译已取消，未保存已完成结果");
         }
     } else {
-        try {
-            QMessageBox::information(this, "翻译取消", "翻译已被用户取消。\n\n没有已完成的翻译结果可保存。");
-            showLogMessage("翻译已取消");
-        } catch (...) {
-            qWarning() << "显示取消对话框时发生异常";
+        if (!QCoreApplication::closingDown()) {
+            try {
+                QMessageBox::information(this, "翻译取消", "翻译已被用户取消。\n\n没有已完成的翻译结果可保存。");
+                showLogMessage("翻译已取消");
+            } catch (...) {
+                qWarning() << "显示取消对话框时发生异常";
+            }
         }
     }
 

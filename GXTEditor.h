@@ -102,6 +102,8 @@ public:
     bool saveAsGTA_VC(const std::string& path);
     bool saveAsGTA_SA(const std::string& path);
     bool saveAsGTA_IV(const std::string& path);
+    bool saveAsNoTable(const std::string& path, const std::vector<GXTEntry>& entries);  // GTA III 无表
+    bool saveAsNoTableIV(const std::string& path, const std::vector<GXTEntry>& entries); // GTA IV 无表
 
 private:
     // 辅助计算方法
