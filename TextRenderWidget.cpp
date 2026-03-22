@@ -321,9 +321,9 @@ void TextRenderWidget::loadViceCityFont()
         mainFontPath = QApplication::applicationDirPath() + "/font/alte-din-1451-mittelschrift.regular.ttf";
         fallbackFontPath.clear(); // 使用系统微软雅黑粗体
     } else if (m_gtaVersion == 2) {
-        // GTA SA 使用 FuturaLT-Bold.ttf 和微软简综艺.ttf
+        // GTA SA 使用 FuturaLT-Bold.ttf 和方正综艺简体.ttf
         mainFontPath = QApplication::applicationDirPath() + "/font/FuturaLT-Bold.ttf";
-        fallbackFontPath = QApplication::applicationDirPath() + "/font/微软简综艺.ttf";
+        fallbackFontPath = QApplication::applicationDirPath() + "/font/方正综艺简体.ttf";
     } else {
         // 其他版本使用 ViceCitySans.otf
         mainFontPath = QApplication::applicationDirPath() + "/font/ViceCitySans.otf";
@@ -350,77 +350,14 @@ void TextRenderWidget::loadViceCityFont()
 
     // 加载备用字体
     if (!fallbackFontPath.isEmpty()) {
-
-        // 使用QFontDatabase加载字体
         int fallbackFontId = db.addApplicationFont(fallbackFontPath);
-
         if (fallbackFontId != -1) {
             QStringList families = db.applicationFontFamilies(fallbackFontId);
-
-            // 尝试多个可能的字体族名称
-            QStringList possibleNames = {
-                "微软简综艺",
-                "DFZongYi",
-                "DFZongYi-Bd-80-Win-GB",
-                "DFZongYi Bd",
-                "DFZongYi-Bd",
-                "ZongYi",
-                "DF ZongYi"
-            };
-
-            bool fontMatched = false;
-            QString usedFamily;
-
-            // 优先使用QFontDatabase返回的字体族
-            if (!families.isEmpty() && !families.first().isEmpty()) {
-                usedFamily = families.first();
-                m_fallbackFont = QFont(usedFamily, m_fontSize);
-                QFontInfo info(m_fallbackFont);
-
-                // 检查是否真正使用了该字体
-                if (info.family() != "MS Sans Serif" && info.family() != "Arial") {
-                    fontMatched = true;
-                }
+            if (!families.isEmpty()) {
+                m_fallbackFont = QFont(families.first(), m_fontSize);
             }
-
-            // 如果失败，尝试其他可能的名称
-            if (!fontMatched) {
-
-                // 获取系统所有字体族
-                QStringList systemFamilies = db.families();
-
-                for (const QString& testName : possibleNames) {
-
-                    // 检查系统中是否存在这个字体
-                    bool foundInSystem = false;
-                    for (const QString& sysFamily : systemFamilies) {
-                        if (sysFamily.compare(testName, Qt::CaseInsensitive) == 0) {
-                            foundInSystem = true;
-                            usedFamily = sysFamily;
-                            break;
-                        }
-                    }
-
-                    if (foundInSystem) {
-                        m_fallbackFont = QFont(usedFamily, m_fontSize);
-                        QFontInfo info(m_fallbackFont);
-
-                        if (info.family() != "MS Sans Serif" && info.family() != "Arial") {
-                            fontMatched = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // 如果所有方法都失败，回退到系统字体
-            if (!fontMatched) {
-                loadSystemFallbackFont(db);
-            } else {
-                // 验证最终字体
-                QFontInfo fontInfo(m_fallbackFont);
-            }
-        } else {
+        }
+        if (m_fallbackFont.family().isEmpty()) {
             loadSystemFallbackFont(db);
         }
     } else {
