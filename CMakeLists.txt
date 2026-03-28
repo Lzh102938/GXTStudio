@@ -6,8 +6,10 @@ include(qt.cmake)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 设置 x64 架构
-set(CMAKE_GENERATOR_PLATFORM x64)
+# 设置 x64 架构（仅对 Visual Studio 生成器有效）
+if(CMAKE_GENERATOR MATCHES "Visual Studio")
+    set(CMAKE_GENERATOR_PLATFORM x64)
+endif()
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core)
 find_package(Qt${QT_VERSION_MAJOR}
