@@ -1,4 +1,5 @@
 #include "AboutDialog.h"
+#include "VersionInfo.h"
 #include <QStyle>
 #include <QPainter>
 #include <QEvent>
@@ -262,7 +263,7 @@ void AboutDialog::createHeaderSection()
         "color: #2c3e50; "
         "}");
 
-    QLabel* versionLabel = new QLabel("版本 3.0.0", headerFrame);
+    QLabel* versionLabel = new QLabel("版本 " + VersionInfo::currentVersion, headerFrame);
     versionLabel->setStyleSheet(
         "QLabel { "
         "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; "
@@ -554,11 +555,9 @@ void AboutDialog::createChangelogSection()
     titleLayout->addStretch();
     changelogLayout->addLayout(titleLayout);
 
-    static const struct { const char* version; const char* date; const char* changes; } s_versions[] = {
-        { "v3.0.0", "2026-03-??", "• 首次发布\n• 支持GXT/GXT2文件编辑\n• 支持WHM/CHACHAR格式\n• 智能翻译功能" }
-    };
+    QVector<VersionInfo::VersionEntry> versions = VersionInfo::getVersionHistory();
 
-    for (const auto& v : s_versions) {
+    for (const auto& v : versions) {
         VersionCard* card = new VersionCard(v.version, v.date, v.changes, changelogFrame);
         changelogLayout->addWidget(card);
     }
@@ -788,29 +787,29 @@ void AboutDialog::onCheckUpdateReply(QNetworkReply* reply)
     }
     
     if (isNewerVersion(latestVersion)) {
-        QString message = QString("发现新版本：%1\n\n%2\n\n是否前往下载？")
-            .arg(latestVersion)
-            .arg(releaseName);
-        
-        QMessageBox msgBox(this);
-        msgBox.setWindowTitle("发现新版本");
-        msgBox.setText(message);
-        msgBox.setInformativeText(releaseNotes.left(200) + (releaseNotes.length() > 200 ? "..." : ""));
-        msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-        msgBox.setDefaultButton(QMessageBox::Yes);
-        msgBox.setIcon(QMessageBox::Information);
-        
-        if (msgBox.exec() == QMessageBox::Yes) {
-            QDesktopServices::openUrl(QUrl(releaseUrl));
+            QString message = QString("发现新版本：%1\n\n%2\n\n是否前往下载？")
+                .arg(latestVersion)
+                .arg(releaseName);
+            
+            QMessageBox msgBox(this);
+            msgBox.setWindowTitle("发现新版本");
+            msgBox.setText(message);
+            msgBox.setInformativeText(releaseNotes.left(200) + (releaseNotes.length() > 200 ? "..." : ""));
+            msgBox.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+            msgBox.setDefaultButton(QMessageBox::Yes);
+            msgBox.setIcon(QMessageBox::Information);
+            
+            if (msgBox.exec() == QMessageBox::Yes) {
+                QDesktopServices::openUrl(QUrl(releaseUrl));
+            }
+        } else {
+            QMessageBox::information(this, "检查更新", QString("当前已是最新版本！\n\n当前版本：v%1\n最新版本：%2").arg(VersionInfo::currentVersion, latestVersion));
         }
-    } else {
-        QMessageBox::information(this, "检查更新", QString("当前已是最新版本！\n\n当前版本：v3.0.0\n最新版本：%1").arg(latestVersion));
-    }
 }
 
 bool AboutDialog::isNewerVersion(const QString& remoteVersion) const
 {
-    QString localVer = "3.0.0";
+    QString localVer = VersionInfo::currentVersion;
     QString remoteVer = remoteVersion;
     
     if (remoteVer.startsWith('v') || remoteVer.startsWith('V')) {

@@ -80,6 +80,8 @@ set(PROJECT_SOURCES
     GXTStudio.h
     GXTStudio.cpp
     FontAwesome.h
+    VersionInfo.h
+    VersionInfo.cpp
     WelcomeWidget.h
     WelcomeWidget.cpp
     MultiThreadProgressDialog.h
