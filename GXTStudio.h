@@ -18,11 +18,14 @@
 #include <QRegularExpression>
 #include <QShortcut>
 #include <functional>
-#include <QtCore/QCache>  // 必须在 TextColorCalculator 类定义之前包含
+#include <QtCore/QCache>
 
-// ============================================================================
-// 优化的文本颜色计算器 - 多级缓存大幅提升性能
-// ============================================================================
+namespace TextColor {
+    constexpr const char* DEFAULT_COLOR = "#495057";
+    constexpr const char* DARK_TEXT_COLOR = "#495057";
+    constexpr const char* LIGHT_TEXT_COLOR = "#ffffff";
+}
+
 class TextColorCalculator {
 public:
     // 更新背景图片缓存（在背景图片变化时调用）
@@ -41,75 +44,59 @@ public:
     void setEnabled(bool enabled) { m_enabled = enabled; }
     bool isEnabled() const { return m_enabled; }
 
-    // 计算指定位置的文字颜色（窗口坐标）
-    // targetRect: 背景图片绘制的目标区域（通常是centralWidget的几何区域）
     QColor calculateColor(const QPoint& pos, const QRect& targetRect) {
         if (!m_enabled || m_backgroundImage.isNull()) {
             return m_defaultColor;
         }
 
-        // 【新增】快速路径：检查精确位置缓存
         qint64 cacheKey = (static_cast<qint64>(pos.x()) << 32) | static_cast<qint64>(pos.y());
         if (auto* cachedColor = m_colorCache.object(cacheKey)) {
             return *cachedColor;
         }
 
-        // 【新增】中速路径：检查网格缓存（避免逐像素计算）
         int gridX = pos.x() / GRID_SIZE;
         int gridY = pos.y() / GRID_SIZE;
         qint64 gridKey = (static_cast<qint64>(gridX) << 32) | static_cast<qint64>(gridY);
 
         QColor* gridColor = m_gridCache.object(gridKey);
         if (gridColor && targetRect.size() == m_cachedTargetSize) {
-            // 存入精确缓存
             QColor* cachedColor = new QColor(*gridColor);
             m_colorCache.insert(cacheKey, cachedColor);
             return *gridColor;
         }
 
-        // 慢速路径：完整计算
         QColor result = calculateColorInternal(pos, targetRect);
 
-        // 存入精确缓存（最近1000个位置）
         QColor* cachedColor = new QColor(result);
         m_colorCache.insert(cacheKey, cachedColor);
 
-        // 存入网格缓存（500个网格）
         QColor* newGridColor = new QColor(result);
         m_gridCache.insert(gridKey, newGridColor);
 
         return result;
     }
 
-    // 批量计算多个位置的颜色（返回平均颜色以保持一致性）
     QColor calculateColorForRegion(const QRect& region, const QRect& targetRect) {
         if (!m_enabled || m_backgroundImage.isNull()) {
             return m_defaultColor;
         }
-
-        // 简单优化：使用区域中心点
         return calculateColor(region.center(), targetRect);
     }
 
-    // 清除缓存（在需要强制刷新时调用）
     void clearCache() {
         m_colorCache.clear();
         m_gridCache.clear();
     }
 
-    // 获取缓存统计信息（用于调试和监控）
     int getColorCacheSize() const { return m_colorCache.size(); }
     int getGridCacheSize() const { return m_gridCache.size(); }
 
-    // 设置自定义颜色
     void setDefaultColor(const QColor& color) { m_defaultColor = color; }
     void setDarkTextColor(const QColor& color) { m_darkTextColor = color; }
     void setLightTextColor(const QColor& color) { m_lightTextColor = color; }
 
 private:
-    // 内部颜色计算方法（核心算法）
     QColor calculateColorInternal(const QPoint& pos, const QRect& targetRect) {
-        // 只在目标大小变化时重新计算缩放参数
         if (targetRect.size() != m_cachedTargetSize) {
             m_cachedTargetSize = targetRect.size();
             m_cachedScaledImage = m_backgroundImage.scaled(
@@ -121,64 +108,48 @@ private:
             m_cachedImgY = targetRect.y() + (targetRect.height() - m_cachedScaledImage.height()) / 2;
         }
 
-        // 将窗口坐标转换为图片坐标
         int pixelX = pos.x() - m_cachedImgX;
         int pixelY = pos.y() - m_cachedImgY;
 
-        // 确保坐标在图片范围内
         if (pixelX < 0 || pixelX >= m_cachedScaledImage.width() ||
             pixelY < 0 || pixelY >= m_cachedScaledImage.height()) {
             return m_defaultColor;
         }
 
-        // 直接获取像素颜色（无需再转换）
         QColor bgColor = m_cachedScaledImage.pixelColor(pixelX, pixelY);
 
-        // 【性能优化】使用整数运算替代浮点运算计算亮度
-        // 原公式: L = 0.299*R + 0.587*G + 0.114*B
-        // 优化: L = (76*R + 150*G + 29*B) / 255
         int luminanceInt = (76 * bgColor.red() + 150 * bgColor.green() + 29 * bgColor.blue()) >> 8;
 
-        // 考虑透明度 - 使用整数运算
         int alpha = bgColor.alpha();
         if (alpha == 255) {
-            // 完全不透明
             return (luminanceInt > 127) ? m_darkTextColor : m_lightTextColor;
         } else if (alpha == 0) {
-            // 完全透明
-            return (242 > 127) ? m_darkTextColor : m_lightTextColor; // 0.95 * 255 = 242
+            return (242 > 127) ? m_darkTextColor : m_lightTextColor;
         } else {
-            // 半透明：使用整数混合
             int opacityInt = static_cast<int>(m_opacity * 255);
             int mixedLuminance = (luminanceInt * alpha * opacityInt + 242 * (255 - alpha * opacityInt)) >> 16;
             return (mixedLuminance > 127) ? m_darkTextColor : m_lightTextColor;
         }
     }
 
-    // 缓存常量
-    static const int GRID_SIZE = 32;  // 网格大小（32x32像素）
+    static const int GRID_SIZE = 32;
 
-    QImage m_backgroundImage;           // 原始背景图片
+    QImage m_backgroundImage;
     Qt::AspectRatioMode m_aspectRatioMode = Qt::KeepAspectRatioByExpanding;
     qreal m_opacity = 1.0;
     bool m_enabled = false;
 
-    // 缓存的缩放结果
     QImage m_cachedScaledImage;
     QSize m_cachedTargetSize;
     int m_cachedImgX = 0;
     int m_cachedImgY = 0;
 
-    // 【新增】精确位置缓存（最近1000个计算结果）
     mutable QCache<qint64, QColor> m_colorCache;
-
-    // 【新增】网格缓存（500个网格单元，每个32x32像素）
     mutable QCache<qint64, QColor> m_gridCache;
 
-    // 颜色配置
-    QColor m_defaultColor = QColor("#495057");   // 默认灰色
-    QColor m_darkTextColor = QColor("#495057");  // 深色背景上的文字
-    QColor m_lightTextColor = QColor("#ffffff"); // 浅色背景上的文字
+    QColor m_defaultColor = QColor(TextColor::DEFAULT_COLOR);
+    QColor m_darkTextColor = QColor(TextColor::DARK_TEXT_COLOR);
+    QColor m_lightTextColor = QColor(TextColor::LIGHT_TEXT_COLOR);
 };
 
 #include <QtWidgets/QMainWindow>
@@ -775,9 +746,10 @@ private:
     TextColorCalculator m_textColorCalculator;  // 优化的文本颜色计算器
     void drawBackground(QPainter* painter);  // 绘制背景方法
     QColor getTextColorForPosition(const QPoint& pos);  // 根据背景位置获取文字颜色（包装方法）
-    void updateLabelColors();  // 更新标签文字颜色
-    void updateSearchUIColors(FileTab& tab);  // 更新搜索UI颜色
-    void applyBackgroundEffects();  // 应用背景效果（模糊、亮度）
+    void updateLabelColors();
+    void updateSearchUIColors(FileTab& tab);
+    void resetSearchUIColors(FileTab& tab);
+    void applyBackgroundEffects();
     void onResizeTimerTimeout();  // 窗口缩放防抖处理
     void saveBackgroundSettings();  // 保存背景设置到配置
     void loadBackgroundSettings();  // 从配置加载背景设置
@@ -924,23 +896,22 @@ private:
 
     // 【性能优化】搜索结果缓存结构
     struct SearchResultCache {
-        QString searchText;           // 搜索文本
-        bool caseSensitive;         // 大小写敏感
-        bool useRegex;             // 使用正则表达式
-        std::vector<std::tuple<int, int, int>> matches;  // 搜索结果 (tableIndex, entryIndex, position)
-        QString cacheKey;          // 缓存键（用于快速查找）
+        QString searchText;
+        bool caseSensitive;
+        bool useRegex;
+        std::vector<std::tuple<int, int, int>> matches;
+        QString cacheKey;
+        int tabIndex;
 
-        SearchResultCache() : caseSensitive(false), useRegex(false) {}
+        SearchResultCache() : caseSensitive(false), useRegex(false), tabIndex(-1) {}
 
-        // 生成缓存键
         QString generateKey() const {
-            return searchText + "|" + QString::number(caseSensitive) + "|" + QString::number(useRegex);
+            return QString::number(tabIndex) + "|" + searchText + "|" + QString::number(caseSensitive) + "|" + QString::number(useRegex);
         }
 
-        // 判断缓存是否有效
-        bool isValid(const QString& search, bool cs, bool regex) const {
+        bool isValid(const QString& search, bool cs, bool regex, int tabIdx) const {
             return !search.isEmpty() && searchText == search &&
-                   caseSensitive == cs && useRegex == regex;
+                   caseSensitive == cs && useRegex == regex && tabIndex == tabIdx;
         }
     };
 

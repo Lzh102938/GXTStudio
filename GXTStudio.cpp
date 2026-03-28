@@ -279,9 +279,17 @@ GXTStudio::GXTStudio(QWidget *parent)
     
     // 加载设置
     AppConfig& config = AppConfig::instance();
+    config.load();
     m_fontSize = config.getFontSize();
     m_isReadOnly = config.isReadOnly();
     m_autoSaveEnabled = config.isAutoSaveEnabled();
+
+    qDebug() << "After config load: m_isReadOnly =" << m_isReadOnly;
+
+    // 【关键修复】在信号连接后设置只读模式状态，确保toggleReadOnly被调用
+    qDebug() << "About to call setChecked with m_isReadOnly:" << m_isReadOnly;
+    m_readOnlyAction->setChecked(m_isReadOnly);
+    qDebug() << "After setChecked call";
 
     // 更新自动保存按钮状态
     if (m_autoSaveButton) {
@@ -716,9 +724,6 @@ void GXTStudio::setupMenus()
     m_smartTranslateAction = ui.actionSmartTranslate;
     m_generateCharTableAction = ui.actionGenerateCharTable;
     m_generateCharTableAction->setEnabled(false); // 初始禁用，只有GTA_VC和GTA_IV版本才启用
-
-    // 设置只读模式初始状态
-    m_readOnlyAction->setChecked(m_isReadOnly);
     
     // 将替换动作添加到编辑菜单
     if (ui.menuEdit) {
@@ -3664,6 +3669,8 @@ void GXTStudio::handleReplaceAll(const QString& findText, const QString& replace
 
 void GXTStudio::toggleReadOnly(bool readOnly)
 {
+    qDebug() << "toggleReadOnly called with:" << readOnly << "current m_isReadOnly:" << m_isReadOnly;
+    
     if (!readOnly) {
         FileTab* currentTab = getCurrentTab();
         if (currentTab && currentTab->isWHMReadOnlyLocked) {
@@ -3674,6 +3681,8 @@ void GXTStudio::toggleReadOnly(bool readOnly)
     }
     
     m_isReadOnly = readOnly;
+    
+    qDebug() << "toggleReadOnly: m_fileTabs.size() =" << m_fileTabs.size();
     
     for (auto& tab : m_fileTabs) {
         if (tab.tableList) {
@@ -4425,6 +4434,9 @@ void GXTStudio::switchToTable(int newTableIndex)
         // 使用模型的resetModel方法重置数据
         tab->entryTableModel->resetModel();
 
+        // 确保编辑触发器正确设置
+        tab->entryTableView->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked);
+
         // 重新启用更新并立即刷新
         tab->entryTableView->setUpdatesEnabled(true);
     }
@@ -4591,11 +4603,10 @@ void GXTStudio::performSearch(const QString& searchText)
         return;
     }
 
-    // 【优化1】检查搜索结果缓存
     for (int i = 0; i < MAX_SEARCH_CACHE; ++i) {
-        if (m_searchResultCache[i].isValid(searchText, caseSensitive, useRegex)) {
+        if (m_searchResultCache[i].isValid(searchText, caseSensitive, useRegex, m_currentTabIndex)) {
             m_searchState.searchText = searchText;
-            m_searchState.currentTableIndex = tab->currentTableIndex;  // 使用当前实际的表索引
+            m_searchState.currentTableIndex = tab->currentTableIndex;
             m_searchState.currentEntryIndex = -1;
             m_searchState.currentMatchPosition = -1;
             m_searchState.allMatches = m_searchResultCache[i].matches;
@@ -4764,7 +4775,6 @@ void GXTStudio::performSearch(const QString& searchText)
             while (lineStart >= 0 && lineStart < textLen) {
                 int lineLen = (lineEnd >= 0) ? (lineEnd - lineStart) : (textLen - lineStart);
                 
-                // 【优化10】使用QStringView避免字符串拷贝（Qt 6推荐）
                 QStringView lineView(QStringView(charTableText).mid(lineStart, lineLen));
                 
                 bool matched = false;
@@ -4775,8 +4785,7 @@ void GXTStudio::performSearch(const QString& searchText)
                 }
                 
                 if (matched) {
-                    // 对于CharTable，我们仍然按照行来记录，但可以扩展为更精确的位置
-                    m_searchState.allMatches.emplace_back(0, lineIdx, 0); // 第三个参数暂时设为0
+                    m_searchState.allMatches.emplace_back(0, lineIdx, 0);
                 }
                 
                 lineStart = (lineEnd >= 0) ? lineEnd + 1 : -1;
@@ -4784,6 +4793,19 @@ void GXTStudio::performSearch(const QString& searchText)
                     lineEnd = charTableText.indexOf(QLatin1Char('\n'), lineStart);
                 }
                 ++lineIdx;
+            }
+        }
+    } else if (!tab->originalHasTABL && tab->tables.empty() && !tab->noTablEntries.empty()) {
+        // 无表文件搜索（GTA III / GTA IV 无表格式）
+        const size_t entryCount = tab->noTablEntries.size();
+        for (size_t i = 0; i < entryCount; ++i) {
+            const auto& entry = tab->noTablEntries[i];
+            QString textStr = QString::fromStdString(entry.value);
+            
+            std::vector<int> positions = findAllMatches(textStr);
+            
+            for (int pos : positions) {
+                m_searchState.allMatches.emplace_back(0, static_cast<int>(i), pos);
             }
         }
     } else {
@@ -4825,13 +4847,13 @@ void GXTStudio::performSearch(const QString& searchText)
 
     m_searchState.isValid = !m_searchState.allMatches.empty();
 
-    // 【优化11】存储搜索结果到缓存
     if (m_searchResultCache) {
         int cacheIdx = m_cacheIndex;
         m_searchResultCache[cacheIdx].searchText = searchText;
         m_searchResultCache[cacheIdx].caseSensitive = caseSensitive;
         m_searchResultCache[cacheIdx].useRegex = useRegex;
         m_searchResultCache[cacheIdx].matches = m_searchState.allMatches;
+        m_searchResultCache[cacheIdx].tabIndex = m_currentTabIndex;
         m_cacheIndex = (m_cacheIndex + 1) % MAX_SEARCH_CACHE;
     }
 
@@ -5072,17 +5094,15 @@ void GXTStudio::jumpToMatch(int matchIndex)
     int targetEntryIndex = std::get<1>(match);
     int targetPosition = std::get<2>(match);
     
-    // 如果需要切换表（仅GXT文件）
-    if (!tab->isWHM && !tab->isDAT && !tab->isCharTable && targetTableIndex != tab->currentTableIndex) {
-        // 【关键修复】等待表切换完成后再进行高亮
+    bool isNoTableFile = !tab->originalHasTABL && tab->tables.empty() && !tab->noTablEntries.empty();
+    
+    if (!tab->isWHM && !tab->isDAT && !tab->isCharTable && !isNoTableFile && targetTableIndex != tab->currentTableIndex) {
         switchToTable(targetTableIndex);
         
-        // 使用定时器确保表切换完成后再高亮
         QTimer::singleShot(50, this, [this, targetEntryIndex]() {
             highlightMatch(targetEntryIndex);
         });
     } else {
-        // 不需要切换表，直接高亮
         highlightMatch(targetEntryIndex);
     }
     
@@ -5122,9 +5142,19 @@ void GXTStudio::jumpToMatch(int matchIndex)
         valueText = QString::fromStdString(entry.text);
     } else if (tab->isCharTable) {
         tableName = "CharTable";
-        // 对于CharTable，显示行号
         keyText = QString("第%1行").arg(targetEntryIndex + 1);
         valueText = "";
+    } else if (isNoTableFile) {
+        tableName = "NoTable Entries";
+        if (targetEntryIndex < 0 || targetEntryIndex >= static_cast<int>(tab->noTablEntries.size()) || 
+            tab->noTablEntries.empty()) {
+            showLogMessage("错误：无效的条目索引");
+            return;
+        }
+        
+        const auto& entry = tab->noTablEntries[targetEntryIndex];
+        keyText = QString::fromStdString(entry.key);
+        valueText = QString::fromStdString(entry.value);
     } else {
         tableName = QString::fromStdString(tab->tables[targetTableIndex].name);
         const auto& entry = tab->tables[targetTableIndex].entries[targetEntryIndex];
@@ -6685,6 +6715,13 @@ void GXTStudio::onTabChanged(int index)
     bool skipCleanup = (m_currentTabIndex == index);
     
     if (!skipCleanup) {
+        m_searchState.clear();
+        for (int i = 0; i < MAX_SEARCH_CACHE; ++i) {
+            m_searchResultCache[i].searchText.clear();
+            m_searchResultCache[i].matches.clear();
+            m_searchResultCache[i].cacheKey.clear();
+        }
+        
         if (previousTabIndex >= 0 && previousTabIndex < static_cast<int>(m_fileTabs.size())) {
             FileTab* previousTab = &m_fileTabs[previousTabIndex];
             if (previousTab) {
@@ -6789,6 +6826,7 @@ void GXTStudio::onTabChanged(int index)
         try {
             if (currentTab->entryTableModel) {
                 currentTab->entryTableModel->forceDataReset();
+                currentTab->entryTableModel->setEditable(!m_isReadOnly);
             }
 
             if (currentTab->entryTableView && currentTab->entryTableModel) {
@@ -6796,6 +6834,7 @@ void GXTStudio::onTabChanged(int index)
                 if (currentModel != currentTab->entryTableModel) {
                     currentTab->entryTableView->setModel(currentTab->entryTableModel);
                 }
+                currentTab->entryTableView->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked);
             }
 
             if (currentTab->isCharTable && currentTab->charTableWidget) {
@@ -7495,6 +7534,7 @@ void GXTStudio::updateEntryTable()
 
     // 【关键修复】首先确保模型的tab指针正确
     tab->entryTableModel->setTab(tab);
+    tab->entryTableModel->setEditable(!m_isReadOnly);
 
     // 禁用更新以防止闪烁
     tab->entryTableView->setUpdatesEnabled(false);
@@ -7515,6 +7555,9 @@ void GXTStudio::updateEntryTable()
     if (tab->entryTableView->model() != tab->entryTableModel) {
         tab->entryTableView->setModel(tab->entryTableModel);
     }
+
+    // 确保编辑触发器正确设置
+    tab->entryTableView->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked);
 
     // 清除视口缓存
     tab->entryTableView->viewport()->update();
@@ -8268,13 +8311,12 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
         const auto& fileTab = m_fileTabs[result.tabIndex];
 
         if (!fileTab.isWHM && !fileTab.isDAT && !fileTab.tables.empty()) {
-            // GXT文件：立即切换到第一个表
             switchToTable(0);
         } else if (fileTab.isWHM && !fileTab.whmEntries.empty()) {
-            // WHM文件：立即更新表格
             updateEntryTable();
         } else if (fileTab.isDAT && !fileTab.datEntries.empty()) {
-            // DAT文件：立即更新表格（DAT和WHM使用相同的表格显示）
+            updateEntryTable();
+        } else if (!fileTab.originalHasTABL && fileTab.tables.empty() && !fileTab.noTablEntries.empty()) {
             updateEntryTable();
         }
 
@@ -8605,6 +8647,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     QTableView* entryTableView = new QTableView();
     entryTableView->setSelectionMode(QAbstractItemView::ExtendedSelection);
     entryTableView->setSelectionBehavior(QAbstractItemView::SelectItems);
+    qDebug() << "createTabContent: m_isReadOnly =" << m_isReadOnly << "setting edit triggers";
     entryTableView->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked);
     entryTableView->setContextMenuPolicy(Qt::CustomContextMenu);
     
@@ -8947,6 +8990,7 @@ void GXTStudio::setupTableOptimizations(QTableView* table)
     table->setDropIndicatorShown(false);
     table->setAcceptDrops(false);
     
+    qDebug() << "setupTableOptimizations: m_isReadOnly =" << m_isReadOnly << "setting edit triggers";
     table->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     
     table->setAutoScroll(false);
@@ -9388,11 +9432,22 @@ void GXTStudio::updateLabelColors()
 {
     if (m_fileTabs.empty()) return;
     
-    bool hasBackground = m_backgroundEnabled && !m_backgroundPixmap.isNull();
-    if (!hasBackground) return;
-    
     FileTab* currentTab = getCurrentTab();
     if (!currentTab || currentTab->isCharTable) return;
+    
+    bool hasBackground = m_backgroundEnabled && !m_backgroundPixmap.isNull();
+    
+    if (!hasBackground) {
+        QColor defaultColor(TextColor::DEFAULT_COLOR);
+        if (currentTab->tableListLabel) {
+            applyLabelStyle(currentTab->tableListLabel, defaultColor);
+        }
+        if (currentTab->entryTableLabel) {
+            applyLabelStyle(currentTab->entryTableLabel, defaultColor);
+        }
+        resetSearchUIColors(*currentTab);
+        return;
+    }
     
     QWidget* centralWidget = this->centralWidget();
     QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
@@ -9435,6 +9490,29 @@ void GXTStudio::updateSearchUIColors(FileTab& tab)
     }
     if (tab.searchNextButton) {
         tab.searchNextButton->setStyleSheet(getNavButtonStyle(textColor));
+    }
+}
+
+void GXTStudio::resetSearchUIColors(FileTab& tab)
+{
+    if (!tab.searchEdit) return;
+    
+    QColor defaultColor(TextColor::DEFAULT_COLOR);
+    
+    tab.searchEdit->setStyleSheet(getSearchEditStyle(defaultColor));
+    
+    if (tab.caseSensitiveButton) {
+        tab.caseSensitiveButton->setStyleSheet(getIconButtonStyle(defaultColor));
+    }
+    if (tab.regexButton) {
+        tab.regexButton->setStyleSheet(getIconButtonStyle(defaultColor));
+    }
+    
+    if (tab.searchPrevButton) {
+        tab.searchPrevButton->setStyleSheet(getNavButtonStyle(defaultColor));
+    }
+    if (tab.searchNextButton) {
+        tab.searchNextButton->setStyleSheet(getNavButtonStyle(defaultColor));
     }
 }
 

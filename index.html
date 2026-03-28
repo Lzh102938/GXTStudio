@@ -1,0 +1,4826 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GXTStudio - GTA文本资源编辑器</title>
+    <link rel="icon" href="icon/favicon.png" type="image/png">
+    <link rel="apple-touch-icon" href="icon/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #60a5fa;
+            --primary-dark: #1d4ed8;
+            --primary-glow: rgba(37, 99, 235, 0.4);
+            --primary-soft: rgba(37, 99, 235, 0.08);
+            --primary-soft-hover: rgba(37, 99, 235, 0.12);
+            --accent: #06b6d4;
+            --accent-soft: rgba(6, 182, 212, 0.08);
+            --bg: #f8fafc;
+            --bg-secondary: #f1f5f9;
+            --surface: #ffffff;
+            --surface-hover: #f8fafc;
+            --text: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #94a3b8;
+            --border: rgba(0, 0, 0, 0.08);
+            --border-hover: rgba(0, 0, 0, 0.15);
+            --success: #22c55e;
+            --gradient-orange-pink: linear-gradient(45deg, #f97316, #ec4899);
+            --radius: 16px;
+            --radius-sm: 10px;
+            --radius-xs: 6px;
+            --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            --code-bg: rgba(0, 0, 0, 0.05);
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --particle-color: rgba(37, 99, 235, 0.3);
+        }
+
+        [data-theme="dark"] {
+            --primary: #60a5fa;
+            --primary-light: #93c5fd;
+            --primary-dark: #3b82f6;
+            --primary-glow: rgba(96, 165, 250, 0.4);
+            --primary-soft: rgba(96, 165, 250, 0.15);
+            --primary-soft-hover: rgba(96, 165, 250, 0.2);
+            --accent: #22d3ee;
+            --accent-soft: rgba(34, 211, 238, 0.15);
+            --bg: #0f172a;
+            --bg-secondary: #1e293b;
+            --surface: #1e293b;
+            --surface-hover: #334155;
+            --text: #f1f5f9;
+            --text-secondary: #cbd5e1;
+            --text-muted: #64748b;
+            --border: rgba(255, 255, 255, 0.1);
+            --border-hover: rgba(255, 255, 255, 0.2);
+            --success: #4ade80;
+            --gradient-orange-pink: linear-gradient(45deg, #fb923c, #f472b6);
+            --code-bg: rgba(255, 255, 255, 0.1);
+            --shadow-color: rgba(0, 0, 0, 0.4);
+            --particle-color: rgba(96, 165, 250, 0.2);
+        }
+
+        html {
+            color-scheme: light;
+        }
+
+        [data-theme="dark"] html,
+        [data-theme="dark"] {
+            color-scheme: dark;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+            font-size: 16px;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* 粒子背景 - 仅在非移动设备和性能良好时启用 */
+        #particles-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+            display: none;
+        }
+
+        @media (min-width: 768px) {
+            #particles-canvas {
+                display: block;
+            }
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* 滚动条美化 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--surface-hover);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        /* Ripple效果 */
+        .ripple {
+            position: absolute;
+            border-radius: 50%;
+            background: var(--primary-glow);
+            transform: scale(0);
+            animation: ripple-effect 0.6s linear;
+            pointer-events: none;
+        }
+
+        @keyframes ripple-effect {
+            to {
+                transform: scale(4);
+                opacity: 0;
+            }
+        }
+
+        /* 导航栏 */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            padding: 16px 0;
+            transition: var(--transition);
+        }
+
+        .navbar.scrolled {
+            background: var(--surface);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 0;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        }
+
+        .nav-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            position: relative;
+        }
+
+        .logo-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--transition);
+        }
+
+        .logo:hover .logo-icon {
+            transform: rotate(-5deg) scale(1.05);
+        }
+
+        .logo-text {
+            font-weight: 700;
+            font-size: 1.25rem;
+            color: var(--text);
+            letter-spacing: -0.5px;
+        }
+
+        .logo-text span {
+            color: var(--primary-light);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 8px;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.9rem;
+            padding: 8px 16px;
+            border-radius: var(--radius-xs);
+            transition: var(--transition);
+            position: relative;
+        }
+
+        .nav-links a i {
+            display: none;
+        }
+
+        .nav-links a:hover {
+            color: var(--primary);
+            background: var(--primary-soft);
+        }
+
+        .nav-links a::before {
+            content: '';
+            position: absolute;
+            bottom: 4px;
+            left: 50%;
+            width: 0;
+            height: 2px;
+            background: var(--gradient-orange-pink);
+            transition: var(--transition);
+            transform: translateX(-50%);
+            border-radius: 1px;
+        }
+
+        .nav-links a:hover::before {
+            width: 20px;
+        }
+
+        .nav-cta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .theme-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: var(--radius-sm);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .theme-toggle:hover {
+            background: var(--surface-hover);
+            border-color: var(--border-hover);
+            transform: scale(1.05);
+        }
+
+        .theme-toggle i {
+            position: absolute;
+            font-size: 1rem;
+            transition: var(--transition);
+        }
+
+        .theme-toggle .fa-sun {
+            color: #f59e0b;
+            opacity: 1;
+            transform: rotate(0deg) scale(1);
+        }
+
+        .theme-toggle .fa-moon {
+            color: #6366f1;
+            opacity: 0;
+            transform: rotate(-90deg) scale(0);
+        }
+
+        [data-theme="dark"] .theme-toggle .fa-sun {
+            opacity: 0;
+            transform: rotate(90deg) scale(0);
+        }
+
+        [data-theme="dark"] .theme-toggle .fa-moon {
+            opacity: 1;
+            transform: rotate(0deg) scale(1);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-decoration: none;
+            transition: var(--transition);
+            border: none;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: white;
+            box-shadow: 0 4px 15px var(--primary-glow);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px var(--primary-glow);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-ghost:hover {
+            background: var(--surface);
+            border-color: var(--border-hover);
+            color: var(--text);
+        }
+
+        .btn-icon {
+            width: 40px;
+            height: 40px;
+            padding: 0;
+            border-radius: var(--radius-sm);
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: var(--transition);
+            align-items: center;
+            justify-content: center;
+            z-index: 1001;
+        }
+
+        .mobile-controls {
+            display: none;
+        }
+
+        .mobile-menu-btn:hover {
+            background: var(--surface-hover);
+            border-color: var(--border-hover);
+        }
+
+        /* 英雄区域 */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            padding: 120px 0 80px;
+            position: relative;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--hero-gradient, radial-gradient(ellipse 80% 50% at 50% 0%, rgba(37, 99, 235, 0.08) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 40% at 80% 20%, rgba(6, 182, 212, 0.06) 0%, transparent 50%));
+            pointer-events: none;
+        }
+
+        [data-theme="dark"] .hero::before {
+            --hero-gradient: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(96, 165, 250, 0.1) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 40% at 80% 20%, rgba(34, 211, 238, 0.08) 0%, transparent 50%);
+        }
+
+        .hero-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 80px;
+            align-items: center;
+        }
+
+        .hero-text {
+            animation: fadeInUp 1s ease forwards;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 100px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--primary);
+            margin-bottom: 24px;
+            backdrop-filter: blur(10px);
+        }
+
+        .hero-badge i {
+            font-size: 0.8rem;
+            animation: pulse 2s ease infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .hero-title {
+            font-size: 4rem;
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 24px;
+            letter-spacing: -2px;
+            color: var(--text);
+        }
+
+        .hero-title .line {
+            display: block;
+        }
+
+        .hero-title .gradient {
+            background: var(--gradient-orange-pink);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-description {
+            font-size: 1.15rem;
+            color: var(--text-secondary);
+            margin-bottom: 40px;
+            max-width: 480px;
+            line-height: 1.7;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 48px;
+        }
+
+        .btn-download {
+            padding: 14px 28px;
+            font-size: 1rem;
+        }
+
+        .btn-download i {
+            transition: var(--transition);
+        }
+
+        .btn-download:hover i {
+            transform: translateY(2px);
+        }
+
+        .hero-stats {
+            display: flex;
+            gap: 40px;
+            padding-top: 40px;
+            border-top: 1px solid var(--border);
+        }
+
+        .stat-item {
+            position: relative;
+        }
+
+        .stat-item::after {
+            content: '';
+            position: absolute;
+            right: -20px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 1px;
+            height: 40px;
+            background: var(--border);
+        }
+
+        .stat-item:last-child::after {
+            display: none;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text);
+            display: block;
+            letter-spacing: -1px;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .hero-visual {
+            position: relative;
+            animation: fadeInRight 1s ease forwards;
+            animation-delay: 0.3s;
+            opacity: 0;
+        }
+
+        .app-window {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            overflow: hidden;
+            box-shadow:
+                0 25px 50px -12px rgba(0, 0, 0, 0.1),
+                0 0 0 1px rgba(0, 0, 0, 0.03);
+            transform: perspective(1500px) rotateY(-8deg) rotateX(2deg);
+            transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .app-window:hover {
+            transform: perspective(1500px) rotateY(-2deg) rotateX(1deg);
+        }
+
+        .window-header {
+            display: flex;
+            align-items: center;
+            padding: 14px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .window-dots {
+            display: flex;
+            gap: 8px;
+        }
+
+        .window-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            transition: var(--transition);
+        }
+
+        .dot-red { background: #ff5f57; }
+        .dot-yellow { background: #febc2e; }
+        .dot-green { background: #28c840; }
+
+        .window-dots:hover .window-dot {
+            filter: brightness(1.2);
+        }
+
+        .window-title {
+            flex: 1;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .version-tabs {
+            display: flex;
+            gap: 2px;
+            padding: 6px 12px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .version-tab {
+            padding: 5px 12px;
+            background: transparent;
+            border: none;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .version-tab:hover {
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        .version-tab.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .window-content {
+            padding: 24px;
+            min-height: 320px;
+            background: linear-gradient(180deg, var(--surface) 0%, var(--bg-secondary) 100%);
+            position: relative;
+        }
+
+        .code-block {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            line-height: 1.8;
+        }
+
+        .code-line {
+            display: flex;
+            gap: 16px;
+            padding: 2px 0;
+            opacity: 0;
+            animation: fadeInCode 0.5s ease forwards;
+        }
+
+        @keyframes fadeInCode {
+            from {
+                opacity: 0;
+                transform: translateX(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .code-line:nth-child(1) { animation-delay: 0.5s; }
+        .code-line:nth-child(2) { animation-delay: 0.6s; }
+        .code-line:nth-child(3) { animation-delay: 0.7s; }
+        .code-line:nth-child(4) { animation-delay: 0.8s; }
+        .code-line:nth-child(5) { animation-delay: 0.9s; }
+        .code-line:nth-child(6) { animation-delay: 1.0s; }
+        .code-line:nth-child(7) { animation-delay: 1.1s; }
+        .code-line:nth-child(8) { animation-delay: 1.2s; }
+
+        .line-number {
+            color: var(--text-muted);
+            user-select: none;
+            min-width: 24px;
+            text-align: right;
+            opacity: 0.5;
+        }
+
+        .line-content {
+            flex: 1;
+        }
+
+        .code-keyword { color: var(--primary); }
+        .code-string { color: var(--success); }
+        .code-comment { color: var(--text-muted); font-style: italic; }
+        .code-tag { color: var(--primary-light); }
+        .code-attr { color: var(--accent); }
+
+        .cursor-blink {
+            display: inline-block;
+            width: 2px;
+            height: 1em;
+            background: var(--primary-light);
+            animation: blink 1s step-end infinite;
+            vertical-align: text-bottom;
+            margin-left: 2px;
+        }
+
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        .floating-badge {
+            position: absolute;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 10px 14px;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            animation: float 3s ease-in-out infinite;
+        }
+
+        .floating-badge.success {
+            top: 20px;
+            right: 10px;
+            color: var(--success);
+            border-color: rgba(34, 197, 94, 0.2);
+        }
+
+        .floating-badge.info {
+            bottom: 40px;
+            left: 10px;
+            color: var(--primary);
+            border-color: rgba(96, 165, 250, 0.2);
+            animation-delay: 1.5s;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        /* 功能区域 */
+        .features {
+            padding: 120px 0;
+            position: relative;
+        }
+
+        .section-header {
+            text-align: center;
+            max-width: 600px;
+            margin: 0 auto 80px;
+        }
+
+        .section-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            background: var(--primary-soft);
+            border-radius: 100px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 2.75rem;
+            font-weight: 800;
+            margin-bottom: 16px;
+            letter-spacing: -1px;
+            line-height: 1.2;
+            color: var(--text);
+        }
+
+        .section-subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+        }
+
+        .feature-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 32px;
+            border: 1px solid var(--border);
+            transition: var(--transition);
+            position: relative;
+            overflow: hidden;
+            cursor: default;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--gradient-orange-pink);
+            transform: scaleX(0);
+            transform-origin: left;
+            transition: var(--transition);
+        }
+
+        .feature-card::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle at var(--mouse-x, 50%) var(--mouse-y, 50%), var(--primary-soft) 0%, transparent 50%);
+            opacity: 0;
+            transition: var(--transition);
+        }
+
+        .feature-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .feature-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .feature-card:hover::after {
+            opacity: 1;
+        }
+
+        .feature-icon {
+            width: 56px;
+            height: 56px;
+            background: var(--code-bg);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 24px;
+            color: var(--primary);
+            font-size: 1.4rem;
+            transition: var(--transition);
+            position: relative;
+            z-index: 1;
+        }
+
+        .feature-card:hover .feature-icon {
+            background: var(--gradient-orange-pink);
+            color: white;
+            transform: scale(1.05) rotate(-5deg);
+            box-shadow: 0 10px 25px rgba(249, 115, 22, 0.3);
+        }
+
+        .feature-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: var(--text);
+            position: relative;
+            z-index: 1;
+        }
+
+        .feature-description {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.7;
+            position: relative;
+            z-index: 1;
+        }
+
+        .feature-tag {
+            display: inline-block;
+            margin-top: 16px;
+            padding: 4px 10px;
+            background: var(--primary-soft);
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--primary);
+            position: relative;
+            z-index: 1;
+        }
+
+        /* 技术规格 */
+        .specs {
+            padding: 120px 0;
+            background: var(--bg-secondary);
+            position: relative;
+        }
+
+        .specs::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border), transparent);
+        }
+
+        .specs-content {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 60px;
+            align-items: start;
+        }
+
+        .specs-left {
+            position: sticky;
+            top: 120px;
+        }
+
+        .specs-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-top: 40px;
+        }
+
+        .spec-item {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            padding: 20px;
+            background: var(--surface);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            transition: var(--transition);
+        }
+
+        .spec-item:hover {
+            border-color: var(--primary);
+            background: var(--surface);
+            transform: translateX(8px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+        }
+
+        .spec-icon {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, var(--primary-soft-hover), var(--accent-soft));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+            font-size: 1.1rem;
+            flex-shrink: 0;
+            transition: var(--transition);
+        }
+
+        .spec-item:hover .spec-icon {
+            background: var(--gradient-orange-pink);
+            color: white;
+            transform: scale(1.1);
+        }
+
+        .spec-text h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: var(--text);
+        }
+
+        .spec-text p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .specs-visual {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .specs-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .specs-tab {
+            flex: 1;
+            padding: 16px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            position: relative;
+        }
+
+        .specs-tab:hover {
+            color: var(--text);
+            background: var(--surface-hover);
+        }
+
+        .specs-tab.active {
+            color: var(--primary);
+            background: var(--code-bg);
+        }
+
+        .specs-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--gradient-orange-pink);
+        }
+
+        .specs-panel {
+            padding: 24px;
+            display: none;
+        }
+
+        .specs-panel.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .format-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .format-table th {
+            text-align: left;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .format-table td {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.9rem;
+        }
+
+        .format-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .format-table tr:hover td {
+            background: var(--primary-soft);
+        }
+
+        .format-name {
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .format-desc {
+            color: var(--text-secondary);
+        }
+
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--success);
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .tag i {
+            font-size: 0.65rem;
+        }
+
+        .token-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+        }
+
+        .token-item {
+            padding: 12px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-xs);
+            text-align: center;
+            transition: var(--transition);
+            cursor: default;
+        }
+
+        .token-item:hover {
+            background: var(--surface-hover);
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+        }
+
+        .token-code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            color: var(--primary);
+            margin-bottom: 4px;
+        }
+
+        .token-desc {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* 下载区域 */
+        .download {
+            padding: 120px 0;
+            position: relative;
+        }
+
+        .download-card {
+            background: linear-gradient(135deg, var(--surface) 0%, var(--bg-secondary) 100%);
+            border-radius: 24px;
+            border: 1px solid var(--border);
+            padding: 60px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .download-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, var(--primary-soft) 0%, transparent 50%);
+            animation: rotate 20s linear infinite;
+        }
+
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .download-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .download-icon {
+            width: 80px;
+            height: 80px;
+            background: var(--gradient-orange-pink);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 32px;
+            font-size: 2rem;
+            color: white;
+            box-shadow: 0 20px 40px rgba(249, 115, 22, 0.3);
+            animation: pulse 2s ease infinite;
+        }
+
+        .download-title {
+            font-size: 2.5rem;
+            font-weight: 800;
+            margin-bottom: 16px;
+            letter-spacing: -1px;
+            color: var(--text);
+        }
+
+        .download-subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            margin-bottom: 40px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .download-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            padding: 18px 36px;
+            background: var(--gradient-orange-pink);
+            color: white;
+            border-radius: var(--radius-sm);
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: var(--transition);
+            box-shadow: 0 10px 30px rgba(249, 115, 22, 0.3);
+            margin-bottom: 24px;
+        }
+
+        .download-btn:hover {
+            transform: translateY(-3px) scale(1.02);
+            box-shadow: 0 15px 40px rgba(249, 115, 22, 0.4);
+        }
+
+        .download-btn:active {
+            transform: translateY(0);
+        }
+
+        .download-btn i {
+            transition: var(--transition);
+        }
+
+        .download-btn:hover i {
+            transform: translateY(3px);
+        }
+
+        .download-info {
+            display: flex;
+            justify-content: center;
+            gap: 32px;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .download-info-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .download-info-item i {
+            color: var(--primary);
+        }
+
+        /* 社区区域 */
+        .community {
+            padding: 120px 0;
+            background: var(--bg-secondary);
+        }
+
+        .community-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+        }
+
+        .community-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 32px;
+            border: 1px solid var(--border);
+            transition: var(--transition);
+        }
+
+        .community-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-8px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.08);
+        }
+
+        .community-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .community-icon {
+            width: 52px;
+            height: 52px;
+            background: linear-gradient(135deg, var(--primary-soft-hover), var(--accent-soft));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+            font-size: 1.3rem;
+            transition: var(--transition);
+        }
+
+        .community-card:hover .community-icon {
+            background: var(--gradient-orange-pink);
+            color: white;
+            transform: scale(1.1) rotate(-5deg);
+        }
+
+        .community-card h3 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .community-card p {
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            line-height: 1.7;
+        }
+
+        .community-links {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .community-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-xs);
+            color: var(--text);
+            text-decoration: none;
+            transition: var(--transition);
+        }
+
+        .community-link:hover {
+            background: var(--surface-hover);
+            transform: translateX(8px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+
+        .community-link i {
+            width: 20px;
+            text-align: center;
+            color: var(--primary);
+        }
+
+        .community-link span {
+            flex: 1;
+            font-size: 0.95rem;
+        }
+
+        .community-link .arrow {
+            opacity: 0;
+            transform: translateX(-10px);
+            transition: var(--transition);
+        }
+
+        .community-link:hover .arrow {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        /* 页脚 */
+        .footer {
+            padding: 80px 0 40px;
+            border-top: 1px solid var(--border);
+        }
+
+        /* 评论区 */
+        .comments {
+            padding: 80px 0;
+            background: var(--bg);
+            position: relative;
+        }
+
+        .comments::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border), transparent);
+        }
+
+        .giscus-container {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            padding: 24px;
+            min-height: 300px;
+            overflow: hidden;
+        }
+
+        .giscus-container iframe {
+            width: 100% !important;
+        }
+
+        /* 文件格式详解 */
+        .format-guide {
+            padding: 80px 0;
+            background: linear-gradient(180deg, var(--bg) 0%, var(--surface) 100%);
+        }
+
+        .format-guide-content {
+            display: flex;
+            flex-direction: column;
+            gap: 40px;
+        }
+
+        .format-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .format-card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 20px 24px;
+            background: linear-gradient(135deg, var(--primary-soft) 0%, rgba(139, 92, 246, 0.05) 100%);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .format-card-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+        }
+
+        .format-card-header h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .format-card-body {
+            padding: 24px;
+            line-height: 1.8;
+            color: var(--text-secondary);
+        }
+
+        .format-card-body p {
+            margin-bottom: 12px;
+        }
+
+        .format-card-body code {
+            background: var(--code-bg);
+            color: var(--primary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+        }
+
+        .format-versions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .format-version-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            overflow: hidden;
+            transition: var(--transition);
+        }
+
+        .format-version-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .version-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            background: linear-gradient(135deg, var(--primary-soft) 0%, rgba(139, 92, 246, 0.08) 100%);
+        }
+
+        .version-badge {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text);
+        }
+
+        .version-status {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+
+        .version-status.supported {
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+        }
+
+        .version-body {
+            padding: 20px;
+        }
+
+        .version-body h4 {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .structure-diagram {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .structure-block {
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            color: white;
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .structure-block.header {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+        }
+
+        .structure-arrow {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .version-features {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .version-features li {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .version-features li i {
+            color: #22c55e;
+            font-size: 12px;
+        }
+
+        .data-blocks-section {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            padding: 32px;
+        }
+
+        .subsection-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 24px;
+        }
+
+        .subsection-title i {
+            color: var(--primary);
+        }
+
+        .data-blocks-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .data-block-card {
+            background: var(--bg);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .block-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .block-name {
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .block-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .block-content {
+            padding: 20px;
+        }
+
+        .block-content p {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin-bottom: 12px;
+        }
+
+        .block-structure {
+            background: var(--primary-soft);
+            border-radius: 8px;
+            padding: 12px 16px;
+        }
+
+        .block-structure code {
+            font-size: 12px;
+            color: var(--primary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* 交互工具区域 */
+        .tools-section {
+            padding: 80px 0;
+            background: var(--bg);
+        }
+
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 24px;
+            margin-bottom: 40px;
+        }
+
+        .tool-card {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            overflow: hidden;
+            transition: var(--transition);
+        }
+
+        .tool-card:hover {
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08);
+        }
+
+        .tool-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px 24px;
+            background: linear-gradient(135deg, var(--primary-soft) 0%, rgba(139, 92, 246, 0.05) 100%);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tool-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+        }
+
+        .tool-title h3 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 4px;
+        }
+
+        .tool-title p {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .tool-body {
+            padding: 24px;
+        }
+
+        .tool-input-group {
+            margin-bottom: 20px;
+        }
+
+        .tool-input-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .tool-input-group textarea,
+        .tool-input-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--bg);
+            color: var(--text);
+            transition: var(--transition);
+            resize: vertical;
+        }
+
+        .tool-input-group textarea {
+            min-height: 100px;
+        }
+
+        .tool-input-group textarea:focus,
+        .tool-input-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-soft-hover);
+        }
+
+        .tool-output-group {
+            margin-bottom: 20px;
+        }
+
+        .tool-output-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .token-preview-box {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-radius: 8px;
+            padding: 16px;
+            min-height: 80px;
+            color: white;
+            font-size: 16px;
+            line-height: 1.6;
+            font-family: 'Microsoft YaHei', '微软雅黑', sans-serif;
+            font-weight: 700;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .token-quick-insert {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .quick-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .quick-btn {
+            padding: 6px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .quick-btn.color-red:hover {
+            background: #ef4444;
+            color: white;
+            border-color: #ef4444;
+        }
+
+        .quick-btn.color-green:hover {
+            background: #22c55e;
+            color: white;
+            border-color: #22c55e;
+        }
+
+        .quick-btn.color-blue:hover {
+            background: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+        }
+
+        .quick-btn.color-yellow:hover {
+            background: #fbbf24;
+            color: #000;
+            border-color: #fbbf24;
+        }
+
+        .quick-btn.color-purple:hover {
+            background: #a855f7;
+            color: white;
+            border-color: #a855f7;
+        }
+
+        .quick-btn.color-white:hover {
+            background: #e5e7eb;
+            color: #000;
+            border-color: #e5e7eb;
+        }
+
+        .quick-btn.color-highlight:hover {
+            background: #ffffff;
+            color: #000;
+            border-color: #ffffff;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+
+        .quick-btn.color-reset:hover {
+            background: #6b7280;
+            color: white;
+            border-color: #6b7280;
+        }
+
+        .quick-btn.color-newline:hover {
+            background: #0ea5e9;
+            color: white;
+            border-color: #0ea5e9;
+        }
+
+        .crc-result {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .crc-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .copy-btn {
+            padding: 8px 12px;
+            background: var(--primary);
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .copy-btn:hover {
+            background: var(--accent);
+        }
+
+        .hash-results {
+            display: grid;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .hash-result-card {
+            background: var(--bg);
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .hash-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .hash-badge {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .hash-badge.sa {
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
+        }
+
+        .hash-badge.iv {
+            background: rgba(249, 115, 22, 0.15);
+            color: #f97316;
+        }
+
+        .hash-name {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .hash-value-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .hash-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text);
+            background: var(--primary-soft-hover);
+            padding: 8px 12px;
+            border-radius: 6px;
+            flex: 1;
+        }
+
+        .copy-btn-small {
+            padding: 8px;
+            background: var(--primary);
+            border: none;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .copy-btn-small:hover {
+            background: var(--accent);
+        }
+
+        .hash-desc {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 8px;
+            margin-bottom: 0;
+        }
+
+        .hash-info-box {
+            display: flex;
+            gap: 12px;
+            padding: 16px;
+            background: var(--primary-soft);
+            border-radius: 8px;
+            border: 1px solid var(--primary-soft-hover);
+        }
+
+        .hash-info-box i {
+            color: var(--primary);
+            font-size: 18px;
+            margin-top: 2px;
+        }
+
+        .hash-info-box strong {
+            display: block;
+            font-size: 13px;
+            color: var(--text);
+            margin-bottom: 4px;
+        }
+
+        .hash-info-box p {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        /* 按键标记参考 */
+        .keybinds-section {
+            background: var(--surface);
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            padding: 32px;
+        }
+
+        .keybinds-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+
+        .keybind-tab {
+            padding: 10px 20px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .keybind-tab:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .keybind-tab.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .keybinds-panel {
+            display: none;
+        }
+
+        .keybinds-panel.active {
+            display: block;
+        }
+
+        .keybind-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
+        }
+
+        .keybind-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--bg);
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            transition: var(--transition);
+        }
+
+        .keybind-item:hover {
+            border-color: var(--primary);
+            transform: translateX(4px);
+        }
+
+        .keybind-item code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--primary);
+            background: var(--primary-soft-hover);
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .keybind-item span {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .footer-top {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 60px;
+            margin-bottom: 60px;
+        }
+
+        .footer-brand {
+            max-width: 320px;
+        }
+
+        .footer-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .footer-logo .logo-icon {
+            width: 38px;
+            height: 38px;
+            font-size: 0.8rem;
+        }
+
+        .footer-logo span {
+            font-weight: 700;
+            font-size: 1.15rem;
+            color: var(--text);
+        }
+
+        .footer-description {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.7;
+            margin-bottom: 24px;
+        }
+
+        .footer-social {
+            display: flex;
+            gap: 12px;
+        }
+
+        .social-link {
+            width: 40px;
+            height: 40px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-xs);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: var(--transition);
+        }
+
+        .social-link:hover {
+            background: var(--gradient-orange-pink);
+            border-color: transparent;
+            color: white;
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(249, 115, 22, 0.3);
+        }
+
+        .footer-column h4 {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .footer-links {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .footer-links a:hover {
+            color: var(--primary);
+            transform: translateX(4px);
+        }
+
+        .footer-bottom {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 40px;
+            border-top: 1px solid var(--border);
+        }
+
+        .footer-copyright {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .footer-author {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 16px;
+            background: var(--surface);
+            border-radius: var(--radius-xs);
+            border: 1px solid var(--border);
+        }
+
+        .footer-author-icon {
+            width: 32px;
+            height: 32px;
+            background: var(--gradient-orange-pink);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.8rem;
+        }
+
+        .footer-author-text {
+            font-size: 0.85rem;
+        }
+
+        .footer-author-text strong {
+            display: block;
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .footer-author-text span {
+            color: var(--text-muted);
+        }
+
+        /* 动画 */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(40px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInRight {
+            from {
+                opacity: 0;
+                transform: translateX(40px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .animate-on-scroll {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 0.6s ease, transform 0.6s ease;
+        }
+
+        .animate-on-scroll.animated {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* 滚动触发动画增强 */
+        .scroll-animate {
+            opacity: 0;
+            transform: translateY(50px);
+            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .scroll-animate.from-left {
+            transform: translateX(-50px) translateY(50px);
+        }
+
+        .scroll-animate.from-right {
+            transform: translateX(50px) translateY(50px);
+        }
+
+        .scroll-animate.from-bottom {
+            transform: translateY(50px);
+        }
+
+        .scroll-animate.visible {
+            opacity: 1;
+            transform: translateY(0) translateX(0);
+        }
+
+        /* 视差效果 */
+        .parallax-container {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .parallax-element {
+            transition: transform 0.1s ease-out;
+        }
+
+        /* 响应式 */
+        @media (max-width: 1024px) {
+            .hero-content {
+                grid-template-columns: 1fr;
+                gap: 60px;
+            }
+
+            .hero-title {
+                font-size: 3rem;
+            }
+
+            .hero-visual {
+                order: -1;
+            }
+
+            .app-window {
+                transform: none;
+            }
+
+            .app-window:hover {
+                transform: translateY(-10px);
+            }
+
+            .features-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .specs-content {
+                grid-template-columns: 1fr;
+            }
+
+            .specs-left {
+                position: static;
+            }
+
+            .footer-top {
+                grid-template-columns: 1fr;
+                gap: 40px;
+            }
+        }
+
+        /* 移动端现代化设计 */
+        @media (max-width: 768px) {
+            :root {
+                --radius: 16px;
+                --radius-sm: 12px;
+            }
+
+            html {
+                font-size: 15px;
+            }
+
+            body {
+                -webkit-tap-highlight-color: transparent;
+                -webkit-touch-callout: none;
+            }
+
+            .nav {
+                padding: 0;
+                height: 60px;
+            }
+
+            .nav-content {
+                padding: 0 16px;
+                height: 60px;
+                position: relative;
+                gap: 12px;
+            }
+
+            .logo {
+                order: 1;
+                margin-right: auto;
+            }
+
+            .nav-links {
+                order: 2;
+            }
+
+            .nav-cta {
+                order: 3;
+            }
+
+            .mobile-controls {
+                order: 4;
+            }
+
+            .logo-text {
+                font-size: 1.1rem;
+            }
+
+            .logo-icon {
+                width: 36px;
+                height: 36px;
+            }
+
+            .nav-links {
+                display: none !important;
+                position: absolute;
+                top: calc(100% + 8px);
+                right: 16px;
+                min-width: 180px;
+                background: var(--surface);
+                backdrop-filter: blur(12px) saturate(150%);
+                -webkit-backdrop-filter: blur(12px) saturate(150%);
+                flex-direction: column;
+                padding: 8px;
+                gap: 4px;
+                border-radius: var(--radius-sm);
+                border: 1px solid var(--border);
+                box-shadow: 0 8px 32px var(--shadow-color);
+                z-index: 1000;
+                animation: fadeIn 0.2s ease;
+            }
+
+            @keyframes fadeIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(-8px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+
+            .nav-links.show {
+                display: flex !important;
+            }
+
+            .nav-links li a {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 12px 14px;
+                font-size: 0.95rem;
+                font-weight: 500;
+                border-radius: 8px;
+                background: transparent;
+                margin-bottom: 0;
+            }
+
+            .nav-links li a i {
+                display: inline-block;
+                width: 18px;
+                text-align: center;
+                color: var(--primary);
+                font-size: 0.9rem;
+            }
+
+            .nav-links li a:active {
+                background: var(--primary);
+                color: white;
+            }
+
+            .nav-links li a:active i {
+                color: white;
+            }
+
+            .nav-cta {
+                display: flex;
+                gap: 8px;
+                order: 2;
+            }
+
+            .nav-cta .btn-primary {
+                display: none;
+            }
+
+            .nav-cta .theme-toggle {
+                display: none;
+            }
+
+            .mobile-controls {
+                display: flex;
+                gap: 8px;
+                order: 3;
+            }
+
+            .theme-toggle {
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+            }
+
+            .mobile-menu-btn {
+                display: flex !important;
+                width: 44px;
+                height: 44px;
+                border-radius: 12px;
+                font-size: 1.3rem;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .hero {
+                min-height: auto;
+                padding: 80px 0 40px;
+            }
+
+            .hero-content {
+                gap: 32px;
+            }
+
+            .hero-badge {
+                padding: 8px 16px;
+                font-size: 0.8rem;
+            }
+
+            .hero-title {
+                font-size: 2rem;
+                line-height: 1.2;
+                letter-spacing: -0.5px;
+            }
+
+            .hero-description {
+                font-size: 1.1rem;
+                line-height: 1.7;
+            }
+
+            .hero-stats {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 12px;
+                width: 100%;
+            }
+
+            .stat-item {
+                flex-direction: column;
+                text-align: center;
+                padding: 16px 8px;
+                background: var(--surface);
+                border-radius: var(--radius-sm);
+                border: 1px solid var(--border);
+            }
+
+            .stat-item::after {
+                display: none;
+            }
+
+            .stat-number {
+                font-size: 1.5rem;
+            }
+
+            .stat-label {
+                font-size: 0.75rem;
+            }
+
+            .hero-actions {
+                flex-direction: column;
+                gap: 12px;
+                width: 100%;
+            }
+
+            .btn {
+                width: 100%;
+                padding: 16px 24px;
+                font-size: 1rem;
+                border-radius: var(--radius-sm);
+            }
+
+            .btn-download {
+                order: -1;
+            }
+
+            .hero-visual {
+                margin: 0 -16px;
+            }
+
+            .app-window {
+                border-radius: 0;
+                border-left: none;
+                border-right: none;
+                transform: none !important;
+            }
+
+            .app-window:hover {
+                transform: none !important;
+            }
+
+            .version-tabs {
+                padding: 8px;
+                gap: 4px;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .version-tab {
+                padding: 8px 16px;
+                font-size: 0.85rem;
+                white-space: nowrap;
+                flex-shrink: 0;
+            }
+
+            .window-content {
+                padding: 16px;
+                min-height: auto;
+            }
+
+            .code-block {
+                font-size: 0.85rem;
+            }
+
+            .floating-badge {
+                display: none;
+            }
+
+            .section-header {
+                margin-bottom: 24px;
+            }
+
+            .section-tag {
+                font-size: 0.75rem;
+            }
+
+            .section-title {
+                font-size: 1.75rem;
+            }
+
+            .section-subtitle {
+                font-size: 0.95rem;
+            }
+
+            .features-grid {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+
+            .feature-card {
+                padding: 20px;
+                border-radius: var(--radius-sm);
+            }
+
+            .feature-icon {
+                width: 48px;
+                height: 48px;
+                font-size: 1.2rem;
+            }
+
+            .feature-title {
+                font-size: 1.1rem;
+            }
+
+            .specs-tabs {
+                display: flex;
+                overflow-x: auto;
+                gap: 8px;
+                padding: 4px;
+                margin-bottom: 20px;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            .specs-tab {
+                flex-shrink: 0;
+                padding: 12px 20px;
+                font-size: 0.9rem;
+            }
+
+            .specs-table {
+                font-size: 0.85rem;
+            }
+
+            .specs-table th,
+            .specs-table td {
+                padding: 12px 10px;
+            }
+
+            .tools-grid {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+
+            .tool-card {
+                border-radius: var(--radius-sm);
+            }
+
+            .tool-header {
+                padding: 16px;
+            }
+
+            .tool-body {
+                padding: 16px;
+            }
+
+            .tool-input-group textarea,
+            .tool-input-group input {
+                padding: 14px;
+                font-size: 1rem;
+            }
+
+            .token-quick-insert {
+                flex-wrap: wrap;
+            }
+
+            .quick-btn {
+                padding: 10px 14px;
+                font-size: 0.9rem;
+            }
+
+            .keybind-section {
+                padding: 16px;
+            }
+
+            .keybind-tabs {
+                gap: 8px;
+            }
+
+            .keybind-tab {
+                padding: 10px 16px;
+                font-size: 0.9rem;
+            }
+
+            .keybind-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+
+            .keybind-item {
+                padding: 12px;
+            }
+
+            .keybind-key {
+                font-size: 0.9rem;
+            }
+
+            .download-card {
+                padding: 32px 20px;
+                border-radius: var(--radius-sm);
+            }
+
+            .download-icon {
+                width: 64px;
+                height: 64px;
+            }
+
+            .download-title {
+                font-size: 1.5rem;
+            }
+
+            .download-info {
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .download-info-item {
+                padding: 12px 16px;
+                background: var(--bg);
+                border-radius: var(--radius-sm);
+            }
+
+            .community-grid {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+
+            .community-card {
+                padding: 20px;
+            }
+
+            .footer {
+                padding: 40px 0 20px;
+            }
+
+            .footer-top {
+                gap: 32px;
+            }
+
+            .footer-brand {
+                text-align: center;
+            }
+
+            .footer-links {
+                justify-content: center;
+            }
+
+            .footer-bottom {
+                flex-direction: column;
+                gap: 16px;
+                text-align: center;
+                padding-top: 20px;
+            }
+
+            .footer-bottom-links {
+                justify-content: center;
+            }
+
+            .scroll-animate {
+                opacity: 1 !important;
+                transform: none !important;
+            }
+
+            .token-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 10px;
+            }
+
+            .token-item {
+                padding: 10px;
+            }
+
+            .hash-results {
+                gap: 12px;
+            }
+
+            .hash-result-card {
+                padding: 14px;
+            }
+
+            .hash-value {
+                font-size: 0.9rem;
+                word-break: break-all;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 0 12px;
+            }
+
+            .hero {
+                padding: 70px 0 32px;
+            }
+
+            .hero-title {
+                font-size: 1.75rem;
+            }
+
+            .hero-stats {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+
+            .stat-item {
+                flex-direction: row;
+                justify-content: space-between;
+                padding: 12px 16px;
+            }
+
+            .section-title {
+                font-size: 1.5rem;
+            }
+
+            .token-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .keybind-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .version-tabs {
+                justify-content: flex-start;
+            }
+
+            .version-tab {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+            }
+        }
+
+        /* 移动端底部安全区域 */
+        @media (max-width: 768px) {
+            .footer {
+                padding-bottom: calc(20px + env(safe-area-inset-bottom));
+            }
+        }
+
+        /* 移动端触摸优化 */
+        @media (hover: none) and (pointer: coarse) {
+            .btn:active {
+                transform: scale(0.98);
+            }
+
+            .feature-card:active {
+                transform: scale(0.99);
+            }
+
+            .quick-btn:active {
+                transform: scale(0.95);
+            }
+
+            .version-tab:active,
+            .specs-tab:active,
+            .keybind-tab:active {
+                transform: scale(0.98);
+            }
+        }
+
+        /* 点击效果 */
+        .click-ripple {
+            position: fixed;
+            pointer-events: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--gradient-orange-pink);
+            opacity: 0.5;
+            transform: scale(0);
+            animation: clickRipple 0.6s ease-out forwards;
+            z-index: 9999;
+        }
+
+        @keyframes clickRipple {
+            to {
+                transform: scale(8);
+                opacity: 0;
+            }
+        }
+
+        /* 光标跟随效果 */
+        /* 光标跟随 - 仅在非移动设备时启用 */
+        .cursor-glow {
+            position: fixed;
+            width: 300px;
+            height: 300px;
+            border-radius: 50%;
+            background: radial-gradient(circle, var(--particle-color) 0%, transparent 70%);
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            z-index: 0;
+            transition: opacity 0.3s ease;
+            display: none;
+        }
+
+        @media (min-width: 768px) {
+            .cursor-glow {
+                display: block;
+            }
+        }
+
+        /* 加载动画 */
+        .page-loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            transition: opacity 0.5s ease, visibility 0.5s ease;
+        }
+
+        .page-loader.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .loader-content {
+            text-align: center;
+        }
+
+        .loader-icon {
+            width: 60px;
+            height: 60px;
+            background: var(--gradient-orange-pink);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1.2rem;
+            color: white;
+            margin: 0 auto 20px;
+            animation: loaderPulse 1.5s ease infinite;
+        }
+
+        @keyframes loaderPulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
+            50% { transform: scale(1.05); box-shadow: 0 0 30px 10px rgba(249, 115, 22, 0.3); }
+        }
+
+        .loader-text {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* 选择文本样式 */
+        ::selection {
+            background: var(--primary);
+            color: white;
+        }
+
+        /* 重点文字渐变样式 */
+        .text-gradient {
+            background: var(--gradient-orange-pink);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* 滚动进度指示 */
+        .scroll-progress {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 2px;
+            background: var(--gradient-orange-pink);
+            z-index: 10001;
+            transition: width 0.1s ease;
+            width: 0%;
+        }
+
+        /* 悬浮按钮动画 */
+        .float-animation {
+            animation: float 3s ease-in-out infinite;
+        }
+
+        /* 弹跳动画 */
+        .bounce-animation {
+            animation: bounce 2s ease infinite;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-20px); }
+            60% { transform: translateY(-10px); }
+        }
+
+        /* 旋转动画 */
+        .rotate-animation {
+            animation: rotate 10s linear infinite;
+        }
+
+        /* 缩放动画 */
+        .scale-animation {
+            animation: scale 2s ease-in-out infinite;
+        }
+
+        @keyframes scale {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        /* 淡入淡出动画 */
+        .fade-animation {
+            animation: fade 3s ease-in-out infinite;
+        }
+
+        @keyframes fade {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* 滑动动画 */
+        .slide-animation {
+            animation: slide 4s ease-in-out infinite;
+        }
+
+        @keyframes slide {
+            0%, 100% { transform: translateX(0); }
+            50% { transform: translateX(10px); }
+        }
+    </style>
+</head>
+<body>
+    <!-- 页面加载器 -->
+    <div class="page-loader" id="pageLoader">
+        <div class="loader-content">
+            <img src="icon/favicon.png" alt="GXTStudio" style="width: 60px; height: 60px; border-radius: 16px; margin-bottom: 20px; animation: loaderPulse 1.5s ease infinite;" loading="eager">
+            <div class="loader-text">正在加载...</div>
+        </div>
+    </div>
+
+    <!-- 滚动进度指示 -->
+    <div class="scroll-progress" id="scrollProgress"></div>
+
+    <!-- 粒子背景 -->
+    <canvas id="particles-canvas"></canvas>
+
+    <!-- 光标跟随 -->
+    <div class="cursor-glow" id="cursorGlow"></div>
+
+    <!-- 导航栏 -->
+    <nav class="navbar" id="navbar">
+        <div class="container nav-content">
+            <a href="#" class="logo">
+                <img src="icon/favicon.png" alt="GXTStudio" class="logo-icon" style="width: 42px; height: 42px; border-radius: 12px;">
+                <span class="logo-text">GXT<span>Studio</span></span>
+            </a>
+
+            <ul class="nav-links">
+                <li><a href="#features"><i class="fas fa-star"></i>功能特性</a></li>
+                <li><a href="#specs"><i class="fas fa-cog"></i>技术规格</a></li>
+                <li><a href="#format-guide"><i class="fas fa-file-code"></i>文件格式</a></li>
+                <li><a href="#tools"><i class="fas fa-tools"></i>在线工具</a></li>
+                <li><a href="#download"><i class="fas fa-download"></i>下载</a></li>
+                <li><a href="#comments"><i class="fas fa-comments"></i>评论区</a></li>
+            </ul>
+
+            <div class="nav-cta">
+                <button class="theme-toggle" id="themeToggle" aria-label="切换主题">
+                    <i class="fas fa-sun"></i>
+                    <i class="fas fa-moon"></i>
+                </button>
+                <a href="#download" class="btn btn-primary">
+                    <i class="fas fa-download"></i>
+                    下载
+                </a>
+            </div>
+
+            <div class="mobile-controls">
+                <button class="theme-toggle mobile-theme-toggle" aria-label="切换主题">
+                    <i class="fas fa-sun"></i>
+                    <i class="fas fa-moon"></i>
+                </button>
+                <button class="mobile-menu-btn" id="mobileMenuBtn">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 英雄区域 -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <div class="hero-text">
+                    <div class="hero-badge scroll-animate from-left">
+                        <i class="fas fa-heart"></i>
+                        个人开发者用爱发电
+                    </div>
+                    <h1 class="hero-title scroll-animate from-left">
+                        <span class="line">专业的</span>
+                        <span class="line"><span class="text-gradient">GXT文本</span></span>
+                        <span class="line">资源编辑器</span>
+                    </h1>
+                    <p class="hero-description scroll-animate from-left">
+                        专业的GTA文本资源编辑器。支持GTA III、罪恶都市、圣安地列斯、GTA IV等版本的GXT文件编辑，提供智能翻译、码表转换、文本渲染预览等功能。
+                    </p>
+                    <div class="hero-actions scroll-animate from-left">
+                        <a href="#download" class="btn btn-primary btn-download">
+                            <i class="fas fa-download"></i>
+                            下载 Windows 版本
+                        </a>
+                        <a href="#features" class="btn btn-ghost">
+                            <i class="fas fa-play"></i>
+                            了解更多
+                        </a>
+                    </div>
+                    <div class="hero-stats scroll-animate from-left">
+                        <div class="stat-item">
+                            <span class="stat-number" data-target="5">0</span>
+                            <span class="stat-label">支持游戏版本</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number" data-target="6">0</span>
+                            <span class="stat-label">核心功能</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-number" data-target="100">0</span>
+                            <span class="stat-label">% 免费开源</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hero-visual scroll-animate from-right">
+                    <div class="app-window">
+                        <div class="window-header">
+                            <div class="window-dots">
+                                <div class="window-dot dot-red"></div>
+                                <div class="window-dot dot-yellow"></div>
+                                <div class="window-dot dot-green"></div>
+                            </div>
+                            <span class="window-title">GXTStudio - <span id="gxtFileName">english.gxt</span></span>
+                            <div style="width: 52px;"></div>
+                        </div>
+                        <div class="version-tabs">
+                            <button class="version-tab active" data-version="sa">GTA SA</button>
+                            <button class="version-tab" data-version="iv">GTA IV</button>
+                            <button class="version-tab" data-version="vc">GTA VC</button>
+                            <button class="version-tab" data-version="iii">GTA III</button>
+                        </div>
+                        <div class="window-content">
+                            <div class="code-block" id="codeBlock">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="floating-badge success">
+                        <i class="fas fa-check-circle"></i>
+                        翻译完成
+                    </div>
+                    <div class="floating-badge info">
+                        <i class="fas fa-magic"></i>
+                        智能翻译中...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 功能区域 -->
+    <section class="features" id="features">
+        <div class="container">
+            <div class="section-header scroll-animate from-bottom">
+                <div class="section-tag">
+                    <i class="fas fa-sparkles"></i>
+                    核心功能
+                </div>
+                <h2 class="section-title">强大而易用的功能特性</h2>
+                <p class="section-subtitle">
+                    专为GTA模组开发者设计，让文本编辑变得简单高效
+                </p>
+            </div>
+
+            <div class="features-grid">
+                <div class="feature-card scroll-animate from-bottom" style="transition-delay: 0.1s;">
+                    <div class="feature-icon">
+                        <i class="fas fa-language"></i>
+                    </div>
+                    <h3 class="feature-title">智能翻译系统</h3>
+                    <p class="feature-description">
+                        内置AI翻译引擎，支持批量翻译GXT文本条目。可配置API密钥、系统提示词和批次大小，自动频率控制和重试机制确保翻译稳定性。
+                    </p>
+                    <span class="feature-tag">AI驱动</span>
+                </div>
+
+                <div class="feature-card scroll-animate from-bottom" style="transition-delay: 0.2s;">
+                    <div class="feature-icon">
+                        <i class="fas fa-table-cells"></i>
+                    </div>
+                    <h3 class="feature-title">码表转换工具</h3>
+                    <p class="feature-description">
+                        支持挂载自定义码表文件，实现码表字符与Unicode字符的双向转换。适用于特殊字符编码的游戏文本本地化工作。
+                    </p>
+                    <span class="feature-tag">双向转换</span>
+                </div>
+
+                <div class="feature-card scroll-animate from-bottom" style="transition-delay: 0.3s;">
+                    <div class="feature-icon">
+                        <i class="fas fa-image"></i>
+                    </div>
+                    <h3 class="feature-title">文本渲染预览</h3>
+                    <p class="feature-description">
+                        仿真游戏内文本显示效果，支持颜色标记解析、描边和阴影效果。可导出渲染结果为PNG图片，支持拖放操作。
+                    </p>
+                    <span class="feature-tag">实时预览</span>
+                </div>
+
+                <div class="feature-card scroll-animate from-bottom" style="transition-delay: 0.4s;">
+                    <div class="feature-icon">
+                        <i class="fas fa-code-compare"></i>
+                    </div>
+                    <h3 class="feature-title">多版本格式支持</h3>
+                    <p class="feature-description">
+                        完整支持GTA III、罪恶都市、圣安地列斯、GTA IV及GXT2格式。自动识别版本，支持TKEY、TDAT、TABL块解析。
+                    </p>
+                    <span class="feature-tag">GTA III-IV</span>
+                </div>
+
+                <div class="feature-card scroll-animate from-bottom" style="transition-delay: 0.5s;">
+                    <div class="feature-icon">
+                        <i class="fas fa-bolt"></i>
+                    </div>
+                    <h3 class="feature-title">高效文件处理</h3>
+                    <p class="feature-description">
+                        采用内存映射技术加速大文件读取，LRU缓存管理已解析文件，多线程解析和保存确保操作流畅。
+                    </p>
+                    <span class="feature-tag">性能优化</span>
+                </div>
+
+                <div class="feature-card scroll-animate from-bottom" style="transition-delay: 0.6s;">
+                    <div class="feature-icon">
+                        <i class="fas fa-shield-halved"></i>
+                    </div>
+                    <h3 class="feature-title">字符表管理</h3>
+                    <p class="feature-description">
+                        支持打开、编辑和导出字符表文件。多标签页管理，方便同时处理多个字符表文件，支持格式检测和转换。
+                    </p>
+                    <span class="feature-tag">多标签页</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 技术规格 -->
+    <section class="specs" id="specs">
+        <div class="container">
+            <div class="section-header scroll-animate from-bottom">
+                <div class="section-tag">
+                    <i class="fas fa-cog"></i>
+                    技术规格
+                </div>
+                <h2 class="section-title">专业技术细节</h2>
+                <p class="section-subtitle">
+                    基于Qt 6.0框架开发，提供原生级性能体验
+                </p>
+            </div>
+
+            <div class="specs-content">
+                <div class="specs-left">
+                    <div class="specs-list">
+                        <div class="spec-item scroll-animate from-left" style="transition-delay: 0.1s;">
+                            <div class="spec-icon">
+                                <i class="fas fa-microchip"></i>
+                            </div>
+                            <div class="spec-text">
+                                <h4>Qt 6.0 框架</h4>
+                                <p>现代化C++框架，原生级性能，跨平台兼容</p>
+                            </div>
+                        </div>
+
+                        <div class="spec-item scroll-animate from-left" style="transition-delay: 0.2s;">
+                            <div class="spec-icon">
+                                <i class="fas fa-file-code"></i>
+                            </div>
+                            <div class="spec-text">
+                                <h4>完整格式支持</h4>
+                                <p>TKEY条目、TDAT条目、TABL表块等数据块解析，支持CRC32索引</p>
+                            </div>
+                        </div>
+
+                        <div class="spec-item scroll-animate from-left" style="transition-delay: 0.3s;">
+                            <div class="spec-icon">
+                                <i class="fas fa-users"></i>
+                            </div>
+                            <div class="spec-text">
+                                <h4>社区驱动</h4>
+                                <p>GTAmod中文组核心成员开发维护</p>
+                            </div>
+                        </div>
+
+                        <div class="spec-item scroll-animate from-left" style="transition-delay: 0.4s;">
+                            <div class="spec-icon">
+                                <i class="fab fa-github"></i>
+                            </div>
+                            <div class="spec-text">
+                                <h4>开源GPL协议</h4>
+                                <p>完全免费，代码透明，欢迎贡献</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="specs-visual scroll-animate from-right" style="transition-delay: 0.5s;">
+                    <div class="specs-tabs">
+                        <button class="specs-tab active" data-tab="formats">格式支持</button>
+                        <button class="specs-tab" data-tab="tokens">Token 语法</button>
+                        <button class="specs-tab" data-tab="encodings">编码支持</button>
+                    </div>
+
+                    <div class="specs-panel active" id="formats">
+                        <table class="format-table">
+                            <thead>
+                                <tr>
+                                    <th>文件类型</th>
+                                    <th>游戏版本/说明</th>
+                                    <th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="format-name">.gxt</span></td>
+                                    <td><span class="format-desc">GTA III / 罪恶都市 / 圣安地列斯</span></td>
+                                    <td><span class="tag"><i class="fas fa-check"></i> 支持</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span class="format-name">.gxt2</span></td>
+                                    <td><span class="format-desc">GTA IV 及扩展格式</span></td>
+                                    <td><span class="tag"><i class="fas fa-check"></i> 支持</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span class="format-name">.dat (WHM)</span></td>
+                                    <td><span class="format-desc">WHM哈希映射文件</span></td>
+                                    <td><span class="tag"><i class="fas fa-check"></i> 支持</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span class="format-name">.dat (CHACHAR)</span></td>
+                                    <td><span class="format-desc">字符表文件</span></td>
+                                    <td><span class="tag"><i class="fas fa-check"></i> 支持</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="specs-panel" id="tokens">
+                        <div class="token-grid">
+                            <div class="token-item">
+                                <div class="token-code">~r~</div>
+                                <div class="token-desc">红色文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~g~</div>
+                                <div class="token-desc">绿色文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~b~</div>
+                                <div class="token-desc">蓝色文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~y~</div>
+                                <div class="token-desc">黄色文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~p~</div>
+                                <div class="token-desc">紫色文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~w~</div>
+                                <div class="token-desc">白色文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~h~</div>
+                                <div class="token-desc">高亮文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~s~</div>
+                                <div class="token-desc">恢复标准色</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~l~</div>
+                                <div class="token-desc">黑色文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~o~</div>
+                                <div class="token-desc">粉色文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~q~</div>
+                                <div class="token-desc">浅粉文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~x~</div>
+                                <div class="token-desc">淡蓝文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~t~</div>
+                                <div class="token-desc">青绿文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~a~</div>
+                                <div class="token-desc">橙色文本</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~n~</div>
+                                <div class="token-desc">换行符</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~1~</div>
+                                <div class="token-desc">数字标记</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~u~</div>
+                                <div class="token-desc">向上箭头 ▲</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~d~</div>
+                                <div class="token-desc">向下箭头 ▼</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~&lt;~</div>
+                                <div class="token-desc">向左箭头 ◄</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~&gt;~</div>
+                                <div class="token-desc">向右箭头 ►</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~f~</div>
+                                <div class="token-desc">文本闪烁</div>
+                            </div>
+                            <div class="token-item">
+                                <div class="token-code">~z~</div>
+                                <div class="token-desc">字幕标记</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="specs-panel" id="encodings">
+                        <table class="format-table">
+                            <thead>
+                                <tr>
+                                    <th>编码类型</th>
+                                    <th>适用游戏</th>
+                                    <th>状态</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="format-name">Windows-1252</span></td>
+                                    <td><span class="format-desc">圣安地列斯</span></td>
+                                    <td><span class="tag"><i class="fas fa-check"></i> 支持</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span class="format-name">UTF-16LE</span></td>
+                                    <td><span class="format-desc">罪恶都市</span></td>
+                                    <td><span class="tag"><i class="fas fa-check"></i> 支持</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span class="format-name">GBK</span></td>
+                                    <td><span class="format-desc">中文本地化</span></td>
+                                    <td><span class="tag"><i class="fas fa-check"></i> 支持</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span class="format-name">UTF-8</span></td>
+                                    <td><span class="format-desc">通用编码</span></td>
+                                    <td><span class="tag"><i class="fas fa-check"></i> 支持</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span class="format-name">自定义码表</span></td>
+                                    <td><span class="format-desc">用户挂载码表</span></td>
+                                    <td><span class="tag"><i class="fas fa-check"></i> 支持</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- GXT文件格式详解 -->
+    <section class="format-guide" id="format-guide">
+        <div class="container">
+            <div class="section-header scroll-animate from-bottom">
+                <div class="section-tag">
+                    <i class="fas fa-book"></i>
+                    文件格式
+                </div>
+                <h2 class="section-title">GXT文件格式详解</h2>
+                <p class="section-subtitle">
+                    了解GXT文件的内部结构，掌握各版本格式差异
+                </p>
+            </div>
+
+            <div class="format-guide-content">
+                <!-- 格式概述 -->
+                <div class="format-card scroll-animate from-left">
+                    <div class="format-card-header">
+                        <div class="format-card-icon">
+                            <i class="fas fa-info-circle"></i>
+                        </div>
+                        <h3>格式概述</h3>
+                    </div>
+                    <div class="format-card-body">
+                        <p>GXT文件的作用相当于字典，将简短的符号型字符串映射为完整的长文本字符串。开发人员在代码中仅需使用简短的键名（例如 <code>GM_OVR</code>），在游戏向玩家展示文本时，该键名会被替换为玩家所选语言的翻译文本。</p>
+                        <p>这种设计让游戏的多语言翻译工作无需对核心代码做大量修改：翻译人员只需将游戏文本翻译成对应语言，玩家选择该语言后，游戏就会调用对应语言的GXT文件中的文本内容。</p>
+                    </div>
+                </div>
+
+                <!-- 格式版本卡片 -->
+                <div class="format-versions">
+                    <div class="format-version-card scroll-animate from-bottom" style="transition-delay: 0.1s;">
+                        <div class="version-header">
+                            <span class="version-badge">GTA III</span>
+                            <span class="version-status supported">支持</span>
+                        </div>
+                        <div class="version-body">
+                            <h4>文件结构</h4>
+                            <div class="structure-diagram">
+                                <div class="structure-block">TKEY块</div>
+                                <div class="structure-arrow">→</div>
+                                <div class="structure-block">TDAT块</div>
+                            </div>
+                            <ul class="version-features">
+                                <li><i class="fas fa-check"></i> 无文件头，直接以TKEY块起始</li>
+                                <li><i class="fas fa-check"></i> 宽字符编码（UTF-16LE）</li>
+                                <li><i class="fas fa-check"></i> 条目按字母顺序排序</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="format-version-card scroll-animate from-bottom" style="transition-delay: 0.2s;">
+                        <div class="version-header">
+                            <span class="version-badge">GTA 罪恶都市</span>
+                            <span class="version-status supported">支持</span>
+                        </div>
+                        <div class="version-body">
+                            <h4>文件结构</h4>
+                            <div class="structure-diagram">
+                                <div class="structure-block">TABL块</div>
+                                <div class="structure-arrow">→</div>
+                                <div class="structure-block">TKEY块</div>
+                                <div class="structure-arrow">→</div>
+                                <div class="structure-block">TDAT块</div>
+                            </div>
+                            <ul class="version-features">
+                                <li><i class="fas fa-check"></i> 新增TABL块支持多子表</li>
+                                <li><i class="fas fa-check"></i> UTF-16编码</li>
+                                <li><i class="fas fa-check"></i> 支持MAIN主表</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="format-version-card scroll-animate from-bottom" style="transition-delay: 0.3s;">
+                        <div class="version-header">
+                            <span class="version-badge">GTA 圣安地列斯</span>
+                            <span class="version-status supported">支持</span>
+                        </div>
+                        <div class="version-body">
+                            <h4>文件结构</h4>
+                            <div class="structure-diagram">
+                                <div class="structure-block header">文件头</div>
+                                <div class="structure-arrow">→</div>
+                                <div class="structure-block">TABL块</div>
+                                <div class="structure-arrow">→</div>
+                                <div class="structure-block">TKEY/TDAT</div>
+                            </div>
+                            <ul class="version-features">
+                                <li><i class="fas fa-check"></i> 文件头版本号固定为4</li>
+                                <li><i class="fas fa-check"></i> CRC32校验值索引</li>
+                                <li><i class="fas fa-check"></i> Windows-1252编码</li>
+                                <li><i class="fas fa-check"></i> 最多200个子表</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                    <div class="format-version-card scroll-animate from-bottom" style="transition-delay: 0.4s;">
+                        <div class="version-header">
+                            <span class="version-badge">GTA IV</span>
+                            <span class="version-status supported">支持</span>
+                        </div>
+                        <div class="version-body">
+                            <h4>文件结构</h4>
+                            <div class="structure-diagram">
+                                <div class="structure-block header">文件头</div>
+                                <div class="structure-arrow">→</div>
+                                <div class="structure-block">TABL块</div>
+                                <div class="structure-arrow">→</div>
+                                <div class="structure-block">TKEY/TDAT</div>
+                            </div>
+                            <ul class="version-features">
+                                <li><i class="fas fa-check"></i> 8位/16位混合编码</li>
+                                <li><i class="fas fa-check"></i> 自定义字符编码表</li>
+                                <li><i class="fas fa-check"></i> GXT2扩展格式</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 数据块详解 -->
+                <div class="data-blocks-section scroll-animate from-bottom">
+                    <h3 class="subsection-title"><i class="fas fa-cube"></i> 数据块详解</h3>
+                    <div class="data-blocks-grid">
+                        <div class="data-block-card">
+                            <div class="block-header">
+                                <span class="block-name">TABL</span>
+                                <span class="block-desc">表块</span>
+                            </div>
+                            <div class="block-content">
+                                <p>存储所有子表的相关数据及偏移量。每个条目包含8字节子表名称和4字节偏移量。</p>
+                                <div class="block-structure">
+                                    <code>TABL标识(4B) + 块大小(4B) + 条目数组</code>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="data-block-card">
+                            <div class="block-header">
+                                <span class="block-name">TKEY</span>
+                                <span class="block-desc">键块</span>
+                            </div>
+                            <div class="block-content">
+                                <p>存储条目名称或CRC32校验值。SA/IV版本使用CRC32进行快速查找。</p>
+                                <div class="block-structure">
+                                    <code>TKEY标识(4B) + 块大小(4B) + 条目数组</code>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="data-block-card">
+                            <div class="block-header">
+                                <span class="block-name">TDAT</span>
+                                <span class="block-desc">数据块</span>
+                            </div>
+                            <div class="block-content">
+                                <p>存储条目的实际文本内容。条目以空字符\0结尾，顺序与源文件一致。</p>
+                                <div class="block-structure">
+                                    <code>TDAT标识(4B) + 块大小(4B) + 文本数据</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 交互工具区域 -->
+    <section class="tools-section" id="tools">
+        <div class="container">
+            <div class="section-header scroll-animate from-bottom">
+                <div class="section-tag">
+                    <i class="fas fa-tools"></i>
+                    交互工具
+                </div>
+                <h2 class="section-title">在线工具</h2>
+                <p class="section-subtitle">
+                    实时预览Token效果，计算CRC32校验值
+                </p>
+            </div>
+
+            <div class="tools-grid">
+                <!-- Token实时预览 -->
+                <div class="tool-card scroll-animate from-left">
+                    <div class="tool-header">
+                        <div class="tool-icon">
+                            <i class="fas fa-eye"></i>
+                        </div>
+                        <div class="tool-title">
+                            <h3>Token 实时预览</h3>
+                            <p>输入带标记符的文本，实时查看渲染效果</p>
+                        </div>
+                    </div>
+                    <div class="tool-body">
+                        <div class="tool-input-group">
+                            <label>输入文本</label>
+                            <textarea id="tokenInput" placeholder="输入文本，例如：~r~红色文本~s~ 恢复默认">~y~欢迎来到~s~ ~b~GXTStudio~s~！~n~~g~专业的GXT文件编辑器</textarea>
+                        </div>
+                        <div class="tool-output-group">
+                            <label>预览效果</label>
+                            <div id="tokenPreview" class="token-preview-box">
+                                <span style="color: #fbbf24;">欢迎来到</span> <span style="color: #3b82f6;">GXTStudio</span>！<br><span style="color: #22c55e;">专业的GXT文件编辑器</span>
+                            </div>
+                        </div>
+                        <div class="token-quick-insert">
+                            <span class="quick-label">快速插入：</span>
+                            <button class="quick-btn color-red" data-token="~r~" title="红色">~r~</button>
+                            <button class="quick-btn color-green" data-token="~g~" title="绿色">~g~</button>
+                            <button class="quick-btn color-blue" data-token="~b~" title="蓝色">~b~</button>
+                            <button class="quick-btn color-yellow" data-token="~y~" title="黄色">~y~</button>
+                            <button class="quick-btn color-purple" data-token="~p~" title="紫色">~p~</button>
+                            <button class="quick-btn color-white" data-token="~w~" title="白色">~w~</button>
+                            <button class="quick-btn color-highlight" data-token="~h~" title="高亮">~h~</button>
+                            <button class="quick-btn color-reset" data-token="~s~" title="恢复">~s~</button>
+                            <button class="quick-btn color-newline" data-token="~n~" title="换行">~n~</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CRC32计算器 -->
+                <div class="tool-card scroll-animate from-right">
+                    <div class="tool-header">
+                        <div class="tool-icon">
+                            <i class="fas fa-calculator"></i>
+                        </div>
+                        <div class="tool-title">
+                            <h3>哈希计算器</h3>
+                            <p>计算条目名称的哈希值（SA使用JAMCRC，IV使用自定义算法）</p>
+                        </div>
+                    </div>
+                    <div class="tool-body">
+                        <div class="tool-input-group">
+                            <label>条目名称</label>
+                            <input type="text" id="crcInput" placeholder="输入条目名称，例如：GM_OVR" value="GM_OVR">
+                        </div>
+                        <div class="hash-results">
+                            <div class="hash-result-card">
+                                <div class="hash-header">
+                                    <span class="hash-badge sa">GTA SA</span>
+                                    <span class="hash-name">JAMCRC</span>
+                                </div>
+                                <div class="hash-value-row">
+                                    <code id="jamcrcResult" class="hash-value">0x7190C4B5</code>
+                                    <button class="copy-btn-small" data-target="jamcrcResult" title="复制">
+                                        <i class="fas fa-copy"></i>
+                                    </button>
+                                </div>
+                                <p class="hash-desc">JAMCRC = CRC32取反</p>
+                            </div>
+                            <div class="hash-result-card">
+                                <div class="hash-header">
+                                    <span class="hash-badge iv">GTA IV</span>
+                                    <span class="hash-name">Custom Hash</span>
+                                </div>
+                                <div class="hash-value-row">
+                                    <code id="gta4hashResult" class="hash-value">0x000AF62E</code>
+                                    <button class="copy-btn-small" data-target="gta4hashResult" title="复制">
+                                        <i class="fas fa-copy"></i>
+                                    </button>
+                                </div>
+                                <p class="hash-desc">自定义哈希算法</p>
+                            </div>
+                        </div>
+                        <div class="hash-info-box">
+                            <i class="fas fa-info-circle"></i>
+                            <div>
+                                <strong>算法说明</strong>
+                                <p>GTA SA 使用 JAMCRC（CRC32取反），GTA IV 使用自定义哈希算法（自动转小写、反斜杠转斜杠）。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 按键标记参考 -->
+            <div class="keybinds-section scroll-animate from-bottom">
+                <h3 class="subsection-title"><i class="fas fa-gamepad"></i> 按键标记参考</h3>
+                <div class="keybinds-tabs">
+                    <button class="keybind-tab active" data-tab="walking">步行操控</button>
+                    <button class="keybind-tab" data-tab="vehicle">载具操控</button>
+                </div>
+                <div class="keybinds-content">
+                    <div class="keybinds-panel active" id="walking">
+                        <div class="keybind-grid">
+                            <div class="keybind-item">
+                                <code>~PED_FIREWEAPON~</code>
+                                <span>开火</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~PED_CYCLE_WEAPON_RIGHT~</code>
+                                <span>下一个武器</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~PED_CYCLE_WEAPON_LEFT~</code>
+                                <span>上一个武器</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~PED_LOCK_TARGET~</code>
+                                <span>锁定目标</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~PED_LOOKBEHIND~</code>
+                                <span>向后看</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~SNEAK_ABOUT~</code>
+                                <span>潜行</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~PED_JUMPING~</code>
+                                <span>跳跃</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~PED_SPRINT~</code>
+                                <span>冲刺</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~PED_DUCK~</code>
+                                <span>蹲下</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~PED_ANSWER_PHONE~</code>
+                                <span>接听电话</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~PED_WALK~</code>
+                                <span>行走</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~GROUP_CONTROL_FWD~</code>
+                                <span>团队前进</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="keybinds-panel" id="vehicle">
+                        <div class="keybind-grid">
+                            <div class="keybind-item">
+                                <code>~VEHICLE_FIREWEAPON~</code>
+                                <span>开火</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_ACCELERATE~</code>
+                                <span>加速</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_BRAKE~</code>
+                                <span>刹车</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_HANDBRAKE~</code>
+                                <span>手刹</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_HORN~</code>
+                                <span>鸣笛</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_RADIO_STATION_UP~</code>
+                                <span>下一个电台</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_RADIO_STATION_DOWN~</code>
+                                <span>上一个电台</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_LOOKLEFT~</code>
+                                <span>向左看</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_LOOKRIGHT~</code>
+                                <span>向右看</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_LOOKBEHIND~</code>
+                                <span>向后看</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_TURRETLEFT~</code>
+                                <span>炮塔左移</span>
+                            </div>
+                            <div class="keybind-item">
+                                <code>~VEHICLE_TURRETRIGHT~</code>
+                                <span>炮塔右移</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 下载区域 -->
+    <section class="download" id="download">
+        <div class="container">
+            <div class="download-card scroll-animate from-bottom">
+                <div class="download-content">
+                    <div class="download-icon">
+                        <i class="fab fa-windows"></i>
+                    </div>
+                    <h2 class="download-title">下载 GXTStudio</h2>
+                    <p class="download-subtitle">
+                        完全免费，无广告，无隐藏收费。由GTAmod中文组用爱发电，持续更新维护。
+                    </p>
+                    <a href="#" class="download-btn" id="downloadBtn">
+                        <i class="fas fa-download"></i>
+                        下载 Windows 版本
+                    </a>
+                    <div class="download-info">
+                        <div class="download-info-item">
+                            <i class="fas fa-tag"></i>
+                            <span>版本 3.0.0</span>
+                        </div>
+                        <div class="download-info-item">
+                            <i class="fas fa-hard-drive"></i>
+                            <span>约 45 MB</span>
+                        </div>
+                        <div class="download-info-item">
+                            <i class="fas fa-calendar"></i>
+                            <span>2025年3月更新</span>
+                        </div>
+                        <div class="download-info-item">
+                            <i class="fas fa-windows"></i>
+                            <span>Windows 10/11</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 社区区域 -->
+    <section class="community" id="community">
+        <div class="container">
+            <div class="section-header scroll-animate from-bottom">
+                <div class="section-tag">
+                    <i class="fas fa-users"></i>
+                    社区支持
+                </div>
+                <h2 class="section-title">加入我们的社区</h2>
+                <p class="section-subtitle">
+                    获取帮助、分享经验、参与开发
+                </p>
+            </div>
+
+            <div class="community-grid">
+                <div class="community-card scroll-animate from-left" style="transition-delay: 0.1s;">
+                    <div class="community-header">
+                        <div class="community-icon">
+                            <i class="fab fa-github"></i>
+                        </div>
+                        <h3>开源项目</h3>
+                    </div>
+                    <p>
+                        GXTStudio 完全开源，代码托管在GitHub。欢迎提交Issue、Pull Request，或Fork项目进行二次开发。
+                    </p>
+                    <div class="community-links">
+                        <a href="https://github.com/Lzh102938/GXTStudio" class="community-link">
+                            <i class="fas fa-code-branch"></i>
+                            <span>查看源代码</span>
+                            <i class="fas fa-arrow-right arrow"></i>
+                        </a>
+                        <a href="https://github.com/Lzh102938/GXTStudio/issues" class="community-link">
+                            <i class="fas fa-bug"></i>
+                            <span>报告问题</span>
+                            <i class="fas fa-arrow-right arrow"></i>
+                        </a>
+                        <a href="https://github.com/Lzh102938/GXTStudio" class="community-link">
+                            <i class="fas fa-book"></i>
+                            <span>开发文档</span>
+                            <i class="fas fa-arrow-right arrow"></i>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="community-card scroll-animate from-right" style="transition-delay: 0.2s;">
+                    <div class="community-header">
+                        <div class="community-icon">
+                            <i class="fas fa-comments"></i>
+                        </div>
+                        <h3>交流社区</h3>
+                    </div>
+                    <p>
+                        加入QQ群或Discord服务器，与其他GTA模组开发者交流经验，获取技术支持，分享你的作品。
+                    </p>
+                    <div class="community-links">
+                        <a href="#" class="community-link">
+                            <i class="fab fa-qq"></i>
+                            <span>QQ交流群</span>
+                            <i class="fas fa-arrow-right arrow"></i>
+                        </a>
+                        <a href="#" class="community-link">
+                            <i class="fab fa-discord"></i>
+                            <span>Discord 服务器</span>
+                            <i class="fas fa-arrow-right arrow"></i>
+                        </a>
+                        <a href="#" class="community-link">
+                            <i class="fas fa-globe"></i>
+                            <span>GTAmod 中文论坛</span>
+                            <i class="fas fa-arrow-right arrow"></i>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-top">
+                <div class="footer-brand scroll-animate from-left">
+                    <div class="footer-logo">
+                        <img src="icon/favicon.png" alt="GXTStudio" style="width: 38px; height: 38px; border-radius: 10px;">
+                        <span>GXTStudio</span>
+                    </div>
+                    <p class="footer-description">
+                        专业的GTA文本资源编辑器。支持GTA III、罪恶都市、圣安地列斯、GTA IV等版本的GXT文件编辑，提供智能翻译、码表转换、文本渲染预览等功能。完全免费开源。
+                    </p>
+                    <div class="footer-social">
+                        <a href="https://github.com/Lzh102938/GXTStudio" class="social-link" title="GitHub">
+                            <i class="fab fa-github"></i>
+                        </a>
+                        <a href="#" class="social-link" title="QQ交流群">
+                            <i class="fab fa-qq"></i>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="footer-column scroll-animate from-bottom" style="transition-delay: 0.1s;">
+                    <h4>产品</h4>
+                    <ul class="footer-links">
+                        <li><a href="https://github.com/Lzh102938/GXTStudio/releases"><i class="fas fa-download"></i> 下载</a></li>
+                        <li><a href="https://github.com/Lzh102938/GXTStudio"><i class="fas fa-book"></i> 文档</a></li>
+                        <li><a href="https://github.com/Lzh102938/GXTStudio/releases"><i class="fas fa-history"></i> 更新日志</a></li>
+                    </ul>
+                </div>
+
+                <div class="footer-column scroll-animate from-bottom" style="transition-delay: 0.2s;">
+                    <h4>支持</h4>
+                    <ul class="footer-links">
+                        <li><a href="https://github.com/Lzh102938/GXTStudio/issues"><i class="fas fa-question-circle"></i> 问题反馈</a></li>
+                        <li><a href="https://github.com/Lzh102938/GXTStudio/discussions"><i class="fas fa-comments"></i> 社区讨论</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="footer-bottom scroll-animate from-bottom" style="transition-delay: 0.3s;">
+                <p class="footer-copyright">
+                    © 2025 GXTStudio. 基于 GPL-3.0 协议开源
+                </p>
+                <div class="footer-author">
+                    <img src="icon/favicon.png" alt="GXTStudio" style="width: 32px; height: 32px; border-radius: 8px;">
+                    <div class="footer-author-text">
+                        <strong>Lzh10_慕黑</strong>
+                        <span>GTAmod 中文组</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- 评论区 -->
+    <section class="comments" id="comments">
+        <div class="container">
+            <div class="section-header scroll-animate from-bottom">
+                <div class="section-tag">
+                    <i class="fas fa-comments"></i>
+                    评论区
+                </div>
+                <h2 class="section-title">分享你的想法</h2>
+                <p class="section-subtitle">
+                    使用GitHub账号登录，参与讨论
+                </p>
+            </div>
+            <div class="giscus-container scroll-animate from-bottom">
+                <script src="https://giscus.app/client.js"
+                    data-repo="Lzh102938/GXTStudio"
+                    data-repo-id="R_kgDONf8H2w"
+                    data-category="Announcements"
+                    data-category-id="DIC_kwDONf8H284Cl8Tz"
+                    data-mapping="pathname"
+                    data-strict="0"
+                    data-reactions-enabled="1"
+                    data-emit-metadata="0"
+                    data-input-position="top"
+                    data-theme="preferred_color_scheme"
+                    data-lang="zh-CN"
+                    data-loading="lazy"
+                    crossorigin="anonymous"
+                    async>
+                </script>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        // 主题切换功能
+        (function() {
+            const themeToggles = document.querySelectorAll('.theme-toggle');
+            const html = document.documentElement;
+            
+            const savedTheme = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            
+            if (savedTheme) {
+                html.setAttribute('data-theme', savedTheme);
+            } else if (prefersDark) {
+                html.setAttribute('data-theme', 'dark');
+            }
+
+            themeToggles.forEach(toggle => {
+                toggle.addEventListener('click', function() {
+                    const currentTheme = html.getAttribute('data-theme');
+                    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                    
+                    html.setAttribute('data-theme', newTheme);
+                    localStorage.setItem('theme', newTheme);
+                });
+            });
+
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+                if (!localStorage.getItem('theme')) {
+                    html.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+                }
+            });
+        })();
+
+        // GXT版本示例数据
+        const gxtExamples = {
+            sa: {
+                filename: 'american.gxt',
+                lines: [
+                    { num: 1, content: '<span class="code-comment">; GTA San Andreas GXT</span>' },
+                    { num: 2, content: '<span class="code-keyword">[MAIN]</span>' },
+                    { num: 3, content: '<span class="code-tag">GM_OVR</span>=<span class="code-string">Game Over</span>' },
+                    { num: 4, content: '<span class="code-tag">FEST_H1</span>=<span class="code-string">任务完成!</span>' },
+                    { num: 5, content: '<span class="code-tag">WASTED</span>=<span class="code-string">已死亡</span>' },
+                    { num: 6, content: '<span class="code-tag">WANTED3</span>=<span class="code-string">通缉等级</span> ~r~★★★~w~' },
+                    { num: 7, content: '<span class="code-comment">; JAMCRC哈希</span>' },
+                    { num: 8, content: '' }
+                ]
+            },
+            iv: {
+                filename: 'american.gxt',
+                lines: [
+                    { num: 1, content: '<span class="code-comment">; GTA IV GXT (UTF-16LE)</span>' },
+                    { num: 2, content: '<span class="code-keyword">[MAIN]</span>' },
+                    { num: 3, content: '<span class="code-tag">0x000AF62E</span>=<span class="code-string">Game Over</span>' },
+                    { num: 4, content: '<span class="code-tag">0x00456A12</span>=<span class="code-string">任务完成</span>' },
+                    { num: 5, content: '<span class="code-tag">0x0089BC34</span>=<span class="code-string">已死亡</span>' },
+                    { num: 6, content: '<span class="code-comment">; 自定义哈希算法</span>' },
+                    { num: 7, content: '' },
+                    { num: 8, content: '' }
+                ]
+            },
+            vc: {
+                filename: 'american.gxt',
+                lines: [
+                    { num: 1, content: '<span class="code-comment">; GTA Vice City GXT</span>' },
+                    { num: 2, content: '<span class="code-keyword">[MAIN]</span>' },
+                    { num: 3, content: '<span class="code-tag">GM_OVR</span>=<span class="code-string">Game Over</span>' },
+                    { num: 4, content: '<span class="code-tag">M_PASSD</span>=<span class="code-string">任务完成!</span>' },
+                    { num: 5, content: '<span class="code-tag">WASTED</span>=<span class="code-string">已死亡</span>' },
+                    { num: 6, content: '<span class="code-tag">FEM_OK</span>=<span class="code-string">确定</span>' },
+                    { num: 7, content: '<span class="code-comment">; 键名最大8字符</span>' },
+                    { num: 8, content: '' }
+                ]
+            },
+            iii: {
+                filename: 'american.gxt',
+                lines: [
+                    { num: 1, content: '<span class="code-comment">; GTA III GXT (无TABL)</span>' },
+                    { num: 2, content: '<span class="code-keyword">[MAIN]</span>' },
+                    { num: 3, content: '<span class="code-tag">GM_OVR</span>=<span class="code-string">Game Over</span>' },
+                    { num: 4, content: '<span class="code-tag">M_PASS</span>=<span class="code-string">任务完成!</span>' },
+                    { num: 5, content: '<span class="code-tag">WASTED</span>=<span class="code-string">已死亡</span>' },
+                    { num: 6, content: '<span class="code-tag">FEM_OK</span>=<span class="code-string">确定</span>' },
+                    { num: 7, content: '<span class="code-comment">; 最简单的GXT格式</span>' },
+                    { num: 8, content: '' }
+                ]
+            }
+        };
+
+        function renderCodeBlock(version) {
+            const example = gxtExamples[version];
+            const codeBlock = document.getElementById('codeBlock');
+            const fileName = document.getElementById('gxtFileName');
+            
+            fileName.textContent = example.filename;
+            
+            let html = '';
+            example.lines.forEach(line => {
+                const content = line.content || '&nbsp;';
+                html += `<div class="code-line">
+                    <span class="line-number">${line.num}</span>
+                    <span class="line-content">${content}</span>
+                </div>`;
+            });
+            codeBlock.innerHTML = html;
+        }
+
+        // 版本切换
+        document.querySelectorAll('.version-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.version-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                renderCodeBlock(this.dataset.version);
+            });
+        });
+
+        // 初始化显示SA版本
+        renderCodeBlock('sa');
+
+        // 页面加载器
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                document.getElementById('pageLoader').classList.add('hidden');
+            }, 800);
+        });
+
+        // 粒子背景 - 性能优化版本
+        class ParticleSystem {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.particles = [];
+                this.particleCount = 30;
+                this.mouse = { x: 0, y: 0 };
+                this.animationId = null;
+                this.lastTime = 0;
+                this.fps = 30;
+                this.fpsInterval = 1000 / this.fps;
+                this.isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+
+                this.resize();
+                this.init();
+                this.bindEvents();
+                this.animate();
+            }
+
+            getParticleColor() {
+                return this.isDark ? '96, 165, 250' : '37, 99, 235';
+            }
+
+            resize() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            }
+
+            init() {
+                this.particles = [];
+                for (let i = 0; i < this.particleCount; i++) {
+                    this.particles.push({
+                        x: Math.random() * this.canvas.width,
+                        y: Math.random() * this.canvas.height,
+                        vx: (Math.random() - 0.5) * 0.3,
+                        vy: (Math.random() - 0.5) * 0.3,
+                        radius: Math.random() * 1.5 + 0.5,
+                        opacity: Math.random() * 0.15 + 0.05
+                    });
+                }
+            }
+
+            bindEvents() {
+                let resizeTimeout;
+                window.addEventListener('resize', () => {
+                    clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(() => {
+                        this.resize();
+                        this.init();
+                    }, 200);
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    this.mouse.x = e.clientX;
+                    this.mouse.y = e.clientY;
+                });
+
+                const observer = new MutationObserver(() => {
+                    this.isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                });
+                observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+            }
+
+            animate(currentTime = 0) {
+                this.animationId = requestAnimationFrame((t) => this.animate(t));
+
+                const elapsed = currentTime - this.lastTime;
+                if (elapsed < this.fpsInterval) return;
+                this.lastTime = currentTime - (elapsed % this.fpsInterval);
+
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+                const color = this.getParticleColor();
+
+                this.particles.forEach((p, i) => {
+                    const dx = this.mouse.x - p.x;
+                    const dy = this.mouse.y - p.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < 150) {
+                        const force = (150 - dist) / 150;
+                        p.vx -= (dx / dist) * force * 0.02;
+                        p.vy -= (dy / dist) * force * 0.02;
+                    }
+
+                    p.x += p.vx;
+                    p.y += p.vy;
+
+                    if (p.x < 0 || p.x > this.canvas.width) p.vx *= -1;
+                    if (p.y < 0 || p.y > this.canvas.height) p.vy *= -1;
+
+                    p.vx *= 0.99;
+                    p.vy *= 0.99;
+
+                    this.ctx.beginPath();
+                    this.ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                    this.ctx.fillStyle = `rgba(${color}, ${p.opacity})`;
+                    this.ctx.fill();
+
+                    for (let j = i + 1; j < this.particles.length; j++) {
+                        const p2 = this.particles[j];
+                        const distance = Math.sqrt(
+                            Math.pow(p.x - p2.x, 2) + Math.pow(p.y - p2.y, 2)
+                        );
+
+                        if (distance < 120) {
+                            this.ctx.beginPath();
+                            this.ctx.moveTo(p.x, p.y);
+                            this.ctx.lineTo(p2.x, p2.y);
+                            this.ctx.strokeStyle = `rgba(${color}, ${0.08 * (1 - distance / 120)})`;
+                            this.ctx.lineWidth = 0.5;
+                            this.ctx.stroke();
+                        }
+                    }
+                });
+            }
+
+            destroy() {
+                cancelAnimationFrame(this.animationId);
+            }
+        }
+
+        // 初始化粒子系统
+        const particlesCanvas = document.getElementById('particles-canvas');
+        const particleSystem = new ParticleSystem(particlesCanvas);
+
+        // 光标跟随效果
+        const cursorGlow = document.getElementById('cursorGlow');
+        let mouseX = 0, mouseY = 0;
+        let glowX = 0, glowY = 0;
+
+        document.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+
+        function updateCursorGlow() {
+            glowX += (mouseX - glowX) * 0.1;
+            glowY += (mouseY - glowY) * 0.1;
+            cursorGlow.style.left = glowX + 'px';
+            cursorGlow.style.top = glowY + 'px';
+            requestAnimationFrame(updateCursorGlow);
+        }
+        updateCursorGlow();
+
+        // 点击效果
+        document.addEventListener('click', (e) => {
+            const ripple = document.createElement('div');
+            ripple.className = 'click-ripple';
+            ripple.style.left = e.clientX - 10 + 'px';
+            ripple.style.top = e.clientY - 10 + 'px';
+            document.body.appendChild(ripple);
+
+            setTimeout(() => ripple.remove(), 600);
+        });
+
+        // 导航栏滚动效果
+        const navbar = document.getElementById('navbar');
+        let lastScroll = 0;
+
+        window.addEventListener('scroll', () => {
+            const currentScroll = window.scrollY;
+
+            if (currentScroll > 50) {
+                navbar.classList.add('scrolled');
+            } else {
+                navbar.classList.remove('scrolled');
+            }
+
+            lastScroll = currentScroll;
+        }, { passive: true });
+
+        // 滚动进度指示
+        const scrollProgress = document.getElementById('scrollProgress');
+        window.addEventListener('scroll', () => {
+            const scrollTop = window.scrollY;
+            const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+            const scrollPercent = (scrollTop / docHeight) * 100;
+            scrollProgress.style.width = scrollPercent + '%';
+        }, { passive: true });
+
+        // 平滑滚动
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function(e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    const offset = 80;
+                    const targetPosition = target.getBoundingClientRect().top + window.scrollY - offset;
+
+                    window.scrollTo({
+                        top: targetPosition,
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+
+        // 滚动动画增强
+        const scrollObserverOptions = {
+            root: null,
+            rootMargin: '0px 0px -100px 0px',
+            threshold: 0.1
+        };
+
+        const scrollObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry, index) => {
+                if (entry.isIntersecting) {
+                    setTimeout(() => {
+                        entry.target.classList.add('visible');
+                    }, index * 100);
+                    scrollObserver.unobserve(entry.target);
+                }
+            });
+        }, scrollObserverOptions);
+
+        document.querySelectorAll('.scroll-animate').forEach(el => {
+            scrollObserver.observe(el);
+        });
+
+        // 统计数字动画
+        function animateNumber(element, target, duration = 2000) {
+            const start = 0;
+            const startTime = performance.now();
+
+            function update(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const easeProgress = 1 - Math.pow(1 - progress, 3);
+                const current = Math.floor(easeProgress * target);
+
+                element.textContent = current;
+
+                if (progress < 1) {
+                    requestAnimationFrame(update);
+                } else {
+                    element.textContent = target;
+                }
+            }
+
+            requestAnimationFrame(update);
+        }
+
+        const statsObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const statNumbers = entry.target.querySelectorAll('.stat-number');
+                    statNumbers.forEach(stat => {
+                        const target = parseInt(stat.dataset.target);
+                        animateNumber(stat, target);
+                    });
+                    statsObserver.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.5 });
+
+        const heroStats = document.querySelector('.hero-stats');
+        if (heroStats) {
+            statsObserver.observe(heroStats);
+        }
+
+        // 功能卡片鼠标跟随效果
+        document.querySelectorAll('.feature-card').forEach(card => {
+            card.addEventListener('mousemove', (e) => {
+                const rect = card.getBoundingClientRect();
+                const x = ((e.clientX - rect.left) / rect.width) * 100;
+                const y = ((e.clientY - rect.top) / rect.height) * 100;
+                card.style.setProperty('--mouse-x', x + '%');
+                card.style.setProperty('--mouse-y', y + '%');
+            });
+        });
+
+        // Tab切换
+        document.querySelectorAll('.specs-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const tabId = this.dataset.tab;
+
+                // 更新tab状态
+                document.querySelectorAll('.specs-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+
+                // 更新面板状态
+                document.querySelectorAll('.specs-panel').forEach(panel => {
+                    panel.classList.remove('active');
+                    if (panel.id === tabId) {
+                        panel.classList.add('active');
+                    }
+                });
+            });
+        });
+
+        function getTokenColors() {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            return {
+                'r': isDark ? '#f87171' : '#ef4444',
+                'g': isDark ? '#4ade80' : '#22c55e',
+                'b': isDark ? '#60a5fa' : '#3b82f6',
+                'y': isDark ? '#fcd34d' : '#fbbf24',
+                'p': isDark ? '#c084fc' : '#a855f7',
+                'w': isDark ? '#f1f5f9' : '#e5e7eb',
+                'h': isDark ? '#ffffff' : '#ffffff',
+                's': null,
+                'l': isDark ? '#94a3b8' : '#475569',
+                'o': isDark ? '#f9a8d4' : '#f472b6',
+                'q': isDark ? '#fda4af' : '#fda4af',
+                'x': isDark ? '#93c5fd' : '#93c5fd',
+                't': isDark ? '#6ee7b7' : '#6ee7b7',
+                'a': isDark ? '#fb923c' : '#fb923c'
+            };
+        }
+
+        let tokenColors = getTokenColors();
+
+        const tokenObserver = new MutationObserver(() => {
+            tokenColors = getTokenColors();
+            if (tokenInput && tokenPreview) {
+                tokenPreview.innerHTML = renderTokenText(tokenInput.value);
+            }
+        });
+        tokenObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+        // Token实时预览
+        const tokenInput = document.getElementById('tokenInput');
+        const tokenPreview = document.getElementById('tokenPreview');
+
+        function renderTokenText(text) {
+            let result = '';
+            let currentColor = null;
+            let i = 0;
+
+            while (i < text.length) {
+                if (text[i] === '~' && i + 2 < text.length && text[i + 2] === '~') {
+                    const token = text[i + 1].toLowerCase();
+                    
+                    if (token === 'n') {
+                        result += '<br>';
+                        i += 3;
+                        continue;
+                    }
+                    
+                    if (token === 's') {
+                        if (currentColor) {
+                            result += '</span>';
+                            currentColor = null;
+                        }
+                    } else if (tokenColors[token]) {
+                        if (currentColor) {
+                            result += '</span>';
+                        }
+                        currentColor = tokenColors[token];
+                        result += `<span style="color: ${currentColor};">`;
+                    }
+                    i += 3;
+                } else {
+                    result += text[i];
+                    i++;
+                }
+            }
+
+            if (currentColor) {
+                result += '</span>';
+            }
+
+            return result || '<span style="color: #888;">预览区域</span>';
+        }
+
+        tokenInput.addEventListener('input', function() {
+            tokenPreview.innerHTML = renderTokenText(this.value);
+        });
+
+        // 快速插入Token
+        document.querySelectorAll('.quick-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const token = this.dataset.token;
+                const start = tokenInput.selectionStart;
+                const end = tokenInput.selectionEnd;
+                const text = tokenInput.value;
+                
+                tokenInput.value = text.substring(0, start) + token + text.substring(end);
+                tokenInput.focus();
+                tokenInput.selectionStart = tokenInput.selectionEnd = start + token.length;
+                tokenInput.dispatchEvent(new Event('input'));
+            });
+        });
+
+        // CRC32计算器
+        function makeCRCTable() {
+            let c;
+            const table = [];
+            for (let n = 0; n < 256; n++) {
+                c = n;
+                for (let k = 0; k < 8; k++) {
+                    c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
+                }
+                table[n] = c;
+            }
+            return table;
+        }
+
+        const crcTable = makeCRCTable();
+
+        // 标准CRC32 (Python zlib.crc32 兼容)
+        function crc32(str) {
+            let crc = 0xFFFFFFFF;
+            for (let i = 0; i < str.length; i++) {
+                crc = (crc >>> 8) ^ crcTable[(crc ^ str.charCodeAt(i)) & 0xFF];
+            }
+            return (crc ^ 0xFFFFFFFF) >>> 0;
+        }
+
+        // JAMCRC (GTA SA使用) = CRC32取反
+        // 输入需要先转为大写
+        function jamcrc(str) {
+            // 按游戏规范转为大写
+            const upperStr = str.toUpperCase();
+            // 计算 CRC32
+            const crc = crc32(upperStr);
+            // JAMCRC：对 CRC32 结果取反
+            return (0xFFFFFFFF ^ crc) >>> 0;
+        }
+
+        // GTA IV 自定义哈希算法
+        function gta4Hash(str) {
+            let retHash = 0;
+            
+            for (let i = 0; i < str.length; i++) {
+                let c = str[i];
+                
+                // A-Z 转小写
+                if (c >= 'A' && c <= 'Z') {
+                    c = String.fromCharCode(c.charCodeAt(0) + 32);
+                }
+                // 反斜杠替换为斜杠
+                else if (c === '\\') {
+                    c = '/';
+                }
+                
+                const cVal = c.charCodeAt(0) & 0xFF;
+                const tmp = (retHash + cVal) >>> 0;
+                const mult = (1025 * tmp) >>> 0;
+                retHash = ((mult >>> 6) ^ mult) >>> 0;
+            }
+            
+            const a = (9 * retHash) >>> 0;
+            const aXor = (a ^ (a >>> 11)) >>> 0;
+            retHash = (32769 * aXor) >>> 0;
+            
+            return retHash;
+        }
+
+        const crcInput = document.getElementById('crcInput');
+        const jamcrcResult = document.getElementById('jamcrcResult');
+        const gta4hashResult = document.getElementById('gta4hashResult');
+
+        function updateHashResults() {
+            const value = crcInput.value;
+            
+            if (value) {
+                // JAMCRC (GTA SA) - 自动转大写
+                const jamcrcVal = jamcrc(value);
+                jamcrcResult.textContent = '0x' + jamcrcVal.toString(16).toUpperCase().padStart(8, '0');
+                
+                // GTA IV Hash
+                const gta4Val = gta4Hash(value);
+                gta4hashResult.textContent = '0x' + gta4Val.toString(16).toUpperCase().padStart(8, '0');
+            } else {
+                jamcrcResult.textContent = '0x00000000';
+                gta4hashResult.textContent = '0x00000000';
+            }
+        }
+
+        crcInput.addEventListener('input', updateHashResults);
+        updateHashResults();
+
+        // 复制按钮
+        document.querySelectorAll('.copy-btn-small').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const targetId = this.dataset.target;
+                const targetEl = document.getElementById(targetId);
+                navigator.clipboard.writeText(targetEl.textContent).then(() => {
+                    const originalIcon = this.innerHTML;
+                    this.innerHTML = '<i class="fas fa-check"></i>';
+                    setTimeout(() => {
+                        this.innerHTML = originalIcon;
+                    }, 1500);
+                });
+            });
+        });
+
+        // 按键标记Tab切换
+        document.querySelectorAll('.keybind-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const tabId = this.dataset.tab;
+
+                document.querySelectorAll('.keybind-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+
+                document.querySelectorAll('.keybinds-panel').forEach(panel => {
+                    panel.classList.remove('active');
+                    if (panel.id === tabId) {
+                        panel.classList.add('active');
+                    }
+                });
+            });
+        });
+
+        // 下载按钮点击效果
+        const downloadBtn = document.getElementById('downloadBtn');
+        downloadBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+
+            // 按钮动画
+            this.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+                this.style.transform = '';
+            }, 150);
+
+            // 模拟下载提示
+            const originalText = this.innerHTML;
+            this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 准备下载...';
+
+            setTimeout(() => {
+                this.innerHTML = '<i class="fas fa-check"></i> 下载已开始';
+
+                setTimeout(() => {
+                    this.innerHTML = originalText;
+                }, 2000);
+            }, 1500);
+        });
+
+        // 移动端菜单
+        (function() {
+            const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+            const navLinks = document.querySelector('.nav-links');
+
+            if (!mobileMenuBtn || !navLinks) return;
+
+            mobileMenuBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const isOpen = navLinks.classList.contains('show');
+                
+                if (isOpen) {
+                    navLinks.classList.remove('show');
+                    this.innerHTML = '<i class="fas fa-bars"></i>';
+                } else {
+                    navLinks.classList.add('show');
+                    this.innerHTML = '<i class="fas fa-times"></i>';
+                }
+            });
+
+            // 点击导航链接后关闭菜单
+            navLinks.querySelectorAll('a').forEach(link => {
+                link.addEventListener('click', () => {
+                    navLinks.classList.remove('show');
+                    mobileMenuBtn.innerHTML = '<i class="fas fa-bars"></i>';
+                });
+            });
+
+            // 点击页面其他区域关闭菜单
+            document.addEventListener('click', (e) => {
+                if (navLinks.classList.contains('show') && !navLinks.contains(e.target) && !mobileMenuBtn.contains(e.target)) {
+                    navLinks.classList.remove('show');
+                    mobileMenuBtn.innerHTML = '<i class="fas fa-bars"></i>';
+                }
+            });
+        })();
+
+        // 按钮Ripple效果增强 - 优化性能
+        document.querySelectorAll('.btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                const rect = this.getBoundingClientRect();
+                const ripple = document.createElement('span');
+
+                ripple.style.cssText = `
+                    position: absolute;
+                    border-radius: 50%;
+                    background: rgba(255, 255, 255, 0.3);
+                    width: 100px;
+                    height: 100px;
+                    left: ${e.clientX - rect.left - 50}px;
+                    top: ${e.clientY - rect.top - 50}px;
+                    transform: scale(0);
+                    animation: ripple-effect 0.6s linear;
+                    pointer-events: none;
+                `;
+
+                this.appendChild(ripple);
+                setTimeout(() => ripple.remove(), 600);
+            }, { passive: true });
+        });
+
+        // 视差滚动效果 - 优化性能
+        const parallaxElements = document.querySelectorAll('.hero-visual, .floating-badge');
+
+        let lastScrollTime = 0;
+        const scrollThrottle = 16; // ~60fps
+
+        window.addEventListener('scroll', () => {
+            const now = Date.now();
+            if (now - lastScrollTime < scrollThrottle) return;
+            lastScrollTime = now;
+
+            const scrolled = window.pageYOffset;
+
+            parallaxElements.forEach((element, index) => {
+                const speed = 0.1 + (index * 0.05);
+                const yPos = -(scrolled * speed);
+                element.style.transform = `translateY(${yPos}px)`;
+            });
+        }, { passive: true });
+
+        // 键盘快捷键提示
+        console.log('%c GXTStudio ', 'background: linear-gradient(45deg, #f97316, #ec4899); color: white; padding: 8px 16px; border-radius: 8px; font-weight: bold;');
+        console.log('%c由 Lzh10_慕黑 开发 | GTAmod中文组', 'color: #64748b;');
+    </script>
+</body>
+</html>
