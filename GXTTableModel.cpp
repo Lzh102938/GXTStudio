@@ -568,9 +568,14 @@ void GXTTableModel::buildPartialDisplayCache(int firstRow, int lastRow) const
 
 QVariant GXTTableModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
-    if (role != Qt::DisplayRole || orientation != Qt::Horizontal) return QVariant();
+    if (role != Qt::DisplayRole) return QVariant();
+    
+    if (orientation == Qt::Vertical) {
+        return QString::number(section + 1);
+    }
+    
     static const QStringList whmHeaders = {"Hash", "值"};
-    static const QStringList datHeaders = {"Hash", "值"};  // DAT和WHM使用相同的表头
+    static const QStringList datHeaders = {"Hash", "值"};
     static const QStringList gxtHeaders = {"键", "值"};
     const QStringList& headers = (m_tab && (m_tab->isWHM || m_tab->isDAT)) ? (m_tab->isDAT ? datHeaders : whmHeaders) : gxtHeaders;
     return (section < ColumnCount) ? headers[section] : QVariant();
@@ -617,23 +622,33 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
     }
     
     bool success = false;
+    QString oldKey, oldValue;
+    QString actualNewKey, actualNewValue;
+    
     try {
         if (m_tab->isWHM) {
             if (row >= 0 && row < static_cast<int>(m_tab->whmEntries.size()) && 
                 !m_tab->whmEntries.empty() && col == ValueColumn) {
                 auto& entry = m_tab->whmEntries[row];
                 if (entry.text != newValue) {
+                    oldKey = "0x" + QString("%1").arg(entry.hash, 8, 16, QChar('0')).toUpper();
+                    oldValue = QString::fromStdString(entry.text);
                     entry.text = newValue;
+                    actualNewKey = oldKey;
+                    actualNewValue = QString::fromStdString(entry.text);
                     success = true;
                 }
             }
         } else if (m_tab->isDAT) {
-            // DAT模式 - 与WHM完全独立
             if (row >= 0 && row < static_cast<int>(m_tab->datEntries.size()) && 
                 !m_tab->datEntries.empty() && col == ValueColumn) {
                 auto& entry = m_tab->datEntries[row];
                 if (entry.text != newValue) {
+                    oldKey = "0x" + QString("%1").arg(entry.hash, 8, 16, QChar('0')).toUpper();
+                    oldValue = QString::fromStdString(entry.text);
                     entry.text = newValue;
+                    actualNewKey = oldKey;
+                    actualNewValue = QString::fromStdString(entry.text);
                     success = true;
                 }
             }
@@ -642,11 +657,19 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
             if (row >= 0 && row < static_cast<int>(m_tab->noTablEntries.size())) {
                 auto& entry = m_tab->noTablEntries[row];
                 if (col == KeyColumn && entry.key != newValue) {
+                    oldKey = QString::fromStdString(entry.key);
+                    oldValue = QString::fromStdString(entry.value);
                     entry.key = newValue;
                     entry.originalKey = newValue;
+                    actualNewKey = QString::fromStdString(entry.key);
+                    actualNewValue = oldValue;
                     success = true;
                 } else if (col == ValueColumn && entry.value != newValue) {
+                    oldKey = QString::fromStdString(entry.key);
+                    oldValue = QString::fromStdString(entry.value);
                     entry.value = newValue;
+                    actualNewKey = oldKey;
+                    actualNewValue = QString::fromStdString(entry.value);
                     success = true;
                 }
             }
@@ -656,29 +679,25 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                 if (row < static_cast<int>(table.entries.size())) {
                     auto& entry = table.entries[row];
                     if (col == KeyColumn && entry.key != newValue) {
-                        // 调试日志：记录键修改
-                        QString debugOldKey = QString::fromStdString(entry.key);
+                        oldKey = QString::fromStdString(entry.key);
+                        oldValue = QString::fromStdString(entry.value);
+                        
+                        QString debugOldKey = oldKey;
                         QString debugNewKey = QString::fromStdString(newValue);
                         if (debugNewKey.contains("FF_WARN", Qt::CaseInsensitive) || debugOldKey.contains("FF_WARN", Qt::CaseInsensitive)) {
                             qInfo() << "[setData] 修改键: row=" << row << ", 旧键=" << debugOldKey << ", 新键=" << debugNewKey;
                         }
                         
-                        // 输入字符串后，立即进行hash计算或映射转换
-                        // 表面显示明文，但实际存储hash值
                         QString inputKey = QString::fromStdString(newValue);
                         QString processedKey = inputKey;
                         
-                        // 根据版本进行不同的处理
                         if (m_tab->version == GXTVersion::GTA_III) {
-                            // GTA III: 直接保存字符串键名，不进行hash计算
                             processedKey = inputKey;
                             qDebug() << "[Hash转换] III版本: 输入=" << inputKey << " -> 保持原样=" << processedKey;
                         } else if (m_tab->version == GXTVersion::GTA_VC) {
-                            // GTA VC: 直接保存字符串键名，不进行hash计算
                             processedKey = inputKey;
                             qDebug() << "[Hash转换] VC版本: 输入=" << inputKey << " -> 保持原样=" << processedKey;
                         } else if (m_tab->version == GXTVersion::GTA_SA) {
-                            // GTA SA: 先查找映射表，找不到再计算hash
                             uint32_t hash = 0;
                             if (findSATHash(inputKey, hash)) {
                                 processedKey = "0x" + QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
@@ -690,7 +709,6 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                                 qDebug() << "[Hash转换] SA版本计算: 输入=" << inputKey << " -> Hash=" << processedKey;
                             }
                         } else if (m_tab->version == GXTVersion::GTA_IV) {
-                            // GTA IV: 先查找映射表，找不到再计算hash
                             uint32_t hash = 0;
                             if (findIVTHash(inputKey, hash)) {
                                 processedKey = "0x" + QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
@@ -702,7 +720,6 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                                 qDebug() << "[Hash转换] IV版本计算: 输入=" << inputKey << " -> Hash=" << processedKey;
                             }
                         } else if (m_tab->version == GXTVersion::GXT2) {
-                            // GXT2: 使用JOAAT hash - 简化实现
                             uint32_t hash = 0;
                             std::string str = inputKey.toStdString();
                             for (char c : str) {
@@ -720,15 +737,12 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                             processedKey = "0x" + QString("%1").arg(hash, 8, 16, QChar('0')).toUpper();
                             qDebug() << "[Hash转换] GXT2版本: 输入=" << inputKey << " -> Hash=" << processedKey;
                         } else {
-                            // 其他版本: 尝试解析为hex，如果失败则计算hash
                             bool isHex = false;
                             uint32_t hexValue = inputKey.toUInt(&isHex, 16);
                             if (isHex && inputKey.length() == 8) {
-                                // 已经是合法的8位hex，添加0x前缀
                                 processedKey = "0x" + inputKey.toUpper();
                                 qDebug() << "[Hash转换] Hex格式: 输入=" << inputKey << " -> 保持=" << processedKey;
                             } else {
-                                // 不是hex，计算JOAAT hash
                                 uint32_t hash = 0;
                                 std::string str = inputKey.toStdString();
                                 for (char c : str) {
@@ -749,17 +763,21 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
                         }
                         
                         // 保存原始键值用于显示，但实际存储转换后的hash（GTA_III和GTA_VC除外）
-                        entry.originalKey = newValue;  // 保存原始输入用于显示
+                        entry.originalKey = newValue;
                         if (m_tab->version == GXTVersion::GTA_III || m_tab->version == GXTVersion::GTA_VC) {
-                            // GTA III和VC: 实际存储字符串键名
-                            entry.key = processedKey.toStdString();  // 存储原始字符串
+                            entry.key = processedKey.toStdString();
                         } else {
-                            // 其他版本: 存储hash值
-                            entry.key = processedKey.toStdString();  // 实际存储hash值
+                            entry.key = processedKey.toStdString();
                         }
+                        actualNewKey = QString::fromStdString(entry.key);
+                        actualNewValue = oldValue;
                         success = true;
                     } else if (col == ValueColumn && entry.value != newValue) {
+                        oldKey = QString::fromStdString(entry.key);
+                        oldValue = QString::fromStdString(entry.value);
                         entry.value = newValue;
+                        actualNewKey = oldKey;
+                        actualNewValue = QString::fromStdString(entry.value);
                         success = true;
                     }
                 }
@@ -775,13 +793,11 @@ bool GXTTableModel::setData(const QModelIndex& index, const QVariant& value, int
     
     if (success) {
         m_tab->isModified = true;
-        // 清除显示缓存，确保下次访问时重新构建
         m_displayCacheValid = false;
         m_displayCache.clear();
-        // 精确的数据更新信号 - 只更新修改的单元格
         emit dataChanged(index, index, {Qt::DisplayRole, Qt::EditRole});
-        // 发出数据修改信号，用于触发自动保存
         emit dataModified();
+        emit cellEdited(row, col, oldKey, oldValue, actualNewKey, actualNewValue);
     }
     return success;
 }

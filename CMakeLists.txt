@@ -124,6 +124,8 @@ set(PROJECT_SOURCES
     BackgroundConfigDialog.cpp
     DebugConfigDialog.h
     AppConfig.h
+    UndoSystem.h
+    UndoSystem.cpp
 )
 
 # 设置 Windows 资源文件（用于应用程序图标）

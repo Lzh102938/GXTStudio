@@ -1,4 +1,5 @@
 #include "GXTStudio.h"
+#include "UndoSystem.h"
 #include <QtWidgets/QApplication>
 #include <QByteArray>
 #include <QGuiApplication>
@@ -98,17 +99,19 @@ int main(int argc, char *argv[])
     // 强制使用 FreeType 字体引擎
     qputenv("QT_QPA_PLATFORM", QByteArray("windows:fontengine=freetype"));
     
-    // FreeType 字体渲染优化参数
-    qputenv("QT_FONT_DPI", QByteArray("96"));
-    qputenv("QT_ENABLE_HIGHDPI_SCALING", QByteArray("0"));
-    
-    // 极致性能优化设置
+    // 高DPI显示设置
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
     QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
     QCoreApplication::setAttribute(Qt::AA_NativeWindows);
     QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
     
     QApplication app(argc, argv);
+    
+    // 注册自定义类型用于撤销系统
+    qRegisterMetaType<CellEditData>("CellEditData");
+    qRegisterMetaType<EntryData>("EntryData");
+    qRegisterMetaType<MultipleEntriesData>("MultipleEntriesData");
+    qRegisterMetaType<TableData>("TableData");
     
     // 后台加载 Font Awesome 图标字体
     startFontLoading();
@@ -153,7 +156,6 @@ int main(int argc, char *argv[])
     qputenv("QT_USE_NATIVE_WINDOWS", QByteArray("1"));
     qputenv("QT_DEVICE_PIXEL_RATIO", QByteArray("auto"));
     qputenv("QT_HIGHDPI_SCALE_FACTOR_ROUNDING_POLICY", QByteArray("PassThrough"));
-    qputenv("QT_SCALE_FACTOR", QByteArray("1")); // 固定缩放因子
     qputenv("QT_OPENGL", QByteArray("desktop")); // 强制桌面OpenGL
     qputenv("QT_LOGGING_RULES", QByteArray("qt.qpa.*=false")); // 禁用日志
     qputenv("QT_DEBUG_PLUGINS", QByteArray("0")); // 禁用插件调试

@@ -46,6 +46,30 @@ const int TranslateConfigDialog::DEFAULT_BATCH_SIZE = 32;
 const int TranslateConfigDialog::DEFAULT_MAX_CONCURRENT = 12;
 const int TranslateConfigDialog::DEFAULT_MAX_RETRIES = 3;
 const int TranslateConfigDialog::DEFAULT_REQUEST_TIMEOUT = 180;
+const QString TranslateConfigDialog::DEFAULT_MODEL = "mimo-v2-flash";
+const QString TranslateConfigDialog::DEFAULT_PROVIDER = "xiaomi";
+
+const QList<TranslateConfigDialog::ProviderInfo> TranslateConfigDialog::s_providers = {
+    { "xiaomi", "小米 MiMo", 
+      "https://api.xiaomimimo.com/v1/chat/completions",
+      "api-key", "", "https://platform.xiaomimimo.com" },
+    { "deepseek", "DeepSeek", 
+      "https://api.deepseek.com/chat/completions",
+      "Authorization", "Bearer ", "https://platform.deepseek.com" }
+};
+
+const QList<TranslateConfigDialog::ModelInfo> TranslateConfigDialog::s_models = {
+    { "mimo-v2-flash", "MiMo Flash (快速)", 
+      "快速响应，适合大批量翻译，性价比高", 65536, 0.3, "xiaomi" },
+    { "mimo-v2-pro", "MiMo Pro (专业)", 
+      "专业版本，更强的理解和推理能力，翻译质量更高", 131072, 1.0, "xiaomi" },
+    { "mimo-v2-omni", "MiMo Omni (全能)", 
+      "全能版本，平衡速度与质量，支持多模态", 32768, 1.0, "xiaomi" },
+    { "deepseek-chat", "DeepSeek Chat", 
+      "DeepSeek-V3 非思考模式，适合日常翻译任务", 64000, 0.3, "deepseek" },
+    { "deepseek-reasoner", "DeepSeek Reasoner", 
+      "DeepSeek-V3 思考模式，更强的推理能力，翻译质量更高", 64000, 0.3, "deepseek" }
+};
 
 const QList<TranslateConfigDialog::UnifiedPromptTemplate> TranslateConfigDialog::s_presets = {
     { "默认（专业游戏翻译）", "适合GTA系列游戏的专业翻译，保持游戏风格和语气", DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT },
@@ -64,57 +88,157 @@ const QList<TranslateConfigDialog::UnifiedPromptTemplate> TranslateConfigDialog:
 const QString TranslateConfigDialog::s_mainStyle = R"(
     QGroupBox {
         font-weight: bold;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        margin-top: 8px;
-        padding-top: 8px;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        margin-top: 10px;
+        padding-top: 10px;
+        background: #fafafa;
     }
     QGroupBox::title {
         subcontrol-origin: margin;
-        left: 10px;
-        padding: 0 5px;
+        left: 12px;
+        padding: 0 6px;
+        color: #333;
     }
     QTabWidget::pane {
-        border: 1px solid #ccc;
+        border: 1px solid #e0e0e0;
         background-color: #fff;
+        border-radius: 6px;
     }
     QTabBar::tab {
-        background: #f0f0f0;
-        padding: 8px 20px;
-        margin-right: 2px;
-        border: 1px solid #ccc;
+        background: rgba(255, 255, 255, 0.45);
+        padding: 10px 24px;
+        margin-right: 3px;
+        border: 1px solid rgba(200, 210, 220, 0.3);
         border-bottom: none;
+        border-top-left-radius: 10px;
+        border-top-right-radius: 10px;
+        color: rgba(80, 90, 100, 0.75);
     }
     QTabBar::tab:selected {
-        background: #fff;
-        font-weight: bold;
+        background: rgba(255, 255, 255, 0.85);
+        border: 1px solid rgba(180, 200, 220, 0.5);
+        border-bottom: none;
+        font-weight: 550;
+        color: #1976d2;
     }
     QTabBar::tab:hover:!selected {
-        background: #e0e0e0;
+        background: rgba(255, 255, 255, 0.7);
+        border: 1px solid rgba(180, 200, 220, 0.4);
+        border-bottom: none;
+        color: rgba(66, 165, 245, 0.9);
     }
-    QLineEdit, QComboBox, QSpinBox {
-        border: 1px solid #ccc;
+    QLineEdit {
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        padding: 8px 12px;
+        background: #fff;
+        selection-background-color: #409eff;
+    }
+    QLineEdit:focus {
+        border: 2px solid #409eff;
+        padding: 7px 11px;
+    }
+    QLineEdit:hover {
+        border: 1px solid #c0c0c0;
+    }
+    QComboBox {
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        padding: 4px 8px;
+        background: #fff;
+        min-height: 18px;
+        font-size: 13px;
+    }
+    QComboBox:hover {
+        border: 1px solid #c0c0c0;
+        background: #fafafa;
+    }
+    QComboBox:focus {
+        border: 2px solid #409eff;
+        padding: 3px 7px;
+    }
+    QComboBox::drop-down {
+        border: none;
+        width: 20px;
+        subcontrol-position: center right;
+        subcontrol-origin: padding;
+    }
+    QComboBox::down-arrow {
+        width: 12px;
+        height: 12px;
+    }
+    QComboBox QAbstractItemView {
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        background: #fff;
+        selection-background-color: #f0f7ff;
+        selection-color: #333;
+        padding: 2px;
+        outline: none;
+        font-size: 13px;
+    }
+    QComboBox QAbstractItemView::item {
+        border-radius: 4px;
+        padding: 6px 10px;
+        min-height: 20px;
+    }
+    QComboBox QAbstractItemView::item:hover {
+        background: #f5f5f5;
+    }
+    QComboBox QAbstractItemView::item:selected {
+        background: #e6f4ff;
+        color: #409eff;
+    }
+    QSpinBox {
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        padding: 4px 8px;
+        background: #fff;
+        font-size: 13px;
+    }
+    QSpinBox:hover {
+        border: 1px solid #c0c0c0;
+    }
+    QSpinBox:focus {
+        border: 2px solid #409eff;
+        padding: 3px 7px;
+    }
+    QSpinBox::up-button, QSpinBox::down-button {
+        border: none;
+        background: transparent;
+        width: 18px;
+    }
+    QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+        background: #f0f0f0;
         border-radius: 3px;
-        padding: 5px 8px;
-    }
-    QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
-        border: 1px solid #409eff;
     }
     QTextEdit {
-        border: 1px solid #ccc;
-        border-radius: 3px;
-        padding: 5px;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        padding: 8px;
+        background: #fff;
     }
     QTextEdit:focus {
-        border: 1px solid #409eff;
+        border: 2px solid #409eff;
+        padding: 7px;
     }
     QPushButton {
-        border: 1px solid #ccc;
-        border-radius: 3px;
-        padding: 5px 15px;
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        padding: 8px 20px;
+        background: #fff;
+        color: #333;
     }
     QPushButton:hover {
-        background-color: #f0f0f0;
+        background: #f5f5f5;
+        border-color: #c0c0c0;
+    }
+    QPushButton:pressed {
+        background: #ebebeb;
+    }
+    QLabel {
+        color: #333;
     }
 )";
 
@@ -138,18 +262,41 @@ TranslateConfigDialog::TranslateConfigDialog(QWidget *parent)
     QVBoxLayout* keyGroupLayout = new QVBoxLayout(keyGroup);
     keyGroupLayout->setSpacing(10);
     
+    QHBoxLayout* providerLayout = new QHBoxLayout();
+    providerLayout->addWidget(new QLabel("服务商:", keyGroup));
+    m_providerCombo = new QComboBox(keyGroup);
+    for (const auto& provider : s_providers) {
+        m_providerCombo->addItem(provider.name, provider.id);
+    }
+    m_providerCombo->setCurrentIndex(0);
+    providerLayout->addWidget(m_providerCombo, 1);
+    keyGroupLayout->addLayout(providerLayout);
+    
     keyGroupLayout->addWidget(new QLabel("API 密钥:", keyGroup));
     
     QHBoxLayout* apiKeyInputLayout = new QHBoxLayout();
     m_apiKeyEdit = new QLineEdit(keyGroup);
     m_apiKeyEdit->setEchoMode(QLineEdit::Password);
-    m_apiKeyEdit->setPlaceholderText("请输入小米MIMO API密钥");
+    m_apiKeyEdit->setPlaceholderText("请输入API密钥");
     apiKeyInputLayout->addWidget(m_apiKeyEdit, 1);
     
     m_apiStatusIcon = new QLabel("", keyGroup);
     m_apiStatusIcon->setFixedWidth(20);
     apiKeyInputLayout->addWidget(m_apiStatusIcon);
     keyGroupLayout->addLayout(apiKeyInputLayout);
+    
+    QHBoxLayout* modelLayout = new QHBoxLayout();
+    modelLayout->addWidget(new QLabel("模型选择:", keyGroup));
+    m_modelCombo = new QComboBox(keyGroup);
+    modelLayout->addWidget(m_modelCombo, 1);
+    keyGroupLayout->addLayout(modelLayout);
+    
+    m_modelDescLabel = new QLabel("", keyGroup);
+    m_modelDescLabel->setWordWrap(true);
+    m_modelDescLabel->setStyleSheet("color: #666; font-size: 11px; padding: 6px; background: #f5f5f5; border-radius: 3px;");
+    keyGroupLayout->addWidget(m_modelDescLabel);
+    
+    updateModelCombo();
     
     QHBoxLayout* testLayout = new QHBoxLayout();
     testLayout->addStretch();
@@ -158,11 +305,10 @@ TranslateConfigDialog::TranslateConfigDialog(QWidget *parent)
     testLayout->addWidget(m_testButton);
     keyGroupLayout->addLayout(testLayout);
     
-    QLabel* apiHelpLabel = new QLabel(
-        "获取API密钥请访问 <a href=\"https://platform.xiaomimimo.com\">小米MIMO官网</a>", keyGroup);
-    apiHelpLabel->setOpenExternalLinks(true);
-    apiHelpLabel->setStyleSheet("color: #666; font-size: 11px;");
-    keyGroupLayout->addWidget(apiHelpLabel);
+    m_providerHelpLabel = new QLabel("", keyGroup);
+    m_providerHelpLabel->setOpenExternalLinks(true);
+    m_providerHelpLabel->setStyleSheet("color: #666; font-size: 11px;");
+    keyGroupLayout->addWidget(m_providerHelpLabel);
     
     apiLayout->addWidget(keyGroup);
     apiLayout->addStretch();
@@ -190,7 +336,7 @@ TranslateConfigDialog::TranslateConfigDialog(QWidget *parent)
     presetLayout->addWidget(m_unifiedPresetCombo, 1);
     
     QPushButton* applyPresetButton = new QPushButton("应用", unifiedGroup);
-    applyPresetButton->setFixedWidth(60);
+    applyPresetButton->setMinimumWidth(60);
     presetLayout->addWidget(applyPresetButton);
     unifiedLayout->addLayout(presetLayout);
 
@@ -312,11 +458,25 @@ TranslateConfigDialog::TranslateConfigDialog(QWidget *parent)
     connect(m_unifiedPresetCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &TranslateConfigDialog::onUnifiedPromptPresetChanged);
     connect(applyPresetButton, &QPushButton::clicked, this, &TranslateConfigDialog::onApplyUnifiedPreset);
+    connect(m_providerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &TranslateConfigDialog::onProviderChanged);
+    connect(m_modelCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        QString currentProvider = m_providerCombo->currentData().toString();
+        QString modelId = m_modelCombo->itemData(index).toString();
+        for (const auto& model : s_models) {
+            if (model.id == modelId && model.providerId == currentProvider) {
+                m_modelDescLabel->setText(model.description);
+                break;
+            }
+        }
+    });
     connect(okButton, &QPushButton::clicked, this, &QDialog::accept);
     connect(cancelButton, &QPushButton::clicked, this, &QDialog::reject);
     connect(this, &QDialog::finished, [this]() {
         m_apiKeyEdit->setText(getApiKey());
     });
+    
+    onProviderChanged(m_providerCombo->currentIndex());
 }
 
 TranslateConfigDialog::~TranslateConfigDialog()
@@ -353,6 +513,24 @@ QString TranslateConfigDialog::getBatchPrompt() const
 {
     return m_userPromptEdit->toPlainText().trimmed();
 }
+QString TranslateConfigDialog::getModel() const
+{
+    int index = m_modelCombo->currentIndex();
+    if (index >= 0) {
+        return m_modelCombo->itemData(index).toString();
+    }
+    return DEFAULT_MODEL;
+}
+
+QString TranslateConfigDialog::getProvider() const
+{
+    int index = m_providerCombo->currentIndex();
+    if (index >= 0) {
+        return m_providerCombo->itemData(index).toString();
+    }
+    return DEFAULT_PROVIDER;
+}
+
 void TranslateConfigDialog::setApiKey(const QString& apiKey)
 {
     m_apiKeyEdit->setText(apiKey);
@@ -364,6 +542,26 @@ void TranslateConfigDialog::setSystemPrompt(const QString& prompt)
 void TranslateConfigDialog::setBatchPrompt(const QString& prompt)
 {
     m_userPromptEdit->setPlainText(prompt);
+}
+
+void TranslateConfigDialog::setModel(const QString& model)
+{
+    for (int i = 0; i < m_modelCombo->count(); ++i) {
+        if (m_modelCombo->itemData(i).toString() == model) {
+            m_modelCombo->setCurrentIndex(i);
+            break;
+        }
+    }
+}
+
+void TranslateConfigDialog::setProvider(const QString& provider)
+{
+    for (int i = 0; i < m_providerCombo->count(); ++i) {
+        if (m_providerCombo->itemData(i).toString() == provider) {
+            m_providerCombo->setCurrentIndex(i);
+            break;
+        }
+    }
 }
 int TranslateConfigDialog::getBatchSize() const
 {
@@ -397,6 +595,58 @@ void TranslateConfigDialog::onRestoreDefaults()
     m_maxConcurrentEdit->setValue(DEFAULT_MAX_CONCURRENT);
     m_maxRetriesEdit->setValue(DEFAULT_MAX_RETRIES);
     m_unifiedPresetCombo->setCurrentIndex(0);
+    m_providerCombo->setCurrentIndex(0);
+    updateModelCombo();
+}
+
+void TranslateConfigDialog::onProviderChanged(int index)
+{
+    if (index < 0 || index >= s_providers.size()) return;
+    
+    const auto& provider = s_providers[index];
+    
+    m_providerHelpLabel->setText(
+        QString("获取API密钥请访问 <a href=\"%1\">%2官网</a>")
+        .arg(provider.helpUrl, provider.name));
+    
+    updateModelCombo();
+}
+
+void TranslateConfigDialog::updateModelCombo()
+{
+    QString currentProvider = m_providerCombo->currentData().toString();
+    QString currentModel = m_modelCombo->currentData().toString();
+    
+    m_modelCombo->clear();
+    
+    for (const auto& model : s_models) {
+        if (model.providerId == currentProvider) {
+            m_modelCombo->addItem(model.name, model.id);
+        }
+    }
+    
+    bool modelFound = false;
+    for (int i = 0; i < m_modelCombo->count(); ++i) {
+        if (m_modelCombo->itemData(i).toString() == currentModel) {
+            m_modelCombo->setCurrentIndex(i);
+            modelFound = true;
+            break;
+        }
+    }
+    
+    if (!modelFound && m_modelCombo->count() > 0) {
+        m_modelCombo->setCurrentIndex(0);
+    }
+    
+    if (m_modelDescLabel && m_modelCombo->currentIndex() >= 0) {
+        QString modelId = m_modelCombo->currentData().toString();
+        for (const auto& model : s_models) {
+            if (model.id == modelId && model.providerId == currentProvider) {
+                m_modelDescLabel->setText(model.description);
+                break;
+            }
+        }
+    }
 }
 void TranslateConfigDialog::onTestConnection()
 {
@@ -409,23 +659,41 @@ void TranslateConfigDialog::onTestConnection()
     m_testButton->setEnabled(false);
     m_testButton->setText("测试中...");
     
+    QString providerId = getProvider();
+    QString providerName;
+    QString apiUrl;
+    QString authHeader;
+    QString authPrefix;
+    QString helpUrl;
+    
+    for (const auto& provider : s_providers) {
+        if (provider.id == providerId) {
+            providerName = provider.name;
+            apiUrl = provider.apiUrl;
+            authHeader = provider.authHeader;
+            authPrefix = provider.authPrefix;
+            helpUrl = provider.helpUrl;
+            break;
+        }
+    }
+    
     QNetworkAccessManager* manager = new QNetworkAccessManager(this);
     
     QJsonObject requestObj;
-    requestObj["model"] = "mimo-v2-flash";
+    requestObj["model"] = getModel();
     requestObj["temperature"] = 0.1;
     requestObj["stream"] = false;
     requestObj["max_tokens"] = 100;
     
     QJsonArray messages;
-    messages.append(QJsonObject{{"role", "system"}, {"content", "You are MiMo, an AI assistant developed by Xiaomi."}});
+    messages.append(QJsonObject{{"role", "system"}, {"content", "You are a helpful assistant."}});
     messages.append(QJsonObject{{"role", "user"}, {"content", "请用中文回复：连接成功"}});
     requestObj["messages"] = messages;
     
     QNetworkRequest request;
-    request.setUrl(QUrl("https://api.xiaomimimo.com/v1/chat/completions"));
+    request.setUrl(QUrl(apiUrl));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    request.setRawHeader("api-key", apiKey.toUtf8());
+    request.setRawHeader(authHeader.toUtf8(), (authPrefix + apiKey).toUtf8());
     request.setRawHeader("User-Agent", "GXTStudio-Translator/2.0");
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     
@@ -443,7 +711,7 @@ void TranslateConfigDialog::onTestConnection()
         timeoutTimer->deleteLater();
     });
     
-    connect(reply, &QNetworkReply::finished, [this, reply, timeoutTimer]() {
+    connect(reply, &QNetworkReply::finished, [this, reply, timeoutTimer, providerName, helpUrl]() {
         m_testButton->setEnabled(true);
         m_testButton->setText("测试连接");
         
@@ -465,7 +733,7 @@ void TranslateConfigDialog::onTestConnection()
                 QString displayMsg;
                 if (errorMsg.contains("余额不足") || errorMsg.contains("insufficient") || 
                     errorMsg.contains("balance") || errorCode == "insufficient_quota") {
-                    displayMsg = "账户余额不足\n\n请前往 platform.xiaomimimo.com 充值后继续使用";
+                    displayMsg = QString("账户余额不足\n\n请前往 %1 充值后继续使用").arg(helpUrl);
                 } else if (errorMsg.contains("API密钥") || errorMsg.contains("api key") || 
                           errorMsg.contains("invalid") || errorCode == "invalid_api_key") {
                     displayMsg = "API密钥无效或已过期\n\n请检查您的API密钥是否正确";
@@ -489,7 +757,7 @@ void TranslateConfigDialog::onTestConnection()
                         QJsonObject message = choice["message"].toObject();
                         if (message.contains("content")) {
                             QString content = message["content"].toString();
-                            QMessageBox::information(this, "测试成功", QString("API连接成功！\n响应：%1").arg(content));
+                            QMessageBox::information(this, "测试成功", QString("%1 API连接成功！\n响应：%2").arg(providerName, content));
                             reply->deleteLater();
                             return;
                         }
@@ -502,7 +770,7 @@ void TranslateConfigDialog::onTestConnection()
             int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             
             if (statusCode == 401) errorStr = "API密钥无效或已过期\n\n请检查您的API密钥是否正确";
-            else if (statusCode == 402) errorStr = "账户余额不足\n\n请前往 platform.xiaomimimo.com 充值后继续使用";
+            else if (statusCode == 402) errorStr = QString("账户余额不足\n\n请前往 %1 充值后继续使用").arg(helpUrl);
             else if (statusCode == 429) errorStr = "API调用频率超限\n\n请稍后重试";
             else if (reply->error() == QNetworkReply::OperationCanceledError) errorStr = "请求超时\n\n请检查网络连接";
             
@@ -527,6 +795,12 @@ void TranslateConfigDialog::loadSettings()
     m_batchSizeEdit->setValue(config.getTranslateBatchSize());
     m_maxConcurrentEdit->setValue(config.getTranslateMaxConcurrent());
     m_maxRetriesEdit->setValue(config.getTranslateMaxRetries());
+    
+    QString provider = config.getTranslateProvider();
+    setProvider(provider.isEmpty() ? DEFAULT_PROVIDER : provider);
+    
+    QString model = config.getTranslateModel();
+    setModel(model.isEmpty() ? DEFAULT_MODEL : model);
 }
 void TranslateConfigDialog::saveSettings()
 {
@@ -538,6 +812,8 @@ void TranslateConfigDialog::saveSettings()
     config.setTranslateBatchSize(getBatchSize());
     config.setTranslateMaxConcurrent(getMaxConcurrentRequests());
     config.setTranslateMaxRetries(getMaxRetries());
+    config.setTranslateProvider(getProvider());
+    config.setTranslateModel(getModel());
     
     config.save();
 }

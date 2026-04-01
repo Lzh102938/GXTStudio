@@ -48,6 +48,7 @@
 #include <QItemSelectionModel>
 #include <QSet>
 #include <QStringConverter>
+#include <QFileInfo>
 #include <QFontDialog>
 #include <QComboBox>
 #include <algorithm>
@@ -144,6 +145,9 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_setBackgroundAction(nullptr)
     , m_clearBackgroundAction(nullptr)
     , m_debugConfigAction(nullptr)
+    , m_undoAction(nullptr)
+    , m_redoAction(nullptr)
+    , m_undoSystem(nullptr)
     , m_smartTranslator(nullptr)
     , m_smartTranslatorThread(nullptr)
     , m_translateProgressDialog(nullptr)
@@ -377,11 +381,10 @@ GXTStudio::~GXTStudio()
     if (m_smartTranslatorThread) {
         qWarning() << "开始停止翻译线程...";
         
-        // 首先取消翻译 - 使用非阻塞方式避免死锁
         if (m_smartTranslator) {
+            m_smartTranslator->disconnect(this);
             QMetaObject::invokeMethod(m_smartTranslator, "cancelTranslation", Qt::QueuedConnection);
             
-            // 【性能优化】使用 QEventLoop 非阻塞等待，避免 UI 冻结
             QEventLoop waitLoop;
             QTimer timeoutTimer;
             timeoutTimer.setSingleShot(true);
@@ -391,11 +394,9 @@ GXTStudio::~GXTStudio()
             waitLoop.exec();
         }
         
-        // 更优雅的线程终止
         m_smartTranslatorThread->requestInterruption();
         m_smartTranslatorThread->quit();
         
-        // 等待线程结束，但增加超时时间
         if (!m_smartTranslatorThread->wait(5000)) {
             qWarning() << "翻译线程未能在5秒内正常结束，强制终止";
             m_smartTranslatorThread->terminate();
@@ -549,22 +550,40 @@ void GXTStudio::initializeCachedStyles()
         QTabWidget::pane {
             border: none;
             background: transparent;
+            top: 0px;
+        }
+        QTabBar {
+            background: transparent;
+            qproperty-drawBase: false;
         }
         QTabBar::tab {
-            background: #f0f0f0;
+            background: rgba(255, 255, 255, 0.65);
             border: none;
-            border-top-left-radius: 4px;
-            border-top-right-radius: 4px;
-            padding: 6px 12px;
-            margin-right: 2px;
-            color: #666;
+            border-radius: 16px;
+            padding: 8px 16px;
+            margin-right: 4px;
+            margin-left: 2px;
+            color: rgba(60, 70, 85, 0.75);
+            font-weight: 500;
+            min-width: 80px;
         }
         QTabBar::tab:selected {
-            background: #fff;
-            color: #333;
+            background: rgba(255, 255, 255, 0.92);
+            color: #1976d2;
+            font-weight: 600;
         }
         QTabBar::tab:hover:!selected {
-            background: #e8e8e8;
+            background: rgba(255, 255, 255, 0.82);
+            color: rgba(33, 150, 243, 0.9);
+        }
+        QTabBar::tab:!selected {
+            margin-top: 3px;
+        }
+        QTabBar::close-button {
+            image: none;
+            subcontrol-position: right;
+            margin-right: 2px;
+            margin-left: 4px;
         }
     )";
     
@@ -637,6 +656,7 @@ void GXTStudio::initializeCachedStyles()
         QHeaderView::section{background-color:rgba(245,245,245,0.5);border:1px solid #ddd;border-bottom:2px solid #ccc;padding:4px 8px;font-weight:bold;font-size:13px;color:#333;text-align:center;}
         QHeaderView::section:first{min-width:120px;}
         QHeaderView::section:hover{background-color:rgba(232,232,232,0.5);}
+        QHeaderView{background-color:transparent;}
     )";
     
     m_cachedStyles.searchEditStyleTemplate = 
@@ -696,10 +716,14 @@ void GXTStudio::setupUI()
     m_tabWidget->tabBar()->setDrawBase(false);
     m_tabWidget->tabBar()->setUsesScrollButtons(true);
     m_tabWidget->tabBar()->setExpanding(false);
+    m_tabWidget->tabBar()->setElideMode(Qt::ElideRight);
     
     m_tabWidget->setStyleSheet(m_cachedStyles.tabWidgetStyle);
     
-    m_tabWidget->addTab(createWelcomeTab(), "欢迎使用");
+    QWidget* welcomeTab = createWelcomeTab();
+    int welcomeIndex = m_tabWidget->addTab(welcomeTab, "欢迎使用");
+    m_tabWidget->tabBar()->setTabButton(welcomeIndex, QTabBar::RightSide, nullptr);
+    
     setCentralWidget(m_tabWidget);
 }
 
@@ -730,6 +754,24 @@ void GXTStudio::setupMenus()
     if (ui.menuEdit) {
         ui.menuEdit->addAction(m_replaceAction);
         
+        // 添加撤销/重做
+        ui.menuEdit->addSeparator();
+        m_undoAction = new QAction(QString::fromUtf8("撤销(&U)"), this);
+        m_undoAction->setShortcut(QKeySequence::Undo);
+        m_undoAction->setToolTip(QString::fromUtf8("撤销上一步操作 (Ctrl+Z)"));
+        m_undoAction->setEnabled(false);
+        connect(m_undoAction, &QAction::triggered, this, &GXTStudio::undo);
+        ui.menuEdit->addAction(m_undoAction);
+        
+        m_redoAction = new QAction(QString::fromUtf8("重做(&R)"), this);
+        m_redoAction->setShortcut(QKeySequence::Redo);
+        m_redoAction->setToolTip(QString::fromUtf8("重做上一步操作 (Ctrl+Y)"));
+        m_redoAction->setEnabled(false);
+        connect(m_redoAction, &QAction::triggered, this, &GXTStudio::redo);
+        ui.menuEdit->addAction(m_redoAction);
+        
+        ui.menuEdit->addSeparator();
+        
         // 添加循环搜索选项
         m_loopSearchAction = new QAction("循环搜索(&L)", this);
         m_loopSearchAction->setCheckable(true);
@@ -757,6 +799,27 @@ void GXTStudio::setupMenus()
         m_debugConfigAction->setToolTip(QString::fromUtf8("打开调试配置编辑器 (Ctrl+M)"));
         ui.menuHelp->addAction(m_debugConfigAction);
     }
+    
+    // 创建最近文件菜单
+    m_recentFilesMenu = new QMenu(QString::fromUtf8("最近文件(&R)"), this);
+    m_recentFilesMenu->setIcon(QIcon(":/icons/recent.png"));
+    
+    // 创建清除最近文件列表动作
+    m_clearRecentFilesAction = new QAction(QString::fromUtf8("清除列表"), this);
+    connect(m_clearRecentFilesAction, &QAction::triggered, this, &GXTStudio::clearRecentFiles);
+    
+    // 将最近文件菜单添加到文件菜单
+    if (ui.menuFile) {
+        QAction* exitAction = ui.actionExit;
+        if (exitAction) {
+            ui.menuFile->insertSeparator(exitAction);
+            ui.menuFile->insertMenu(exitAction, m_recentFilesMenu);
+        }
+    }
+    
+    // 加载最近文件列表
+    loadRecentFiles();
+    updateRecentFilesMenu();
 }
 
 void GXTStudio::setupToolBars()
@@ -1175,6 +1238,10 @@ void GXTStudio::initializeDeferredComponents()
 {
     showLogMessage("开始延迟初始化组件...");
     
+    // 初始化撤销系统
+    m_undoSystem = new UndoSystem(this);
+    connect(m_undoSystem, &UndoSystem::undoStackChanged, this, &GXTStudio::onUndoStackChanged);
+    
     // 设置异步解析线程
     setupParseThread();
     
@@ -1484,6 +1551,34 @@ void GXTStudio::newFile()
     // CharTable类型标签页已经有完整的界面，直接添加到tabWidget
     if (newTab.isCharTable && newTab.pageWidget) {
         m_tabWidget->insertTab(tabIndex, newTab.pageWidget, newTab.fileName);
+        
+        // 添加关闭按钮 - 简洁圆形设计
+        QPushButton* closeButton = new QPushButton();
+        closeButton->setFixedSize(16, 16);
+        closeButton->setText(FA::QTimes);
+        closeButton->setFont(FA::solidFont(8));
+        closeButton->setStyleSheet(R"(
+            QPushButton {
+                background: transparent;
+                border: none;
+                border-radius: 8px;
+                color: rgba(100, 110, 120, 0.5);
+            }
+            QPushButton:hover {
+                background: rgba(239, 83, 80, 0.15);
+                color: rgba(239, 83, 80, 0.9);
+            }
+            QPushButton:pressed {
+                background: rgba(239, 83, 80, 0.25);
+                color: rgba(239, 83, 80, 1.0);
+            }
+        )");
+        closeButton->setCursor(Qt::PointingHandCursor);
+        connect(closeButton, &QPushButton::clicked, this, [this, tabIndex]() {
+            closeTab(tabIndex);
+        });
+        m_tabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeButton);
+        
         // 连接修改信号
         if (newTab.charTableWidget) {
             connect(newTab.charTableWidget, &CharTableWidget::textModified, [this, tabIndex]() {
@@ -1669,6 +1764,33 @@ void GXTStudio::importTxtFile(const QString& filePath)
         if (!parentPage) parentPage = charWidget->parentWidget();
         m_tabWidget->insertTab(tabIndex, parentPage, newTab.fileName);
 
+        // 添加关闭按钮 - 简洁圆形设计
+        QPushButton* closeButton = new QPushButton();
+        closeButton->setFixedSize(16, 16);
+        closeButton->setText(FA::QTimes);
+        closeButton->setFont(FA::solidFont(8));
+        closeButton->setStyleSheet(R"(
+            QPushButton {
+                background: transparent;
+                border: none;
+                border-radius: 8px;
+                color: rgba(100, 110, 120, 0.5);
+            }
+            QPushButton:hover {
+                background: rgba(239, 83, 80, 0.15);
+                color: rgba(239, 83, 80, 0.9);
+            }
+            QPushButton:pressed {
+                background: rgba(239, 83, 80, 0.25);
+                color: rgba(239, 83, 80, 1.0);
+            }
+        )");
+        closeButton->setCursor(Qt::PointingHandCursor);
+        connect(closeButton, &QPushButton::clicked, this, [this, tabIndex]() {
+            closeTab(tabIndex);
+        });
+        m_tabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeButton);
+
         // 连接修改信号
         connect(charWidget, &CharTableWidget::textModified, [this, tabIndex]() {
             if (tabIndex >= 0 && tabIndex < static_cast<int>(m_fileTabs.size())) {
@@ -1851,6 +1973,34 @@ void GXTStudio::importTxtFile(const QString& filePath)
         FileTab newTab; newTab.filePath = filePath; newTab.fileName = QFileInfo(filePath).fileName(); newTab.isCharTable = true; newTab.isDAT = true; newTab.charTableWidget = widget; newTab.charTableData = data; newTab.isModified = true;
         int idx = m_fileTabs.size(); m_fileTabs.push_back(newTab);
         QWidget* parentPage = widget->property("parentPage").value<QWidget*>(); if (!parentPage) parentPage = widget->parentWidget(); m_tabWidget->insertTab(idx, parentPage, newTab.fileName);
+        
+        // 添加关闭按钮 - 简洁圆形设计
+        QPushButton* closeButton = new QPushButton();
+        closeButton->setFixedSize(16, 16);
+        closeButton->setText(FA::QTimes);
+        closeButton->setFont(FA::solidFont(8));
+        closeButton->setStyleSheet(R"(
+            QPushButton {
+                background: transparent;
+                border: none;
+                border-radius: 8px;
+                color: rgba(100, 110, 120, 0.5);
+            }
+            QPushButton:hover {
+                background: rgba(239, 83, 80, 0.15);
+                color: rgba(239, 83, 80, 0.9);
+            }
+            QPushButton:pressed {
+                background: rgba(239, 83, 80, 0.25);
+                color: rgba(239, 83, 80, 1.0);
+            }
+        )");
+        closeButton->setCursor(Qt::PointingHandCursor);
+        connect(closeButton, &QPushButton::clicked, this, [this, idx]() {
+            closeTab(idx);
+        });
+        m_tabWidget->tabBar()->setTabButton(idx, QTabBar::RightSide, closeButton);
+        
         connect(widget, &CharTableWidget::textModified, [this, idx]() { if (idx>=0 && idx < (int)m_fileTabs.size()) { m_fileTabs[idx].isModified = true; updateWindowTitle(); } });
         m_currentTabIndex = idx; m_tabWidget->setCurrentIndex(idx); updateActions(); updateStatusBar(); updateWindowTitle();
         return;
@@ -4899,6 +5049,13 @@ void GXTStudio::onSearchNext()
     int currentRow = currentIndex.row();
     int currentTableIndex = tab->currentTableIndex;
     
+    // 对于无表GXT文件，currentTableIndex为-1，但搜索结果中存储的表索引为0
+    // 需要统一处理
+    bool isNoTablFile = (!tab->originalHasTABL && tab->tables.empty());
+    if (isNoTablFile && currentTableIndex == -1) {
+        currentTableIndex = 0;
+    }
+    
     // 检查用户是否手动点击了其他行
     bool userClickedDifferentRow = false;
     if (m_searchState.currentEntryIndex >= 0 && m_searchState.currentEntryIndex < static_cast<int>(m_searchState.allMatches.size())) {
@@ -5000,6 +5157,13 @@ void GXTStudio::onSearchPrevious()
     
     int currentRow = currentIndex.row();
     int currentTableIndex = tab->currentTableIndex;
+    
+    // 对于无表GXT文件，currentTableIndex为-1，但搜索结果中存储的表索引为0
+    // 需要统一处理
+    bool isNoTablFile = (!tab->originalHasTABL && tab->tables.empty());
+    if (isNoTablFile && currentTableIndex == -1) {
+        currentTableIndex = 0;
+    }
     
     // 检查用户是否手动点击了其他行
     bool userClickedDifferentRow = false;
@@ -5510,6 +5674,33 @@ void GXTStudio::onGenerateCharTable()
     if (!parentPage) parentPage = charWidget->parentWidget();
     m_tabWidget->insertTab(tabIndex, parentPage, newTab.fileName);
     
+    // 添加关闭按钮 - 简洁圆形设计
+    QPushButton* closeButton = new QPushButton();
+    closeButton->setFixedSize(16, 16);
+    closeButton->setText(FA::QTimes);
+    closeButton->setFont(FA::solidFont(8));
+    closeButton->setStyleSheet(R"(
+        QPushButton {
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: rgba(100, 110, 120, 0.5);
+        }
+        QPushButton:hover {
+            background: rgba(239, 83, 80, 0.15);
+            color: rgba(239, 83, 80, 0.9);
+        }
+        QPushButton:pressed {
+            background: rgba(239, 83, 80, 0.25);
+            color: rgba(239, 83, 80, 1.0);
+        }
+    )");
+    closeButton->setCursor(Qt::PointingHandCursor);
+    connect(closeButton, &QPushButton::clicked, this, [this, tabIndex]() {
+        closeTab(tabIndex);
+    });
+    m_tabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeButton);
+    
     // 连接修改信号
     connect(charWidget, &CharTableWidget::textModified, [this, tabIndex]() {
         if (tabIndex >= 0 && tabIndex < static_cast<int>(m_fileTabs.size())) {
@@ -5599,13 +5790,31 @@ void GXTStudio::deleteEntry()
             if (tableIndex >= 0 && tableIndex < static_cast<int>(currentTab->tables.size())) {
                 auto& table = currentTab->tables[tableIndex];
                 if (currentRow < static_cast<int>(table.entries.size())) {
+                    // 记录撤销操作
+                    if (m_undoSystem) {
+                        auto& entry = table.entries[currentRow];
+                        
+                        UndoAction action;
+                        action.type = UndoActionType::DeleteEntry;
+                        action.tabIndex = m_currentTabIndex;
+                        action.tableIndex = tableIndex;
+                        action.description = QString::fromUtf8("删除条目");
+                        
+                        EntryData entryData;
+                        entryData.row = currentRow;
+                        entryData.key = QString::fromStdString(entry.key);
+                        entryData.value = QString::fromStdString(entry.value);
+                        action.beforeData = QVariant::fromValue(entryData);
+                        
+                        m_undoSystem->pushAction(action);
+                    }
+                    
                     table.entries.erase(table.entries.begin() + currentRow);
                     currentTab->isModified = true;
                     updateEntryTable();
                     updateWindowTitle();
                     showLogMessage("已删除条目");
 
-                    // 触发自动保存
                     if (m_autoSaveEnabled && m_autoSaveTimer) {
                         m_autoSaveTimer->stop();
                         m_autoSaveTimer->start();
@@ -5646,6 +5855,34 @@ void GXTStudio::deleteSelectedRows()
         if (tableIndex >= 0 && tableIndex < static_cast<int>(currentTab->tables.size())) {
             auto& table = currentTab->tables[tableIndex];
             
+            // 记录撤销操作 - 在删除前保存数据
+            if (m_undoSystem) {
+                MultipleEntriesData entriesData;
+                // 按行号从小到大排序以便保存
+                QList<int> sortedRows = selectedRowsSet.values();
+                std::sort(sortedRows.begin(), sortedRows.end());
+                
+                for (int row : sortedRows) {
+                    if (row < static_cast<int>(table.entries.size())) {
+                        const auto& entry = table.entries[row];
+                        EntryData entryData;
+                        entryData.row = row;
+                        entryData.key = QString::fromStdString(entry.key);
+                        entryData.value = QString::fromStdString(entry.value);
+                        entriesData.entries.append(entryData);
+                    }
+                }
+                
+                UndoAction action;
+                action.type = UndoActionType::DeleteMultipleEntries;
+                action.tabIndex = m_currentTabIndex;
+                action.tableIndex = tableIndex;
+                action.description = QString::fromUtf8("删除 %1 个条目").arg(count);
+                action.beforeData = QVariant::fromValue(entriesData);
+                
+                m_undoSystem->pushAction(action);
+            }
+            
             // 从后往前删除，避免索引变化
             for (int row : selectedRows) {
                 if (row < static_cast<int>(table.entries.size())) {
@@ -5658,7 +5895,6 @@ void GXTStudio::deleteSelectedRows()
             updateWindowTitle();
             showLogMessage(QString("已删除 %1 个条目").arg(count));
 
-            // 触发自动保存
             if (m_autoSaveEnabled && m_autoSaveTimer) {
                 m_autoSaveTimer->stop();
                 m_autoSaveTimer->start();
@@ -6237,6 +6473,30 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
     currentTab->isModified = true;
     updateEntryTable();
     updateWindowTitle();
+    
+    // 记录撤销操作
+    if (m_undoSystem) {
+        int newRow;
+        if (isNoTableFile) {
+            newRow = static_cast<int>(currentTab->noTablEntries.size()) - 1;
+        } else {
+            newRow = static_cast<int>(currentTab->tables[currentTab->currentTableIndex].entries.size()) - 1;
+        }
+        
+        UndoAction action;
+        action.type = UndoActionType::AddEntry;
+        action.tabIndex = m_currentTabIndex;
+        action.tableIndex = currentTab->currentTableIndex;
+        action.description = QString::fromUtf8("添加条目");
+        
+        EntryData entryData;
+        entryData.row = newRow;
+        entryData.key = keyText;
+        entryData.value = valueText;
+        action.afterData = QVariant::fromValue(entryData);
+        
+        m_undoSystem->pushAction(action);
+    }
 
     // 清空输入框
     keyEdit->clear();
@@ -7276,6 +7536,17 @@ void GXTStudio::onTabMoved(int from, int to)
     }
 
     showLogMessage(QString("标签页已从位置 %1 移动到 %2").arg(from).arg(to));
+    
+    // 更新所有标签页的关闭按钮连接
+    for (int i = 0; i < m_tabWidget->count(); ++i) {
+        QPushButton* closeBtn = qobject_cast<QPushButton*>(m_tabWidget->tabBar()->tabButton(i, QTabBar::RightSide));
+        if (closeBtn) {
+            disconnect(closeBtn, &QPushButton::clicked, nullptr, nullptr);
+            connect(closeBtn, &QPushButton::clicked, this, [this, i]() {
+                closeTab(i);
+            });
+        }
+    }
 }
 
 // 更新方法
@@ -8138,6 +8409,33 @@ void GXTStudio::startAsyncParse(const QString& filePath)
                             // insertTab会在指定位置插入，而不是在末尾追加
                             m_tabWidget->insertTab(tabIndex, parentPage, fileInfo.fileName());
                             
+                            // 添加关闭按钮 - 简洁圆形设计
+                            QPushButton* closeButton = new QPushButton();
+                            closeButton->setFixedSize(16, 16);
+                            closeButton->setText(FA::QTimes);
+                            closeButton->setFont(FA::solidFont(8));
+                            closeButton->setStyleSheet(R"(
+                                QPushButton {
+                                    background: transparent;
+                                    border: none;
+                                    border-radius: 8px;
+                                    color: rgba(100, 110, 120, 0.5);
+                                }
+                                QPushButton:hover {
+                                    background: rgba(239, 83, 80, 0.15);
+                                    color: rgba(239, 83, 80, 0.9);
+                                }
+                                QPushButton:pressed {
+                                    background: rgba(239, 83, 80, 0.25);
+                                    color: rgba(239, 83, 80, 1.0);
+                                }
+                            )");
+                            closeButton->setCursor(Qt::PointingHandCursor);
+                            connect(closeButton, &QPushButton::clicked, this, [this, tabIndex]() {
+                                closeTab(tabIndex);
+                            });
+                            m_tabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeButton);
+                            
                             // 连接CharTable的文本修改信号，标记文件已修改并更新窗口标题
                             connect(charTableWidget, &CharTableWidget::textModified, [this, tabIndex]() {
                                 if (tabIndex >= 0 && tabIndex < static_cast<int>(m_fileTabs.size())) {
@@ -8306,6 +8604,9 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
         m_tabWidget->setCurrentIndex(result.tabIndex);
 
         showLogMessage(QString("成功加载 %1 (耗时: %2ms)").arg(tab.fileName).arg(parseTime));
+        
+        // 添加到最近文件列表
+        addToRecentFiles(result.filePath);
 
         // 【性能优化】移除不必要的100ms延迟，立即显示内容
         // 立即确保右侧表格显示第一个表的内容
@@ -8398,12 +8699,6 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     searchLayout->setContentsMargins(6, 2, 6, 2);
     searchLayout->setSpacing(6);
     
-    // 创建搜索框容器（用于放置搜索框和图标按钮）
-    QWidget* searchWrapper = new QWidget();
-    QHBoxLayout* wrapperLayout = new QHBoxLayout(searchWrapper);
-    wrapperLayout->setContentsMargins(0, 0, 0, 0);
-    wrapperLayout->setSpacing(4);
-    
     QPoint searchPos = tabWidget->mapTo(this, QPoint(100, 20));
     QColor searchTextColor = getTextColorForPosition(searchPos);
     
@@ -8415,23 +8710,61 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     searchEdit->setFont(searchFont);
     searchEdit->setStyleSheet(getSearchEditStyle(searchTextColor));
     
-    QToolButton* caseSensitiveButton = new QToolButton();
-    caseSensitiveButton->setFixedSize(32, 28);
+    // 创建嵌入搜索框内部的按钮
+    QToolButton* caseSensitiveButton = new QToolButton(searchEdit);
+    caseSensitiveButton->setFixedSize(24, 24);
     caseSensitiveButton->setCheckable(true);
     caseSensitiveButton->setText(FA::CaseSensitive);
     caseSensitiveButton->setToolTip("区分大小写");
+    caseSensitiveButton->setCursor(Qt::PointingHandCursor);
 
-    QToolButton* regexButton = new QToolButton();
-    regexButton->setFixedSize(32, 28);
+    QToolButton* regexButton = new QToolButton(searchEdit);
+    regexButton->setFixedSize(24, 24);
     regexButton->setCheckable(true);
     regexButton->setText(FA::Regex);
     regexButton->setToolTip("正则表达式");
+    regexButton->setCursor(Qt::PointingHandCursor);
 
-    caseSensitiveButton->setStyleSheet(getIconButtonStyle(searchTextColor));
-    regexButton->setStyleSheet(getIconButtonStyle(searchTextColor));
+    // 内嵌按钮样式
+    QString innerButtonStyle = QString(
+        "QToolButton {"
+        "  background: transparent;"
+        "  border: none;"
+        "  border-radius: 4px;"
+        "  color: %1;"
+        "  padding: 0px;"
+        "  margin: 0px;"
+        "}"
+        "QToolButton:hover {"
+        "  background: rgba(0, 0, 0, 0.08);"
+        "}"
+        "QToolButton:checked {"
+        "  background: rgba(25, 118, 210, 0.15);"
+        "  color: #1976d2;"
+        "}"
+    ).arg(searchTextColor.name());
     
-    caseSensitiveButton->setFont(FA::solidFont(12));
-    regexButton->setFont(FA::solidFont(12));
+    caseSensitiveButton->setStyleSheet(innerButtonStyle);
+    regexButton->setStyleSheet(innerButtonStyle);
+    
+    QFont caseFont = FA::solidFont(11);
+    caseFont.setStyleStrategy(QFont::PreferMatch);
+    caseSensitiveButton->setFont(caseFont);
+    
+    QFont regexFont = FA::solidFont(11);
+    regexFont.setStyleStrategy(QFont::PreferMatch);
+    regexButton->setFont(regexFont);
+    
+    // 使用布局将按钮嵌入搜索框内部右侧
+    QHBoxLayout* innerButtonLayout = new QHBoxLayout(searchEdit);
+    innerButtonLayout->setContentsMargins(0, 0, 4, 0);
+    innerButtonLayout->setSpacing(2);
+    innerButtonLayout->addStretch();
+    innerButtonLayout->addWidget(caseSensitiveButton);
+    innerButtonLayout->addWidget(regexButton);
+    
+    // 设置搜索框内部边距，为按钮留出空间
+    searchEdit->setTextMargins(4, 0, 58, 0);
     
     QPushButton* prevButton = new QPushButton();
     QPushButton* nextButton = new QPushButton();
@@ -8452,13 +8785,9 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     prevButton->setFont(FA::solidFont(12));
     nextButton->setFont(FA::solidFont(12));
     
-    // 将搜索框和图标按钮放入容器
+    // 将搜索框和导航按钮放入布局
     searchEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    wrapperLayout->addWidget(searchEdit);
-    wrapperLayout->addWidget(caseSensitiveButton);
-    wrapperLayout->addWidget(regexButton);
-    
-    searchLayout->addWidget(searchWrapper);
+    searchLayout->addWidget(searchEdit);
     searchLayout->addWidget(prevButton);
     searchLayout->addWidget(nextButton);
     
@@ -8770,9 +9099,39 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     // 连接自动保存信号 - 数据修改时重置定时器
     connect(entryTableModel, &GXTTableModel::dataModified, this, [this]() {
         if (m_autoSaveEnabled && m_autoSaveTimer) {
-            // 重置定时器，延长5秒后再保存
             m_autoSaveTimer->stop();
             m_autoSaveTimer->start();
+        }
+    });
+    
+    // 连接单元格编辑信号 - 用于撤销系统
+    connect(entryTableModel, &GXTTableModel::cellEdited, this, [this, tabIndex = m_fileTabs.size() - 1](int row, int column, const QString& oldKey, const QString& oldValue, const QString& newKey, const QString& newValue) {
+        if (m_undoSystem) {
+            UndoAction action;
+            action.type = UndoActionType::EditCell;
+            action.tabIndex = tabIndex;
+            action.tableIndex = m_fileTabs[tabIndex].currentTableIndex;
+            action.description = QString::fromUtf8("编辑单元格");
+            
+            CellEditData beforeData;
+            beforeData.row = row;
+            beforeData.column = column;
+            beforeData.oldKey = oldKey;
+            beforeData.oldValue = oldValue;
+            beforeData.newKey = newKey;
+            beforeData.newValue = newValue;
+            action.beforeData = QVariant::fromValue(beforeData);
+            
+            CellEditData afterData;
+            afterData.row = row;
+            afterData.column = column;
+            afterData.oldKey = oldKey;
+            afterData.oldValue = oldValue;
+            afterData.newKey = newKey;
+            afterData.newValue = newValue;
+            action.afterData = QVariant::fromValue(afterData);
+            
+            m_undoSystem->pushAction(action);
         }
     });
 
@@ -8866,6 +9225,33 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
 
     // 添加标签页到tabWidget
     m_tabWidget->insertTab(tabIndex, tabWidget, title);
+    
+    // 创建自定义关闭按钮 - 简洁圆形设计
+    QPushButton* closeButton = new QPushButton();
+    closeButton->setFixedSize(16, 16);
+    closeButton->setText(FA::QTimes);
+    closeButton->setFont(FA::solidFont(8));
+    closeButton->setStyleSheet(R"(
+        QPushButton {
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: rgba(100, 110, 120, 0.5);
+        }
+        QPushButton:hover {
+            background: rgba(239, 83, 80, 0.15);
+            color: rgba(239, 83, 80, 0.9);
+        }
+        QPushButton:pressed {
+            background: rgba(239, 83, 80, 0.25);
+            color: rgba(239, 83, 80, 1.0);
+        }
+    )");
+    closeButton->setCursor(Qt::PointingHandCursor);
+    connect(closeButton, &QPushButton::clicked, this, [this, tabIndex]() {
+        closeTab(tabIndex);
+    });
+    m_tabWidget->tabBar()->setTabButton(tabIndex, QTabBar::RightSide, closeButton);
     
     // 连接信号 - 使用正确的信号类型
     connect(tableList, &QListWidget::currentItemChanged, this, &GXTStudio::onTableSelectionChanged);
@@ -8969,9 +9355,18 @@ void GXTStudio::setupTableOptimizations(QTableView* table)
     table->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     table->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     
-    table->verticalHeader()->setVisible(false);
-    table->verticalHeader()->setDefaultSectionSize(m_fontSize + 10);
-    table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    QHeaderView* vHeader = table->verticalHeader();
+    vHeader->setVisible(true);
+    vHeader->setDefaultSectionSize(m_fontSize + 10);
+    vHeader->setSectionResizeMode(QHeaderView::Fixed);
+    vHeader->setFixedWidth(36);
+    vHeader->setDefaultAlignment(Qt::AlignCenter | Qt::AlignVCenter);
+    vHeader->setHighlightSections(false);
+    vHeader->setStyleSheet(
+        "QHeaderView{background-color:transparent;border:none;}"
+        "QHeaderView::section{background-color:rgba(240,240,240,0.4);color:#666;font-size:11px;font-weight:normal;border:none;border-right:1px solid rgba(200,200,200,0.3);padding:0px 2px;min-width:36px;}"
+        "QHeaderView::section:hover{background-color:rgba(230,230,230,0.5);}"
+    );
     
     auto* header = table->horizontalHeader();
     header->setFixedHeight(28);
@@ -11349,23 +11744,24 @@ void GXTStudio::setupTranslationProgress()
     // 立即加载配置应用到翻译器
     AppConfig& config = AppConfig::instance();
     
-    // 加载并应用配置 - 使用32并发优化配置
     QString apiKey = config.getTranslateApiKey();
     QString systemPrompt = config.getTranslateSystemPrompt();
     QString batchPrompt = config.getTranslateBatchPrompt();
     int batchSize = config.getTranslateBatchSize();
     int maxConcurrent = config.getTranslateMaxConcurrent();
     int maxRetries = config.getTranslateMaxRetries();
+    QString model = config.getTranslateModel();
+    QString provider = config.getTranslateProvider();
     
-    // 应用配置到翻译器
     m_smartTranslator->setApiKey(apiKey);
     m_smartTranslator->setSystemPrompt(systemPrompt);
     m_smartTranslator->setBatchPrompt(batchPrompt);
+    m_smartTranslator->setModel(model);
+    m_smartTranslator->setProvider(provider);
     m_smartTranslator->setBatchSize(batchSize);
     m_smartTranslator->setMaxConcurrentRequests(maxConcurrent);
     m_smartTranslator->setMaxRetries(maxRetries);
     
-    // 移动翻译器到子线程
     m_smartTranslator->moveToThread(m_smartTranslatorThread);
     
     // 连接信号 - 使用 Qt::QueuedConnection 确保在主线程中处理
@@ -11413,6 +11809,7 @@ void GXTStudio::onConfigTranslate()
     QString apiKey = config.getTranslateApiKey();
     QString systemPrompt = config.getTranslateSystemPrompt();
     QString batchPrompt = config.getTranslateBatchPrompt();
+    QString model = config.getTranslateModel();
     
     // 加载性能配置 - 使用配置界面的默认值
     int batchSize = config.getTranslateBatchSize();
@@ -11422,6 +11819,7 @@ void GXTStudio::onConfigTranslate()
     dialog.setApiKey(apiKey);
     dialog.setSystemPrompt(systemPrompt);
     dialog.setBatchPrompt(batchPrompt);
+    dialog.setModel(model);
     
     // 设置性能配置
     dialog.setBatchSize(batchSize);
@@ -11439,6 +11837,8 @@ void GXTStudio::onConfigTranslate()
                                   Q_ARG(QString, dialog.getSystemPrompt()));
         QMetaObject::invokeMethod(m_smartTranslator, "setBatchPrompt", Qt::QueuedConnection,
                                   Q_ARG(QString, dialog.getBatchPrompt()));
+        QMetaObject::invokeMethod(m_smartTranslator, "setModel", Qt::QueuedConnection,
+                                  Q_ARG(QString, dialog.getModel()));
         
         // 应用性能配置
         QMetaObject::invokeMethod(m_smartTranslator, "setBatchSize", Qt::QueuedConnection,
@@ -11984,42 +12384,80 @@ QPair<int, int> GXTStudio::applyTranslationResultsToFile(const QList<TranslateRe
                         continue;
                     }
 
-                    // 在所有表中搜索匹配的key
-                    for (auto& table : currentTab->tables) {
-                        for (auto& entry : table.entries) {
+                    // 检查是否是无表GXT文件
+                    bool isNoTablFile = (!currentTab->originalHasTABL && currentTab->tables.empty());
+                    
+                    if (isNoTablFile) {
+                        // 无表GXT文件：在noTablEntries中查找
+                        for (auto& entry : currentTab->noTablEntries) {
                             if (QString::fromStdString(entry.key) == taskKey) {
                                 try {
-                                    // 安全地更新GXT条目
                                     std::string translatedText = result.translatedValue.toStdString();
 
-                                    // 验证翻译结果长度和内容
-                                    if (translatedText.length() > 10000) { // 限制单个条目长度
-                                        qWarning() << "GXT翻译结果过长，已截断:" << translatedText.length();
+                                    if (translatedText.length() > 10000) {
+                                        qWarning() << "无表GXT翻译结果过长，已截断:" << translatedText.length();
                                         translatedText = translatedText.substr(0, 10000);
                                     }
 
-                                    // 检查是否包含恶意内容
                                     if (translatedText.find('\0') != std::string::npos) {
-                                        qWarning() << "GXT翻译结果包含空字符，跳过";
+                                        qWarning() << "无表GXT翻译结果包含空字符，跳过";
                                         failureCount++;
-                                        continue;
+                                        found = true; // 标记为已找到但跳过
+                                        break;
                                     }
 
                                     entry.value = translatedText;
                                     successCount++;
                                     found = true;
 
-                                    qWarning() << "成功更新GXT条目，表:" << QString::fromStdString(table.name)
-                                              << "键:" << taskKey
+                                    qWarning() << "成功更新无表GXT条目，键:" << taskKey
                                               << "原文:" << result.originalValue.left(30)
                                               << "译文:" << result.translatedValue.left(30);
                                     break;
                                 } catch (...) {
-                                    qWarning() << "应用GXT翻译结果时发生异常，键:" << taskKey;
+                                    qWarning() << "应用无表GXT翻译结果时发生异常，键:" << taskKey;
                                 }
                             }
                         }
-                        if (found) break;
+                    } else {
+                        // 有表GXT文件：在所有表中搜索匹配的key
+                        for (auto& table : currentTab->tables) {
+                            for (auto& entry : table.entries) {
+                                if (QString::fromStdString(entry.key) == taskKey) {
+                                    try {
+                                        // 安全地更新GXT条目
+                                        std::string translatedText = result.translatedValue.toStdString();
+
+                                        // 验证翻译结果长度和内容
+                                        if (translatedText.length() > 10000) { // 限制单个条目长度
+                                            qWarning() << "GXT翻译结果过长，已截断:" << translatedText.length();
+                                            translatedText = translatedText.substr(0, 10000);
+                                        }
+
+                                        // 检查是否包含恶意内容
+                                        if (translatedText.find('\0') != std::string::npos) {
+                                            qWarning() << "GXT翻译结果包含空字符，跳过";
+                                            failureCount++;
+                                            found = true; // 标记为已找到但跳过
+                                            break;
+                                        }
+
+                                        entry.value = translatedText;
+                                        successCount++;
+                                        found = true;
+
+                                        qWarning() << "成功更新GXT条目，表:" << QString::fromStdString(table.name)
+                                                  << "键:" << taskKey
+                                                  << "原文:" << result.originalValue.left(30)
+                                                  << "译文:" << result.translatedValue.left(30);
+                                        break;
+                                    } catch (...) {
+                                        qWarning() << "应用GXT翻译结果时发生异常，键:" << taskKey;
+                                    }
+                                }
+                            }
+                            if (found) break;
+                        }
                     }
 
                     if (!found) {
@@ -12576,8 +13014,8 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     QLineEdit* searchEdit = new QLineEdit();
     searchEdit->setPlaceholderText("搜索字符...");
     searchEdit->setMinimumHeight(32);
-    searchEdit->setMinimumWidth(150);
-    searchEdit->setMaximumWidth(200);
+    searchEdit->setMinimumWidth(180);
+    searchEdit->setMaximumWidth(230);
     
     // 设置搜索框样式和字体 - 使用自动判断的颜色
     QFont searchFont("Microsoft YaHei", m_fontSize);
@@ -12597,70 +13035,51 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
             outline: none;
         }
     )").arg(searchTextColorName));
-    searchLayout->addWidget(searchEdit);
     
-    // 大小写敏感图标按钮
-    QToolButton* caseSensitiveButton = new QToolButton();
-    caseSensitiveButton->setFixedSize(32, 28);
+    // 创建嵌入搜索框内部的大小写按钮
+    QToolButton* caseSensitiveButton = new QToolButton(searchEdit);
+    caseSensitiveButton->setFixedSize(22, 22);
     caseSensitiveButton->setCheckable(true);
     caseSensitiveButton->setText(FA::CaseSensitive);
     caseSensitiveButton->setToolTip("区分大小写");
+    caseSensitiveButton->setCursor(Qt::PointingHandCursor);
     
-    // 设置图标按钮样式
-    QString fontFamily = FA::solidFontFamily();
-    QString buttonStyle;
-    if (fontFamily.isEmpty()) {
-        buttonStyle = QString(R"(
-            QToolButton {
-                border: none;
-                border-radius: 4px;
-                background-color: transparent;
-                color: %1;
-            }
-            QToolButton:hover {
-                background-color: rgba(255, 255, 255, 0.5);
-                color: %1;
-            }
-            QToolButton:pressed {
-                background-color: #e9ecef;
-            }
-            QToolButton:checked {
-                color: #2196f3;
-                background-color: #e3f2fd;
-            }
-            QToolButton:checked:hover {
-                background-color: #bbdefb;
-            }
-        )").arg(searchTextColorName);
-    } else {
-        buttonStyle = QString(R"(
-            QToolButton {
-                border: none;
-                border-radius: 4px;
-                background-color: transparent;
-                color: %1;
-                font-family: '%2';
-                font-size: 13px;
-            }
-            QToolButton:hover {
-                background-color: rgba(255, 255, 255, 0.5);
-                color: %1;
-            }
-            QToolButton:pressed {
-                background-color: #e9ecef;
-            }
-            QToolButton:checked {
-                color: #2196f3;
-                background-color: #e3f2fd;
-            }
-            QToolButton:checked:hover {
-                background-color: #bbdefb;
-            }
-        )").arg(searchTextColorName, fontFamily);
-    }
-    caseSensitiveButton->setStyleSheet(buttonStyle);
-    caseSensitiveButton->setFont(FA::solidFont(12));
-    searchLayout->addWidget(caseSensitiveButton);
+    // 内嵌按钮样式
+    QString innerButtonStyle = QString(
+        "QToolButton {"
+        "  background: transparent;"
+        "  border: none;"
+        "  border-radius: 4px;"
+        "  color: %1;"
+        "  padding: 0px;"
+        "  margin: 0px;"
+        "}"
+        "QToolButton:hover {"
+        "  background: rgba(0, 0, 0, 0.08);"
+        "}"
+        "QToolButton:checked {"
+        "  background: rgba(33, 150, 243, 0.15);"
+        "  color: #2196f3;"
+        "}"
+    ).arg(searchTextColorName);
+    
+    caseSensitiveButton->setStyleSheet(innerButtonStyle);
+    
+    QFont caseFont = FA::solidFont(10);
+    caseFont.setStyleStrategy(QFont::PreferMatch);
+    caseSensitiveButton->setFont(caseFont);
+    
+    // 使用布局将按钮嵌入搜索框内部右侧
+    QHBoxLayout* innerButtonLayout = new QHBoxLayout(searchEdit);
+    innerButtonLayout->setContentsMargins(0, 0, 4, 0);
+    innerButtonLayout->setSpacing(2);
+    innerButtonLayout->addStretch();
+    innerButtonLayout->addWidget(caseSensitiveButton);
+    
+    // 设置搜索框内部边距，为按钮留出空间
+    searchEdit->setTextMargins(4, 0, 32, 0);
+    
+    searchLayout->addWidget(searchEdit);
     
     // 上一个/下一个按钮 - 使用FontAwesome图标
     int btnSize = qMax(30, m_fontSize + 10);
@@ -13050,4 +13469,512 @@ void GXTStudio::scheduleUpdateTableList(int delayMs)
 
     // 重启定时器以合并多次请求（延迟合并）
     m_tableListUpdateTimer->start(delayMs);
+}
+
+void GXTStudio::undo()
+{
+    if (!m_undoSystem || !m_undoSystem->canUndo()) return;
+    
+    UndoAction action = m_undoSystem->undo();
+    
+    FileTab* tab = getTab(action.tabIndex);
+    if (!tab) return;
+    
+    switch (action.type) {
+        case UndoActionType::EditCell: {
+            CellEditData editData = action.beforeData.value<CellEditData>();
+            
+            if (tab->isWHM) {
+                if (editData.row >= 0 && editData.row < static_cast<int>(tab->whmEntries.size())) {
+                    tab->whmEntries[editData.row].text = editData.oldValue.toStdString();
+                }
+            } else if (tab->isDAT) {
+                if (editData.row >= 0 && editData.row < static_cast<int>(tab->datEntries.size())) {
+                    tab->datEntries[editData.row].text = editData.oldValue.toStdString();
+                }
+            } else if (!tab->originalHasTABL && tab->tables.empty()) {
+                if (editData.row >= 0 && editData.row < static_cast<int>(tab->noTablEntries.size())) {
+                    if (editData.column == 0) {
+                        tab->noTablEntries[editData.row].key = editData.oldKey.toStdString();
+                        tab->noTablEntries[editData.row].originalKey = editData.oldKey.toStdString();
+                    } else {
+                        tab->noTablEntries[editData.row].value = editData.oldValue.toStdString();
+                    }
+                }
+            } else {
+                if (action.tableIndex >= 0 && action.tableIndex < static_cast<int>(tab->tables.size())) {
+                    auto& table = tab->tables[action.tableIndex];
+                    if (editData.row >= 0 && editData.row < static_cast<int>(table.entries.size())) {
+                        auto& entry = table.entries[editData.row];
+                        if (editData.column == 0) {
+                            entry.key = editData.oldKey.toStdString();
+                            entry.originalKey = editData.oldKey.toStdString();
+                        } else {
+                            entry.value = editData.oldValue.toStdString();
+                        }
+                    }
+                }
+            }
+            
+            if (action.tabIndex == m_currentTabIndex) {
+                updateEntryTable();
+            }
+            tab->isModified = true;
+            updateWindowTitle();
+            showLogMessage(QString::fromUtf8("已撤销: %1").arg(action.description));
+            break;
+        }
+        
+        case UndoActionType::AddEntry: {
+            EntryData entryData = action.afterData.value<EntryData>();
+            
+            if (tab->isWHM) {
+                if (entryData.row >= 0 && entryData.row <= static_cast<int>(tab->whmEntries.size())) {
+                    tab->whmEntries.erase(tab->whmEntries.begin() + entryData.row);
+                }
+            } else if (tab->isDAT) {
+                if (entryData.row >= 0 && entryData.row <= static_cast<int>(tab->datEntries.size())) {
+                    tab->datEntries.erase(tab->datEntries.begin() + entryData.row);
+                }
+            } else if (!tab->originalHasTABL && tab->tables.empty()) {
+                if (entryData.row >= 0 && entryData.row <= static_cast<int>(tab->noTablEntries.size())) {
+                    tab->noTablEntries.erase(tab->noTablEntries.begin() + entryData.row);
+                }
+            } else {
+                if (action.tableIndex >= 0 && action.tableIndex < static_cast<int>(tab->tables.size())) {
+                    auto& table = tab->tables[action.tableIndex];
+                    if (entryData.row >= 0 && entryData.row <= static_cast<int>(table.entries.size())) {
+                        table.entries.erase(table.entries.begin() + entryData.row);
+                    }
+                }
+            }
+            
+            if (action.tabIndex == m_currentTabIndex) {
+                updateEntryTable();
+                updateTableList();
+            }
+            tab->isModified = true;
+            updateWindowTitle();
+            showLogMessage(QString::fromUtf8("已撤销: %1").arg(action.description));
+            break;
+        }
+        
+        case UndoActionType::DeleteEntry: {
+            EntryData entryData = action.beforeData.value<EntryData>();
+            
+            if (tab->isWHM) {
+                if (entryData.row >= 0 && entryData.row <= static_cast<int>(tab->whmEntries.size())) {
+                    WHMEntry entry;
+                    QString hashStr = entryData.key;
+                    if (hashStr.startsWith("0x", Qt::CaseInsensitive)) {
+                        entry.hash = hashStr.mid(2).toUInt(nullptr, 16);
+                    } else {
+                        entry.hash = hashStr.toUInt(nullptr, 16);
+                    }
+                    entry.text = entryData.value.toStdString();
+                    tab->whmEntries.insert(tab->whmEntries.begin() + entryData.row, entry);
+                }
+            } else if (tab->isDAT) {
+                if (entryData.row >= 0 && entryData.row <= static_cast<int>(tab->datEntries.size())) {
+                    DATEntry entry;
+                    QString hashStr = entryData.key;
+                    if (hashStr.startsWith("0x", Qt::CaseInsensitive)) {
+                        entry.hash = hashStr.mid(2).toUInt(nullptr, 16);
+                    } else {
+                        entry.hash = hashStr.toUInt(nullptr, 16);
+                    }
+                    entry.text = entryData.value.toStdString();
+                    tab->datEntries.insert(tab->datEntries.begin() + entryData.row, entry);
+                }
+            } else if (!tab->originalHasTABL && tab->tables.empty()) {
+                if (entryData.row >= 0 && entryData.row <= static_cast<int>(tab->noTablEntries.size())) {
+                    GXTEntry entry;
+                    entry.key = entryData.key.toStdString();
+                    entry.originalKey = entryData.key.toStdString();
+                    entry.value = entryData.value.toStdString();
+                    tab->noTablEntries.insert(tab->noTablEntries.begin() + entryData.row, entry);
+                }
+            } else {
+                if (action.tableIndex >= 0 && action.tableIndex < static_cast<int>(tab->tables.size())) {
+                    auto& table = tab->tables[action.tableIndex];
+                    if (entryData.row >= 0 && entryData.row <= static_cast<int>(table.entries.size())) {
+                        GXTEntry entry;
+                        entry.key = entryData.key.toStdString();
+                        entry.originalKey = entryData.key.toStdString();
+                        entry.value = entryData.value.toStdString();
+                        table.entries.insert(table.entries.begin() + entryData.row, entry);
+                    }
+                }
+            }
+            
+            if (action.tabIndex == m_currentTabIndex) {
+                updateEntryTable();
+                updateTableList();
+            }
+            tab->isModified = true;
+            updateWindowTitle();
+            showLogMessage(QString::fromUtf8("已撤销: %1").arg(action.description));
+            break;
+        }
+        
+        case UndoActionType::DeleteMultipleEntries: {
+            MultipleEntriesData entriesData = action.beforeData.value<MultipleEntriesData>();
+            
+            if (action.tableIndex >= 0 && action.tableIndex < static_cast<int>(tab->tables.size())) {
+                auto& table = tab->tables[action.tableIndex];
+                
+                std::sort(entriesData.entries.begin(), entriesData.entries.end(), 
+                    [](const EntryData& a, const EntryData& b) { return a.row < b.row; });
+                
+                for (const auto& entryData : entriesData.entries) {
+                    if (entryData.row >= 0 && entryData.row <= static_cast<int>(table.entries.size())) {
+                        GXTEntry entry;
+                        entry.key = entryData.key.toStdString();
+                        entry.originalKey = entryData.key.toStdString();
+                        entry.value = entryData.value.toStdString();
+                        table.entries.insert(table.entries.begin() + entryData.row, entry);
+                    }
+                }
+            }
+            
+            if (action.tabIndex == m_currentTabIndex) {
+                updateEntryTable();
+                updateTableList();
+            }
+            tab->isModified = true;
+            updateWindowTitle();
+            showLogMessage(QString::fromUtf8("已撤销: %1").arg(action.description));
+            break;
+        }
+        
+        default:
+            break;
+    }
+}
+
+void GXTStudio::redo()
+{
+    if (!m_undoSystem || !m_undoSystem->canRedo()) return;
+    
+    UndoAction action = m_undoSystem->redo();
+    
+    FileTab* tab = getTab(action.tabIndex);
+    if (!tab) return;
+    
+    switch (action.type) {
+        case UndoActionType::EditCell: {
+            CellEditData editData = action.afterData.value<CellEditData>();
+            
+            if (tab->isWHM) {
+                if (editData.row >= 0 && editData.row < static_cast<int>(tab->whmEntries.size())) {
+                    tab->whmEntries[editData.row].text = editData.newValue.toStdString();
+                }
+            } else if (tab->isDAT) {
+                if (editData.row >= 0 && editData.row < static_cast<int>(tab->datEntries.size())) {
+                    tab->datEntries[editData.row].text = editData.newValue.toStdString();
+                }
+            } else if (!tab->originalHasTABL && tab->tables.empty()) {
+                if (editData.row >= 0 && editData.row < static_cast<int>(tab->noTablEntries.size())) {
+                    if (editData.column == 0) {
+                        tab->noTablEntries[editData.row].key = editData.newKey.toStdString();
+                        tab->noTablEntries[editData.row].originalKey = editData.newKey.toStdString();
+                    } else {
+                        tab->noTablEntries[editData.row].value = editData.newValue.toStdString();
+                    }
+                }
+            } else {
+                if (action.tableIndex >= 0 && action.tableIndex < static_cast<int>(tab->tables.size())) {
+                    auto& table = tab->tables[action.tableIndex];
+                    if (editData.row >= 0 && editData.row < static_cast<int>(table.entries.size())) {
+                        auto& entry = table.entries[editData.row];
+                        if (editData.column == 0) {
+                            entry.key = editData.newKey.toStdString();
+                            entry.originalKey = editData.newKey.toStdString();
+                        } else {
+                            entry.value = editData.newValue.toStdString();
+                        }
+                    }
+                }
+            }
+            
+            if (action.tabIndex == m_currentTabIndex) {
+                updateEntryTable();
+            }
+            tab->isModified = true;
+            updateWindowTitle();
+            showLogMessage(QString::fromUtf8("已重做: %1").arg(action.description));
+            break;
+        }
+        
+        case UndoActionType::AddEntry: {
+            EntryData entryData = action.afterData.value<EntryData>();
+            
+            if (tab->isWHM) {
+                WHMEntry entry;
+                QString hashStr = entryData.key;
+                if (hashStr.startsWith("0x", Qt::CaseInsensitive)) {
+                    entry.hash = hashStr.mid(2).toUInt(nullptr, 16);
+                } else {
+                    entry.hash = hashStr.toUInt(nullptr, 16);
+                }
+                entry.text = entryData.value.toStdString();
+                tab->whmEntries.insert(tab->whmEntries.begin() + entryData.row, entry);
+            } else if (tab->isDAT) {
+                DATEntry entry;
+                QString hashStr = entryData.key;
+                if (hashStr.startsWith("0x", Qt::CaseInsensitive)) {
+                    entry.hash = hashStr.mid(2).toUInt(nullptr, 16);
+                } else {
+                    entry.hash = hashStr.toUInt(nullptr, 16);
+                }
+                entry.text = entryData.value.toStdString();
+                tab->datEntries.insert(tab->datEntries.begin() + entryData.row, entry);
+            } else if (!tab->originalHasTABL && tab->tables.empty()) {
+                GXTEntry entry;
+                entry.key = entryData.key.toStdString();
+                entry.originalKey = entryData.key.toStdString();
+                entry.value = entryData.value.toStdString();
+                tab->noTablEntries.insert(tab->noTablEntries.begin() + entryData.row, entry);
+            } else {
+                if (action.tableIndex >= 0 && action.tableIndex < static_cast<int>(tab->tables.size())) {
+                    auto& table = tab->tables[action.tableIndex];
+                    GXTEntry entry;
+                    entry.key = entryData.key.toStdString();
+                    entry.originalKey = entryData.key.toStdString();
+                    entry.value = entryData.value.toStdString();
+                    table.entries.insert(table.entries.begin() + entryData.row, entry);
+                }
+            }
+            
+            if (action.tabIndex == m_currentTabIndex) {
+                updateEntryTable();
+                updateTableList();
+            }
+            tab->isModified = true;
+            updateWindowTitle();
+            showLogMessage(QString::fromUtf8("已重做: %1").arg(action.description));
+            break;
+        }
+        
+        case UndoActionType::DeleteEntry: {
+            EntryData entryData = action.afterData.value<EntryData>();
+            
+            if (tab->isWHM) {
+                if (entryData.row >= 0 && entryData.row < static_cast<int>(tab->whmEntries.size())) {
+                    tab->whmEntries.erase(tab->whmEntries.begin() + entryData.row);
+                }
+            } else if (tab->isDAT) {
+                if (entryData.row >= 0 && entryData.row < static_cast<int>(tab->datEntries.size())) {
+                    tab->datEntries.erase(tab->datEntries.begin() + entryData.row);
+                }
+            } else if (!tab->originalHasTABL && tab->tables.empty()) {
+                if (entryData.row >= 0 && entryData.row < static_cast<int>(tab->noTablEntries.size())) {
+                    tab->noTablEntries.erase(tab->noTablEntries.begin() + entryData.row);
+                }
+            } else {
+                if (action.tableIndex >= 0 && action.tableIndex < static_cast<int>(tab->tables.size())) {
+                    auto& table = tab->tables[action.tableIndex];
+                    if (entryData.row >= 0 && entryData.row < static_cast<int>(table.entries.size())) {
+                        table.entries.erase(table.entries.begin() + entryData.row);
+                    }
+                }
+            }
+            
+            if (action.tabIndex == m_currentTabIndex) {
+                updateEntryTable();
+                updateTableList();
+            }
+            tab->isModified = true;
+            updateWindowTitle();
+            showLogMessage(QString::fromUtf8("已重做: %1").arg(action.description));
+            break;
+        }
+        
+        case UndoActionType::DeleteMultipleEntries: {
+            MultipleEntriesData entriesData = action.afterData.value<MultipleEntriesData>();
+            
+            if (action.tableIndex >= 0 && action.tableIndex < static_cast<int>(tab->tables.size())) {
+                auto& table = tab->tables[action.tableIndex];
+                
+                std::sort(entriesData.entries.begin(), entriesData.entries.end(), 
+                    [](const EntryData& a, const EntryData& b) { return a.row > b.row; });
+                
+                for (const auto& entryData : entriesData.entries) {
+                    if (entryData.row >= 0 && entryData.row < static_cast<int>(table.entries.size())) {
+                        table.entries.erase(table.entries.begin() + entryData.row);
+                    }
+                }
+            }
+            
+            if (action.tabIndex == m_currentTabIndex) {
+                updateEntryTable();
+                updateTableList();
+            }
+            tab->isModified = true;
+            updateWindowTitle();
+            showLogMessage(QString::fromUtf8("已重做: %1").arg(action.description));
+            break;
+        }
+        
+        default:
+            break;
+    }
+}
+
+void GXTStudio::onUndoStackChanged(bool canUndo, bool canRedo)
+{
+    if (m_undoAction) {
+        m_undoAction->setEnabled(canUndo);
+        if (canUndo && m_undoSystem) {
+            m_undoAction->setText(QString::fromUtf8("撤销 - %1").arg(m_undoSystem->getUndoDescription()));
+        } else {
+            m_undoAction->setText(QString::fromUtf8("撤销(&U)"));
+        }
+    }
+    
+    if (m_redoAction) {
+        m_redoAction->setEnabled(canRedo);
+        if (canRedo && m_undoSystem) {
+            m_redoAction->setText(QString::fromUtf8("重做 - %1").arg(m_undoSystem->getRedoDescription()));
+        } else {
+            m_redoAction->setText(QString::fromUtf8("重做(&R)"));
+        }
+    }
+}
+
+void GXTStudio::addToRecentFiles(const QString& filePath)
+{
+    if (filePath.isEmpty()) return;
+    
+    // 移除已存在的相同路径
+    m_recentFiles.removeAll(filePath);
+    
+    // 添加到列表开头
+    m_recentFiles.prepend(filePath);
+    
+    // 限制列表大小
+    while (m_recentFiles.size() > MAX_RECENT_FILES) {
+        m_recentFiles.removeLast();
+    }
+    
+    // 更新菜单
+    updateRecentFilesMenu();
+    
+    // 保存到设置
+    saveRecentFiles();
+}
+
+void GXTStudio::updateRecentFilesMenu()
+{
+    if (!m_recentFilesMenu) return;
+    
+    // 清空现有菜单项
+    m_recentFilesMenu->clear();
+    
+    for (QAction* action : m_recentFileActions) {
+        action->deleteLater();
+    }
+    m_recentFileActions.clear();
+    
+    if (m_recentFiles.isEmpty()) {
+        QAction* emptyAction = new QAction(QString::fromUtf8("(无最近文件)"), this);
+        emptyAction->setEnabled(false);
+        m_recentFilesMenu->addAction(emptyAction);
+        m_recentFileActions.append(emptyAction);
+    } else {
+        for (int i = 0; i < m_recentFiles.size(); ++i) {
+            const QString& filePath = m_recentFiles[i];
+            QFileInfo fi(filePath);
+            QString text = QString("&%1 %2").arg(i + 1).arg(fi.fileName());
+            
+            QAction* action = new QAction(text, this);
+            action->setData(filePath);
+            action->setToolTip(filePath);
+            
+            // 使用lambda捕获filePath
+            connect(action, &QAction::triggered, this, [this, filePath]() {
+                openRecentFileInternal(filePath);
+            });
+            
+            m_recentFilesMenu->addAction(action);
+            m_recentFileActions.append(action);
+        }
+        
+        m_recentFilesMenu->addSeparator();
+        m_recentFilesMenu->addAction(m_clearRecentFilesAction);
+    }
+}
+
+void GXTStudio::openRecentFile()
+{
+    QAction* action = qobject_cast<QAction*>(sender());
+    if (action) {
+        QString filePath = action->data().toString();
+        if (!filePath.isEmpty()) {
+            openRecentFileInternal(filePath);
+        }
+    }
+}
+
+void GXTStudio::openRecentFileInternal(const QString& filePath)
+{
+    QFileInfo fi(filePath);
+    if (!fi.exists()) {
+        QMessageBox::warning(this, QString::fromUtf8("文件不存在"), 
+            QString::fromUtf8("文件 \"%1\" 不存在或已被移动。").arg(filePath));
+        // 从列表中移除
+        m_recentFiles.removeAll(filePath);
+        updateRecentFilesMenu();
+        saveRecentFiles();
+        return;
+    }
+    
+    // 检查是否已经打开
+    for (int i = 0; i < static_cast<int>(m_fileTabs.size()); ++i) {
+        if (m_fileTabs[i].filePath == filePath) {
+            m_tabWidget->setCurrentIndex(i);
+            return;
+        }
+    }
+    
+    // 根据文件类型打开
+    if (fi.suffix().toLower() == "txt") {
+        importTxtFile(filePath);
+    } else {
+        startAsyncParse(filePath);
+    }
+}
+
+void GXTStudio::clearRecentFiles()
+{
+    m_recentFiles.clear();
+    updateRecentFilesMenu();
+    saveRecentFiles();
+    showLogMessage(QString::fromUtf8("已清除最近文件列表"));
+}
+
+void GXTStudio::saveRecentFiles()
+{
+    QSettings settings("GXTStudio", "GXTStudio");
+    settings.setValue("recentFiles", m_recentFiles);
+}
+
+void GXTStudio::loadRecentFiles()
+{
+    QSettings settings("GXTStudio", "GXTStudio");
+    m_recentFiles = settings.value("recentFiles").toStringList();
+    
+    // 移除不存在的文件
+    QStringList validFiles;
+    for (const QString& filePath : m_recentFiles) {
+        if (QFileInfo::exists(filePath)) {
+            validFiles.append(filePath);
+        }
+    }
+    m_recentFiles = validFiles;
+    
+    // 限制列表大小
+    while (m_recentFiles.size() > MAX_RECENT_FILES) {
+        m_recentFiles.removeLast();
+    }
 }

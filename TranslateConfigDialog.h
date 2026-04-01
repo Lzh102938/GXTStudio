@@ -29,6 +29,8 @@ public:
     QString getApiKey() const;
     QString getSystemPrompt() const;
     QString getBatchPrompt() const;
+    QString getModel() const;
+    QString getProvider() const;
     
     int getBatchSize() const;
     int getMaxConcurrentRequests() const;
@@ -37,6 +39,8 @@ public:
     void setApiKey(const QString& apiKey);
     void setSystemPrompt(const QString& prompt);
     void setBatchPrompt(const QString& prompt);
+    void setModel(const QString& model);
+    void setProvider(const QString& provider);
     void setBatchSize(int size);
     void setMaxConcurrentRequests(int count);
     void setMaxRetries(int retries);
@@ -49,11 +53,31 @@ private slots:
     void onTestConnection();
     void onUnifiedPromptPresetChanged(int index);
     void onApplyUnifiedPreset();
+    void onProviderChanged(int index);
 
 private:
     void setupUI();
     void loadSettings();
     void saveSettings();
+    void updateModelCombo();
+    
+    struct ProviderInfo {
+        QString id;
+        QString name;
+        QString apiUrl;
+        QString authHeader;
+        QString authPrefix;
+        QString helpUrl;
+    };
+    
+    struct ModelInfo {
+        QString id;
+        QString name;
+        QString description;
+        int maxTokens;
+        double defaultTemperature;
+        QString providerId;
+    };
     
     struct UnifiedPromptTemplate {
         QString name;
@@ -64,9 +88,13 @@ private:
     
     QTabWidget* m_tabWidget;
     
+    QComboBox* m_providerCombo;
+    QLabel* m_providerHelpLabel;
     QLineEdit* m_apiKeyEdit;
     QPushButton* m_testButton;
     QLabel* m_apiStatusIcon;
+    QComboBox* m_modelCombo;
+    QLabel* m_modelDescLabel;
     
     QComboBox* m_unifiedPresetCombo;
     QTextEdit* m_systemPromptEdit;
@@ -82,12 +110,16 @@ private:
 public:
     static const QString DEFAULT_SYSTEM_PROMPT;
     static const QString DEFAULT_USER_PROMPT;
+    static const QString DEFAULT_MODEL;
+    static const QString DEFAULT_PROVIDER;
     static const int DEFAULT_BATCH_SIZE;
     static const int DEFAULT_MAX_CONCURRENT;
     static const int DEFAULT_MAX_RETRIES;
     static const int DEFAULT_REQUEST_TIMEOUT;
     
 private:
+    static const QList<ProviderInfo> s_providers;
+    static const QList<ModelInfo> s_models;
     static const QList<UnifiedPromptTemplate> s_presets;
     static const QString s_mainStyle;
 };

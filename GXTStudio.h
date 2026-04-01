@@ -7,6 +7,7 @@
 #include "SaveWorker.h"
 #include "ItemPool.h"
 #include "ReplaceWorker.h"
+#include "UndoSystem.h"
 
 #include <QFont>
 #include <QFontDatabase>
@@ -605,6 +606,15 @@ private slots:
     void onEntryReplaced(int tableIndex, int entryIndex, int replaceCount);
     void toggleReadOnly(bool readOnly);
     
+    // 撤销/重做操作
+    void undo();
+    void redo();
+    void onUndoStackChanged(bool canUndo, bool canRedo);
+    
+    // 最近文件列表
+    void openRecentFile();
+    void clearRecentFiles();
+    
     // 后台替换功能
     void replaceAllMatchesInEntry(FileTab* tab, int tableIndex, int entryIndex, const QString& findText, const QString& replaceText, bool caseSensitive);
 
@@ -753,6 +763,13 @@ private:
     void onResizeTimerTimeout();  // 窗口缩放防抖处理
     void saveBackgroundSettings();  // 保存背景设置到配置
     void loadBackgroundSettings();  // 从配置加载背景设置
+    
+    // 最近文件列表相关
+    void addToRecentFiles(const QString& filePath);
+    void updateRecentFilesMenu();
+    void saveRecentFiles();
+    void loadRecentFiles();
+    void openRecentFileInternal(const QString& filePath);
 
     // 主要控件
     QTabWidget* m_tabWidget;
@@ -786,6 +803,18 @@ private:
     QAction* m_setBackgroundAction;    // 设置背景图片
     QAction* m_clearBackgroundAction;  // 清除背景图片
     QAction* m_debugConfigAction;      // 调试配置编辑器
+    
+    // 撤销/重做相关
+    QAction* m_undoAction;
+    QAction* m_redoAction;
+    class UndoSystem* m_undoSystem;
+    
+    // 最近文件列表相关
+    static const int MAX_RECENT_FILES = 10;
+    QStringList m_recentFiles;
+    QMenu* m_recentFilesMenu;
+    QList<QAction*> m_recentFileActions;
+    QAction* m_clearRecentFilesAction;
       
     // 码表转换相关
     QToolButton* m_codeTableButton; // 码表转换下拉按钮

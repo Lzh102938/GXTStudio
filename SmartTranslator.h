@@ -89,6 +89,8 @@ public slots:
     void setApiKey(const QString& apiKey);
     void setSystemPrompt(const QString& prompt);
     void setBatchPrompt(const QString& prompt);
+    void setModel(const QString& model);
+    void setProvider(const QString& provider);
     
     // 主要翻译入口，参考Python版本的异步并发逻辑
     void translateTexts(const QList<TranslateTask>& tasks);
@@ -127,6 +129,16 @@ private:
     QString m_apiKey;
     QString m_systemPrompt;
     QString m_batchPrompt;
+    QString m_model;
+    QString m_provider;
+    
+    struct ProviderConfig {
+        QString apiUrl;
+        QString authHeader;
+        QString authPrefix;
+    };
+    
+    ProviderConfig getProviderConfig() const;
     
     // 动态性能配置
     int m_batchSize;
@@ -163,8 +175,6 @@ private:
     int m_adaptiveConcurrentLimit;     // 自适应并发限制
     
     mutable QMutex m_mutex;
-    
-    static const QString API_URL;
 };
 
 // BatchRequest的完整定义放在类定义之后

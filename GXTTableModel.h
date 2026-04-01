@@ -161,6 +161,7 @@ public:
     
 signals:
     void dataModified();
+    void cellEdited(int row, int column, const QString& oldKey, const QString& oldValue, const QString& newKey, const QString& newValue);
     
 public:
     // 【性能优化】行缓存结构

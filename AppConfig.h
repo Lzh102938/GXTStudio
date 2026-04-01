@@ -204,6 +204,26 @@ public:
         m_config["translate/maxRetries"] = retries;
     }
 
+    QString getTranslateModel() const
+    {
+        return m_config.value("translate/model", "mimo-v2-flash").toString();
+    }
+
+    void setTranslateModel(const QString& model)
+    {
+        m_config["translate/model"] = model;
+    }
+
+    QString getTranslateProvider() const
+    {
+        return m_config.value("translate/provider", "xiaomi").toString();
+    }
+
+    void setTranslateProvider(const QString& provider)
+    {
+        m_config["translate/provider"] = provider;
+    }
+
     int getFontSize() const
     {
         return m_config.value("general/fontSize", 11).toInt();

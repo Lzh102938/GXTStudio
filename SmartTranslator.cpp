@@ -12,13 +12,11 @@
 #include <QFuture>
 #include <QFutureWatcher>
 
-const QString SmartTranslator::API_URL = "https://api.xiaomimimo.com/v1/chat/completions";
-
 SmartTranslator::SmartTranslator(QObject *parent)
     : QObject(parent)
-    , m_batchSize(DEFAULT_BATCH_SIZE)                    // 32行每批次
-    , m_maxConcurrentRequests(DEFAULT_MAX_CONCURRENT_REQUESTS)  // 降低至12个并发请求
-    , m_maxRetries(DEFAULT_MAX_RETRIES)                   // 3次重试
+    , m_batchSize(DEFAULT_BATCH_SIZE)
+    , m_maxConcurrentRequests(DEFAULT_MAX_CONCURRENT_REQUESTS)
+    , m_maxRetries(DEFAULT_MAX_RETRIES)
     , m_completedCount(0)
     , m_processedCount(0)
     , m_totalCount(0)
@@ -33,16 +31,14 @@ SmartTranslator::SmartTranslator(QObject *parent)
     , m_adaptiveConcurrentLimit(DEFAULT_MAX_CONCURRENT_REQUESTS)
     , m_timeoutCheckTimer(nullptr)
     , m_totalTranslationTime(0)
-    , m_successfulRequests(0)     // 初始化为0
-    , m_failedRequests(0)         // 初始化为0
+    , m_successfulRequests(0)
+    , m_failedRequests(0)
 {
     qDebug() << "初始化SmartTranslator，使用" << DEFAULT_MAX_CONCURRENT_REQUESTS << "并发线程和事件驱动架构";
 
-    // 初始化计时器
     m_lastRequestTime.start();
     m_rateLimitTimer.start();
 
-    // 创建超时检测定时器（每5秒检查一次）
     m_timeoutCheckTimer = new QTimer(this);
     m_timeoutCheckTimer->setInterval(5000);
     connect(m_timeoutCheckTimer, &QTimer::timeout, this, &SmartTranslator::checkStuckRequests);
@@ -80,6 +76,35 @@ void SmartTranslator::setBatchPrompt(const QString& prompt)
 {
     QMutexLocker locker(&m_mutex);
     m_batchPrompt = prompt;
+}
+
+void SmartTranslator::setModel(const QString& model)
+{
+    QMutexLocker locker(&m_mutex);
+    m_model = model.isEmpty() ? "mimo-v2-flash" : model;
+}
+
+void SmartTranslator::setProvider(const QString& provider)
+{
+    QMutexLocker locker(&m_mutex);
+    m_provider = provider.isEmpty() ? "xiaomi" : provider;
+}
+
+SmartTranslator::ProviderConfig SmartTranslator::getProviderConfig() const
+{
+    ProviderConfig config;
+    
+    if (m_provider == "deepseek") {
+        config.apiUrl = "https://api.deepseek.com/chat/completions";
+        config.authHeader = "Authorization";
+        config.authPrefix = "Bearer ";
+    } else {
+        config.apiUrl = "https://api.xiaomimimo.com/v1/chat/completions";
+        config.authHeader = "api-key";
+        config.authPrefix = "";
+    }
+    
+    return config;
 }
 
 void SmartTranslator::setBatchSize(int size)
@@ -393,38 +418,29 @@ void SmartTranslator::translateBatchAsync(const QList<TranslateTask>& batch, int
 
             // 参考Python版本的请求格式
             QJsonObject requestObj;
-            requestObj["model"] = "mimo-v2-flash";  // 使用MiMo API模型
+            QString modelToUse = m_model.isEmpty() ? "mimo-v2-flash" : m_model;
+            requestObj["model"] = modelToUse;
             requestObj["temperature"] = 0.3;
-            requestObj["max_completion_tokens"] = 4096;
+            requestObj["max_tokens"] = 4096;
             requestObj["top_p"] = 0.95;
             requestObj["stream"] = false;
             requestObj["frequency_penalty"] = 0;
             requestObj["presence_penalty"] = 0;
 
-            // 添加thinking配置
-            QJsonObject thinking;
-            thinking["type"] = "disabled";
-            requestObj["thinking"] = thinking;
-
-            // 使用配置的提示词，如果为空则使用默认
             QString systemPrompt = m_systemPrompt.isEmpty()
                 ? "你是一个专业的游戏文本翻译助手，擅长准确翻译游戏内容。"
                 : m_systemPrompt;
 
             QString userPrompt;
             if (m_batchPrompt.isEmpty()) {
-                // 默认批量提示词
                 userPrompt = QString("请将以下内容翻译成中文，保持游戏风格和格式：\n%1\n\n要求：\n1. 按行翻译，保持编号格式\n2. 保留~g~、~y~、~r~、~b~、~w~等颜色代码不变\n3. 按字面意思翻译，保持游戏文本风格").arg(batchContents);
             } else {
-                // 使用配置的批量提示词，替换{contents}占位符
                 userPrompt = m_batchPrompt;
-                // 确保{contents}被正确替换
                 if (userPrompt.contains("{contents}")) {
                     userPrompt = userPrompt.replace("{contents}", batchContents);
                 }
             }
 
-            // 调试日志：显示使用的提示词（最多100字符）
             qWarning() << "批次" << batchRequest->batchId << "使用的系统提示词:" << systemPrompt.left(300) << (systemPrompt.length() > 300 ? "..." : "");
 
             QJsonArray messages;
@@ -438,19 +454,19 @@ void SmartTranslator::translateBatchAsync(const QList<TranslateTask>& batch, int
             });
             requestObj["messages"] = messages;
 
-            // 发送HTTP请求 - 优化连接配置
+            ProviderConfig providerConfig = getProviderConfig();
+
             QNetworkAccessManager networkManager;
-            QNetworkRequest request = QNetworkRequest(QUrl(API_URL));
+            QNetworkRequest request = QNetworkRequest(QUrl(providerConfig.apiUrl));
             request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-            request.setRawHeader("api-key", m_apiKey.toUtf8());  // 使用 api-key 头而不是 Authorization: Bearer
+            request.setRawHeader(providerConfig.authHeader.toUtf8(), (providerConfig.authPrefix + m_apiKey).toUtf8());
             request.setRawHeader("User-Agent", "GXTStudio-Translator/2.0");
             request.setRawHeader("Accept", "application/json");
             request.setRawHeader("Connection", "keep-alive");
-            request.setRawHeader("Keep-Alive", "timeout=30, max=32");  // 优化keep-alive
+            request.setRawHeader("Keep-Alive", "timeout=30, max=32");
             request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 
-            // 优化超时和重试配置
-            request.setTransferTimeout(REQUEST_TIMEOUT * 1000);  // 使用类常量
+            request.setTransferTimeout(REQUEST_TIMEOUT * 1000);
             QJsonDocument doc(requestObj);
             QByteArray requestData = doc.toJson();
 
