@@ -269,9 +269,13 @@ struct FileTab {
     QLineEdit* searchEdit = nullptr;
     QPushButton* searchPrevButton = nullptr; // 上一个按钮
     QPushButton* searchNextButton = nullptr; // 下一个按钮
+    QToolButton* filterButton = nullptr;            // 过滤器模式图标按钮
     QToolButton* caseSensitiveButton = nullptr;  // 大小写敏感图标按钮
     QToolButton* regexButton = nullptr;           // 正则表达式图标按钮
     QToolButton* addTableButton = nullptr;        // 添加新表按钮
+
+    // 过滤模式：隐藏不匹配的行
+    QSet<int> filteredRows;
 
     // 添加键值对控件
     QLineEdit* keyEdit = nullptr;       // 键输入框
@@ -906,9 +910,10 @@ private:
         bool caseSensitive;  // 大小写敏感
         bool useRegex;       // 使用正则表达式
         bool loopSearch;     // 是否循环搜索
+        bool filterMode;     // 过滤模式 - 只显示匹配的行
 
-        SearchState() : currentTableIndex(-1), currentEntryIndex(-1), currentMatchPosition(-1), 
-                        isValid(false), caseSensitive(false), useRegex(false), loopSearch(false) {}
+        SearchState() : currentTableIndex(-1), currentEntryIndex(-1), currentMatchPosition(-1),
+                        isValid(false), caseSensitive(false), useRegex(false), loopSearch(false), filterMode(false) {}
         void clear() {
             searchText.clear();
             currentTableIndex = -1;
@@ -919,6 +924,7 @@ private:
             caseSensitive = false;
             useRegex = false;
             loopSearch = false;
+            filterMode = false;
         }
     };
     SearchState m_searchState;
@@ -995,6 +1001,8 @@ private:
     void cleanupListCache(FileTab* tab); // 清理列表缓存
     void clearSearchCache(); // 清除搜索缓存
     QString getVersionString(GXTVersion version) const;
+    QIcon getVersionIcon(GXTVersion version) const;
+    QIcon getFileTypeIcon(const FileTab& tab) const;
     std::string getVersionName(GXTVersion version);
     GXTVersion selectVersionDialog(); // 版本选择对话框
     int calculateKeyColumnWidth(); // 计算键列宽度
@@ -1048,6 +1056,8 @@ private:
     void jumpToMatch(int matchIndex);
     void highlightMatch(int entryIndex);
     void clearSearchHighlight();
+    void applyFilterMode();
+    void clearFilterMode();
     
     // 异步解析方法
     void setupParseThread();

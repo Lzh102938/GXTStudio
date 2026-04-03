@@ -722,6 +722,13 @@ void GXTStudio::setupUI()
     
     QWidget* welcomeTab = createWelcomeTab();
     int welcomeIndex = m_tabWidget->addTab(welcomeTab, "欢迎使用");
+    
+    // 设置欢迎标签页图标
+    QString faviconPath = QCoreApplication::applicationDirPath() + "/icon/favicon.ico";
+    if (QFile::exists(faviconPath)) {
+        m_tabWidget->setTabIcon(welcomeIndex, QIcon(faviconPath));
+    }
+    
     m_tabWidget->tabBar()->setTabButton(welcomeIndex, QTabBar::RightSide, nullptr);
     
     setCentralWidget(m_tabWidget);
@@ -1552,6 +1559,12 @@ void GXTStudio::newFile()
     if (newTab.isCharTable && newTab.pageWidget) {
         m_tabWidget->insertTab(tabIndex, newTab.pageWidget, newTab.fileName);
         
+        // 设置标签页图标
+        QIcon newFileIcon = getFileTypeIcon(newTab);
+        if (!newFileIcon.isNull()) {
+            m_tabWidget->setTabIcon(tabIndex, newFileIcon);
+        }
+        
         // 添加关闭按钮 - 简洁圆形设计
         QPushButton* closeButton = new QPushButton();
         closeButton->setFixedSize(16, 16);
@@ -1764,6 +1777,12 @@ void GXTStudio::importTxtFile(const QString& filePath)
         if (!parentPage) parentPage = charWidget->parentWidget();
         m_tabWidget->insertTab(tabIndex, parentPage, newTab.fileName);
 
+        // 设置标签页图标
+        QIcon charTableIcon = getFileTypeIcon(newTab);
+        if (!charTableIcon.isNull()) {
+            m_tabWidget->setTabIcon(tabIndex, charTableIcon);
+        }
+
         // 添加关闭按钮 - 简洁圆形设计
         QPushButton* closeButton = new QPushButton();
         closeButton->setFixedSize(16, 16);
@@ -1973,6 +1992,12 @@ void GXTStudio::importTxtFile(const QString& filePath)
         FileTab newTab; newTab.filePath = filePath; newTab.fileName = QFileInfo(filePath).fileName(); newTab.isCharTable = true; newTab.isDAT = true; newTab.charTableWidget = widget; newTab.charTableData = data; newTab.isModified = true;
         int idx = m_fileTabs.size(); m_fileTabs.push_back(newTab);
         QWidget* parentPage = widget->property("parentPage").value<QWidget*>(); if (!parentPage) parentPage = widget->parentWidget(); m_tabWidget->insertTab(idx, parentPage, newTab.fileName);
+        
+        // 设置标签页图标
+        QIcon charTableIcon = getFileTypeIcon(newTab);
+        if (!charTableIcon.isNull()) {
+            m_tabWidget->setTabIcon(idx, charTableIcon);
+        }
         
         // 添加关闭按钮 - 简洁圆形设计
         QPushButton* closeButton = new QPushButton();
@@ -4606,6 +4631,41 @@ void GXTStudio::switchToTable(int newTableIndex)
         entryCount = tab->tables[newTableIndex].entries.size();
     }
     showLogMessage("切换到表格: " + tableName + " (条目数: " + QString::number(entryCount) + ")");
+
+    // 如果之前有过滤模式，重新应用过滤
+    if (tab->filterButton && tab->filterButton->isChecked() &&
+        !m_searchState.searchText.isEmpty() && m_searchState.isValid) {
+        // 重新构建当前表的过滤行
+        tab->filteredRows.clear();
+        for (const auto& match : m_searchState.allMatches) {
+            int tableIdx = std::get<0>(match);
+            int entryIdx = std::get<1>(match);
+            if (tableIdx == newTableIndex) {
+                tab->filteredRows.insert(entryIdx);
+            }
+        }
+
+        int totalRows = entryCount;
+        tab->entryTableView->setUpdatesEnabled(false);
+        for (int row = 0; row < totalRows; ++row) {
+            bool shouldHide = !tab->filteredRows.contains(row);
+            tab->entryTableView->setRowHidden(row, shouldHide);
+        }
+        tab->entryTableView->setUpdatesEnabled(true);
+
+        if (tab->entryTableLabel) {
+            int visibleCount = tab->filteredRows.size();
+            QString entryFontFamily = FA::solidFontFamily();
+            if (entryFontFamily.isEmpty()) {
+                tab->entryTableLabel->setText(QString("文本条目 (共 %1 行，已过滤显示 %2 行)")
+                    .arg(totalRows).arg(visibleCount));
+            } else {
+                tab->entryTableLabel->setText(QString("<span style=\"font-family:'%1'; font-size:%2px; font-weight: bold;\">%3</span> <span style=\"font-size:14px;\">文本条目 (共 %4 行，已过滤显示 %5 行)</span>")
+                    .arg(entryFontFamily).arg(14).arg(QString(FA::QEdit))
+                    .arg(totalRows).arg(visibleCount));
+            }
+        }
+    }
 }
 
 // 处理添加表格的请求
@@ -4722,14 +4782,16 @@ void GXTStudio::onSearchTextChanged()
         bool useRegex = tab->regexButton ? tab->regexButton->isChecked() : false;
         m_replaceDialog->setRegexEnabled(useRegex);
     }
-    
+
     QString searchText = tab->searchEdit->text();
-    if (searchText != m_searchState.searchText) {
+    bool filterMode = tab->filterButton ? tab->filterButton->isChecked() : false;
 
-
+    if (searchText != m_searchState.searchText || filterMode != m_searchState.filterMode) {
         // 使用简单的防抖搜索
-        QTimer::singleShot(300, this, [this, searchText]() {
-            if (searchText == getCurrentTab()->searchEdit->text()) {
+        QTimer::singleShot(300, this, [this, searchText, filterMode]() {
+            FileTab* currentTab = getCurrentTab();
+            if (currentTab && searchText == currentTab->searchEdit->text() &&
+                filterMode == (currentTab->filterButton ? currentTab->filterButton->isChecked() : false)) {
                 performSearch(searchText);
             }
         });
@@ -4744,9 +4806,15 @@ void GXTStudio::performSearch(const QString& searchText)
     // 获取搜索选项
     bool caseSensitive = tab->caseSensitiveButton ? tab->caseSensitiveButton->isChecked() : false;
     bool useRegex = tab->regexButton ? tab->regexButton->isChecked() : false;
+    bool filterMode = tab->filterButton ? tab->filterButton->isChecked() : false;
 
     // 清除之前的高亮
     clearSearchHighlight();
+
+    // 如果之前有过滤模式，清除过滤UI
+    if (m_searchState.filterMode) {
+        clearFilterMode();
+    }
 
     if (searchText.isEmpty()) {
         m_searchState.clear();
@@ -4754,25 +4822,29 @@ void GXTStudio::performSearch(const QString& searchText)
         return;
     }
 
-    for (int i = 0; i < MAX_SEARCH_CACHE; ++i) {
-        if (m_searchResultCache[i].isValid(searchText, caseSensitive, useRegex, m_currentTabIndex)) {
-            m_searchState.searchText = searchText;
-            m_searchState.currentTableIndex = tab->currentTableIndex;
-            m_searchState.currentEntryIndex = -1;
-            m_searchState.currentMatchPosition = -1;
-            m_searchState.allMatches = m_searchResultCache[i].matches;
-            m_searchState.caseSensitive = caseSensitive;
-            m_searchState.useRegex = useRegex;
-            m_searchState.isValid = !m_searchState.allMatches.empty();
+    // 如果是过滤模式且有缓存，不需要重新搜索
+    if (filterMode) {
+        for (int i = 0; i < MAX_SEARCH_CACHE; ++i) {
+            if (m_searchResultCache[i].isValid(searchText, caseSensitive, useRegex, m_currentTabIndex)) {
+                m_searchState.searchText = searchText;
+                m_searchState.currentTableIndex = tab->currentTableIndex;
+                m_searchState.currentEntryIndex = -1;
+                m_searchState.currentMatchPosition = -1;
+                m_searchState.allMatches = m_searchResultCache[i].matches;
+                m_searchState.caseSensitive = caseSensitive;
+                m_searchState.useRegex = useRegex;
+                m_searchState.isValid = !m_searchState.allMatches.empty();
+                m_searchState.filterMode = filterMode;
 
-            if (m_searchState.isValid) {
-                QString modeText = useRegex ? " (正则表达式)" : (caseSensitive ? " (区分大小写)" : "");
-                showLogMessage(QString("找到 %1 个匹配项%2 (缓存)").arg(m_searchState.allMatches.size()).arg(modeText));
-                jumpToMatch(0);
-            } else {
-                showLogMessage("未找到匹配项");
+                if (m_searchState.isValid) {
+                    applyFilterMode();
+                    QString modeText = useRegex ? " (正则表达式)" : (caseSensitive ? " (区分大小写)" : "");
+                    showLogMessage(QString("过滤模式: 显示 %1 个匹配行%2").arg(m_searchState.allMatches.size()).arg(modeText));
+                } else {
+                    showLogMessage("未找到匹配项");
+                }
+                return;
             }
-            return;
         }
     }
 
@@ -4799,6 +4871,7 @@ void GXTStudio::performSearch(const QString& searchText)
     m_searchState.allMatches.clear();
     m_searchState.caseSensitive = caseSensitive;
     m_searchState.useRegex = useRegex;
+    m_searchState.filterMode = filterMode;
     // 保持现有的循环搜索设置
     // m_searchState.loopSearch = ... (保持不变)
 
@@ -5010,11 +5083,16 @@ void GXTStudio::performSearch(const QString& searchText)
 
     if (m_searchState.isValid) {
         QString modeText = useRegex ? " (正则表达式)" : (caseSensitive ? " (区分大小写)" : "");
-        showLogMessage(QString("找到 %1 个匹配项%2").arg(m_searchState.allMatches.size()).arg(modeText));
-        if (!m_suppressSearchJump) {
-            jumpToMatch(0);
+        if (filterMode) {
+            applyFilterMode();
+            showLogMessage(QString("过滤模式: 显示 %1 个匹配行%2").arg(m_searchState.allMatches.size()).arg(modeText));
         } else {
-            m_suppressSearchJump = false;
+            showLogMessage(QString("找到 %1 个匹配项%2").arg(m_searchState.allMatches.size()).arg(modeText));
+            if (!m_suppressSearchJump) {
+                jumpToMatch(0);
+            } else {
+                m_suppressSearchJump = false;
+            }
         }
     } else {
         showLogMessage("未找到匹配项");
@@ -5389,13 +5467,85 @@ void GXTStudio::clearSearchHighlight()
     }
     
     if (!tab->entryTableView) return;
-    
-    // 使用单例委托清除高亮
+
+    // 使用单态委托清除高亮
     auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab->entryTableView->itemDelegate());
     if (delegate) {
         delegate->setSearchText(QString());
         delegate->clearCache(); // 清理缓存
         tab->entryTableView->viewport()->update(); // 仅更新视口，不重绘整个表格
+    }
+}
+
+void GXTStudio::applyFilterMode()
+{
+    FileTab* tab = getCurrentTab();
+    if (!tab) return;
+
+    if (!tab->entryTableView) return;
+
+    tab->filteredRows.clear();
+    int currentTableIndex = tab->currentTableIndex;
+
+    for (const auto& match : m_searchState.allMatches) {
+        int tableIdx = std::get<0>(match);
+        int entryIdx = std::get<1>(match);
+        if (tableIdx == currentTableIndex) {
+            tab->filteredRows.insert(entryIdx);
+        }
+    }
+
+    int totalRows = tab->entryTableModel ? tab->entryTableModel->rowCount(QModelIndex()) : 0;
+
+    tab->entryTableView->setUpdatesEnabled(false);
+
+    for (int row = 0; row < totalRows; ++row) {
+        bool shouldHide = !tab->filteredRows.contains(row);
+        tab->entryTableView->setRowHidden(row, shouldHide);
+    }
+
+    tab->entryTableView->setUpdatesEnabled(true);
+
+    if (tab->entryTableLabel) {
+        int visibleCount = tab->filteredRows.size();
+        QString entryFontFamily = FA::solidFontFamily();
+        if (entryFontFamily.isEmpty()) {
+            tab->entryTableLabel->setText(QString("文本条目 (共 %1 行，已过滤显示 %2 行)")
+                .arg(totalRows).arg(visibleCount));
+        } else {
+            tab->entryTableLabel->setText(QString("<span style=\"font-family:'%1'; font-size:%2px; font-weight: bold;\">%3</span> <span style=\"font-size:14px;\">文本条目 (共 %4 行，已过滤显示 %5 行)</span>")
+                .arg(entryFontFamily).arg(14).arg(QString(FA::QEdit))
+                .arg(totalRows).arg(visibleCount));
+        }
+    }
+}
+
+void GXTStudio::clearFilterMode()
+{
+    FileTab* tab = getCurrentTab();
+    if (!tab) return;
+
+    if (!tab->entryTableView) return;
+
+    tab->filteredRows.clear();
+
+    int totalRows = tab->entryTableModel ? tab->entryTableModel->rowCount(QModelIndex()) : 0;
+
+    tab->entryTableView->setUpdatesEnabled(false);
+    for (int row = 0; row < totalRows; ++row) {
+        tab->entryTableView->setRowHidden(row, false);
+    }
+    tab->entryTableView->setUpdatesEnabled(true);
+
+    if (tab->entryTableLabel) {
+        QString entryFontFamily = FA::solidFontFamily();
+        if (entryFontFamily.isEmpty()) {
+            tab->entryTableLabel->setText(QString("文本条目 (共 %1 行)").arg(totalRows));
+        } else {
+            tab->entryTableLabel->setText(QString("<span style=\"font-family:'%1'; font-size:%2px; font-weight: bold;\">%3</span> <span style=\"font-size:14px;\">文本条目 (共 %4 行)</span>")
+                .arg(entryFontFamily).arg(14).arg(QString(FA::QEdit))
+                .arg(totalRows));
+        }
     }
 }
 
@@ -5673,6 +5823,12 @@ void GXTStudio::onGenerateCharTable()
     QWidget* parentPage = charWidget->property("parentPage").value<QWidget*>();
     if (!parentPage) parentPage = charWidget->parentWidget();
     m_tabWidget->insertTab(tabIndex, parentPage, newTab.fileName);
+    
+    // 设置标签页图标
+    QIcon charTableIcon = getFileTypeIcon(newTab);
+    if (!charTableIcon.isNull()) {
+        m_tabWidget->setTabIcon(tabIndex, charTableIcon);
+    }
     
     // 添加关闭按钮 - 简洁圆形设计
     QPushButton* closeButton = new QPushButton();
@@ -7422,9 +7578,8 @@ void GXTStudio::closeTabInternal(int index)
 // 处理标签页拖拽移动
 void GXTStudio::onTabMoved(int from, int to)
 {
-    // 【关键修复】标签页移动的完整解决方案
-    // 核心问题：QTabWidget 的 widget 顺序与 m_fileTabs 顺序不一致
-    // 解决方案：同步重新排序 widget 和 m_fileTabs
+    // 当 setMovable(true) 时，Qt 已经自动移动了标签页的 widget
+    // 这里只需要同步更新 m_fileTabs 的顺序即可
 
     if (from < 0 || from >= static_cast<int>(m_fileTabs.size()) ||
         to < 0 || to >= static_cast<int>(m_fileTabs.size())) {
@@ -7435,47 +7590,18 @@ void GXTStudio::onTabMoved(int from, int to)
         return;
     }
 
-    // 记录是否移动了当前标签页
-    bool currentTabMoved = (from == m_currentTabIndex);
-
-    // 【关键修复】在删除 widget 之前，先保存标签页标题
-    QString tabTitle = m_tabWidget->tabText(from);
-
-    // 【关键修复】获取需要移动的 widget
-    QWidget* movedWidget = m_tabWidget->widget(from);
-
-    // 【关键修复】阻塞 QTabWidget 的信号，防止在移动过程中触发 currentChanged
-    m_tabWidget->blockSignals(true);
-
-    // 移除旧位置的 widget 和数据
-    m_tabWidget->removeTab(from);
-
-    // 【关键修复】在 m_fileTabs 中移动元素
+    // 在 m_fileTabs 中移动元素
     FileTab temp = std::move(m_fileTabs[from]);
     m_fileTabs.erase(m_fileTabs.begin() + from);
+    m_fileTabs.insert(m_fileTabs.begin() + to, std::move(temp));
 
-    // 【关键修复】重新插入到目标位置
-    // 因为已经移除了 from 位置的元素，需要调整插入位置
-    int insertPos = (to > from) ? (to - 1) : to;
-    m_fileTabs.insert(m_fileTabs.begin() + insertPos, std::move(temp));
-
-    // 【关键修复】将 widget 重新插入到 QTabWidget 的目标位置
-    // insertTab 的正确参数顺序：index, widget, label
-    m_tabWidget->insertTab(to, movedWidget, tabTitle);
-
-    // 【关键修复】解除信号阻塞
-    m_tabWidget->blockSignals(false);
-
-    // 【关键修复】更新当前标签页索引
-    if (currentTabMoved) {
+    // 更新当前标签页索引
+    if (from == m_currentTabIndex) {
         m_currentTabIndex = to;
-    } else {
-        // 如果当前标签页没有被移动，需要根据移动方向调整索引
-        if (from < m_currentTabIndex && to >= m_currentTabIndex) {
-            m_currentTabIndex--;
-        } else if (from > m_currentTabIndex && to <= m_currentTabIndex) {
-            m_currentTabIndex++;
-        }
+    } else if (from < m_currentTabIndex && to >= m_currentTabIndex) {
+        m_currentTabIndex--;
+    } else if (from > m_currentTabIndex && to <= m_currentTabIndex) {
+        m_currentTabIndex++;
     }
 
     // 验证索引有效性
@@ -7485,15 +7611,13 @@ void GXTStudio::onTabMoved(int from, int to)
         m_currentTabIndex = static_cast<int>(m_fileTabs.size()) - 1;
     }
 
-    // 【关键修复】强制刷新所有标签页的模型连接
+    // 刷新所有标签页的模型连接
     for (auto& tab : m_fileTabs) {
         if (tab.entryTableModel) {
             tab.entryTableModel->setTab(&tab);
         }
     }
 
-    // 【关键修复】只更新UI状态，不触发标签页切换
-    // 因为我们已经手动重新排序了widgets，不需要再次切换
     updateWindowTitle();
     updateStatusBar();
     updateActions();
@@ -8409,6 +8533,12 @@ void GXTStudio::startAsyncParse(const QString& filePath)
                             // insertTab会在指定位置插入，而不是在末尾追加
                             m_tabWidget->insertTab(tabIndex, parentPage, fileInfo.fileName());
                             
+                            // 设置标签页图标
+                            QIcon charTableIcon = getFileTypeIcon(newTab);
+                            if (!charTableIcon.isNull()) {
+                                m_tabWidget->setTabIcon(tabIndex, charTableIcon);
+                            }
+                            
                             // 添加关闭按钮 - 简洁圆形设计
                             QPushButton* closeButton = new QPushButton();
                             closeButton->setFixedSize(16, 16);
@@ -8457,6 +8587,7 @@ void GXTStudio::startAsyncParse(const QString& filePath)
                             charTab.searchEdit = nullptr;  // CharTable不需要搜索
                             charTab.searchPrevButton = nullptr;
                             charTab.searchNextButton = nullptr;
+                            charTab.filterButton = nullptr;
                             charTab.caseSensitiveButton = nullptr;
                             charTab.regexButton = nullptr;
                             charTab.tableList = nullptr;  // CharTable不需要表格列表
@@ -8709,8 +8840,15 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     QFont searchFont("Microsoft YaHei", m_fontSize);
     searchEdit->setFont(searchFont);
     searchEdit->setStyleSheet(getSearchEditStyle(searchTextColor));
-    
-    // 创建嵌入搜索框内部的按钮
+
+    // 创建嵌入搜索框内部的按钮 - 过滤器按钮（在大小写区分按钮左侧）
+    QToolButton* filterButton = new QToolButton(searchEdit);
+    filterButton->setFixedSize(24, 24);
+    filterButton->setCheckable(true);
+    filterButton->setText(FA::QFilter);
+    filterButton->setToolTip("过滤模式 - 只显示含搜索结果的行");
+    filterButton->setCursor(Qt::PointingHandCursor);
+
     QToolButton* caseSensitiveButton = new QToolButton(searchEdit);
     caseSensitiveButton->setFixedSize(24, 24);
     caseSensitiveButton->setCheckable(true);
@@ -8743,28 +8881,34 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         "  color: #1976d2;"
         "}"
     ).arg(searchTextColor.name());
-    
+
+    filterButton->setStyleSheet(innerButtonStyle);
     caseSensitiveButton->setStyleSheet(innerButtonStyle);
     regexButton->setStyleSheet(innerButtonStyle);
-    
+
+    QFont filterFont = FA::solidFont(11);
+    filterFont.setStyleStrategy(QFont::PreferMatch);
+    filterButton->setFont(filterFont);
+
     QFont caseFont = FA::solidFont(11);
     caseFont.setStyleStrategy(QFont::PreferMatch);
     caseSensitiveButton->setFont(caseFont);
-    
+
     QFont regexFont = FA::solidFont(11);
     regexFont.setStyleStrategy(QFont::PreferMatch);
     regexButton->setFont(regexFont);
-    
+
     // 使用布局将按钮嵌入搜索框内部右侧
     QHBoxLayout* innerButtonLayout = new QHBoxLayout(searchEdit);
     innerButtonLayout->setContentsMargins(0, 0, 4, 0);
     innerButtonLayout->setSpacing(2);
     innerButtonLayout->addStretch();
+    innerButtonLayout->addWidget(filterButton);
     innerButtonLayout->addWidget(caseSensitiveButton);
     innerButtonLayout->addWidget(regexButton);
-    
-    // 设置搜索框内部边距，为按钮留出空间
-    searchEdit->setTextMargins(4, 0, 58, 0);
+
+    // 设置搜索框内部边距，为按钮留出空间（3个按钮约72像素）
+    searchEdit->setTextMargins(4, 0, 80, 0);
     
     QPushButton* prevButton = new QPushButton();
     QPushButton* nextButton = new QPushButton();
@@ -9215,6 +9359,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     tab.searchEdit = searchEdit;
     tab.searchPrevButton = prevButton;
     tab.searchNextButton = nextButton;
+    tab.filterButton = filterButton;
     tab.caseSensitiveButton = caseSensitiveButton;
     tab.regexButton = regexButton;
     tab.tableListLabel = tableListLabel;
@@ -9225,6 +9370,12 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
 
     // 添加标签页到tabWidget
     m_tabWidget->insertTab(tabIndex, tabWidget, title);
+    
+    // 设置标签页图标
+    QIcon tabIcon = getFileTypeIcon(tab);
+    if (!tabIcon.isNull()) {
+        m_tabWidget->setTabIcon(tabIndex, tabIcon);
+    }
     
     // 创建自定义关闭按钮 - 简洁圆形设计
     QPushButton* closeButton = new QPushButton();
@@ -9260,6 +9411,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     connect(searchEdit, &QLineEdit::textChanged, this, &GXTStudio::onSearchTextChanged);
     connect(prevButton, &QPushButton::clicked, this, &GXTStudio::onSearchPrevious);
     connect(nextButton, &QPushButton::clicked, this, &GXTStudio::onSearchNext);
+    connect(filterButton, &QToolButton::toggled, this, &GXTStudio::onSearchTextChanged);
     connect(caseSensitiveButton, &QToolButton::toggled, this, &GXTStudio::onSearchTextChanged);
     connect(regexButton, &QToolButton::toggled, this, &GXTStudio::onSearchTextChanged);
     
@@ -9466,6 +9618,80 @@ QString GXTStudio::getVersionString(GXTVersion version) const
         case GXTVersion::GXT2: return "GXT2";
         default: return "Unknown";
     }
+}
+
+QIcon GXTStudio::getVersionIcon(GXTVersion version) const
+{
+    QString iconPath;
+    switch (version) {
+        case GXTVersion::GTA_III:
+            iconPath = "icon/III.ico";
+            break;
+        case GXTVersion::GTA_VC:
+            iconPath = "icon/VC.ico";
+            break;
+        case GXTVersion::GTA_SA:
+            iconPath = "icon/SA.ico";
+            break;
+        case GXTVersion::GTA_IV:
+            iconPath = "icon/IV.ico";
+            break;
+        case GXTVersion::GXT2:
+            iconPath = "icon/V.ico";
+            break;
+        default:
+            return QIcon();
+    }
+    
+    QString fullPath = QCoreApplication::applicationDirPath() + "/" + iconPath;
+    if (QFile::exists(fullPath)) {
+        return QIcon(fullPath);
+    }
+    return QIcon();
+}
+
+QIcon GXTStudio::getFileTypeIcon(const FileTab& tab) const
+{
+    if (tab.isWHM) {
+        QString fullPath = QCoreApplication::applicationDirPath() + "/icon/IV.ico";
+        if (QFile::exists(fullPath)) {
+            return QIcon(fullPath);
+        }
+    }
+    
+    if (tab.isCharTable) {
+        QString iconPath;
+        if (tab.charTableData.type == CharTableData::GTA_VC) {
+            iconPath = "icon/VC.ico";
+        } else {
+            iconPath = "icon/IV.ico";
+        }
+        QString fullPath = QCoreApplication::applicationDirPath() + "/" + iconPath;
+        if (QFile::exists(fullPath)) {
+            return QIcon(fullPath);
+        }
+    }
+    
+    if (tab.isDAT) {
+        QString iconPath;
+        switch (tab.version) {
+            case GXTVersion::GTA_VC:
+                iconPath = "icon/VC.ico";
+                break;
+            case GXTVersion::GTA_IV:
+                iconPath = "icon/IV.ico";
+                break;
+            default:
+                iconPath = "icon/IV.ico";
+                break;
+        }
+        QString fullPath = QCoreApplication::applicationDirPath() + "/" + iconPath;
+        if (QFile::exists(fullPath)) {
+            return QIcon(fullPath);
+        }
+    }
+    
+    return getVersionIcon(tab.version);
 }
 
 void GXTStudio::dragEnterEvent(QDragEnterEvent* event)
@@ -9880,6 +10106,9 @@ void GXTStudio::updateSearchUIColors(FileTab& tab)
     if (tab.regexButton) {
         tab.regexButton->setStyleSheet(getIconButtonStyle(textColor));
     }
+    if (tab.filterButton) {
+        tab.filterButton->setStyleSheet(getIconButtonStyle(textColor));
+    }
     
     if (tab.searchPrevButton) {
         tab.searchPrevButton->setStyleSheet(getNavButtonStyle(textColor));
@@ -9902,6 +10131,9 @@ void GXTStudio::resetSearchUIColors(FileTab& tab)
     }
     if (tab.regexButton) {
         tab.regexButton->setStyleSheet(getIconButtonStyle(defaultColor));
+    }
+    if (tab.filterButton) {
+        tab.filterButton->setStyleSheet(getIconButtonStyle(defaultColor));
     }
     
     if (tab.searchPrevButton) {
@@ -13964,11 +14196,16 @@ void GXTStudio::loadRecentFiles()
     QSettings settings("GXTStudio", "GXTStudio");
     m_recentFiles = settings.value("recentFiles").toStringList();
     
-    // 移除不存在的文件
+    // 移除不存在或不支持扩展名的文件
     QStringList validFiles;
+    QStringList supportedExtensions = { "gxt", "gxt2", "dat", "whm", "txt" };
     for (const QString& filePath : m_recentFiles) {
         if (QFileInfo::exists(filePath)) {
-            validFiles.append(filePath);
+            QFileInfo fi(filePath);
+            QString suffix = fi.suffix().toLower();
+            if (supportedExtensions.contains(suffix)) {
+                validFiles.append(filePath);
+            }
         }
     }
     m_recentFiles = validFiles;

@@ -75,6 +75,7 @@ namespace FA {
     constexpr QChar QLock = QChar(0xf023);                     // 锁图标 (Solid) - 只读
     constexpr QChar QExchangeAlt = QChar(0xf362);              // 交换图标 (Solid) - 码表转换
     constexpr QChar QPlay = QChar(0xf04b);                     // 播放图标 (Solid) - 执行
+    constexpr QChar QFilter = QChar(0xf0b0);                   // 漏斗图标 (Solid) - 过滤
     
     // Font Awesome 7 Brands 图标 Unicode
     constexpr QChar QWeixin = QChar(0xf1d7);                   // 微信图标 (Brands) - 捐赠
