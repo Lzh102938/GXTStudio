@@ -39,7 +39,6 @@
 #include <QDebug>
 #include <QFrame>
 #include <QGridLayout>
-#include <QScrollArea>
 #include <QLineEdit>
 #include <QPainter>
 #include <QMessageBox>
@@ -1275,7 +1274,7 @@ void GXTStudio::initializeDeferredComponents()
             m_originalBackgroundPixmap = bgPixmap;
             QWidget* centralWidget = this->centralWidget();
             QSize windowSize = centralWidget ? centralWidget->size() : this->size();
-            m_backgroundPixmap = bgPixmap.scaled(
+            m_scaledBackgroundPixmap = bgPixmap.scaled(
                 windowSize,
                 Qt::KeepAspectRatio,
                 Qt::SmoothTransformation
@@ -1283,13 +1282,11 @@ void GXTStudio::initializeDeferredComponents()
             
             if (m_backgroundBlurRadius > 0 || m_backgroundBrightness != 0) {
                 applyBackgroundEffects();
-            } else {
-                m_processedBackgroundPixmap = m_backgroundPixmap;
             }
             
-            if (!m_processedBackgroundPixmap.isNull()) {
+            if (!m_scaledBackgroundPixmap.isNull()) {
                 m_textColorCalculator.setEnabled(true);
-                m_textColorCalculator.updateBackground(m_processedBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+                m_textColorCalculator.updateBackground(m_scaledBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
             }
             
             if (m_clearBackgroundAction) {
@@ -1827,7 +1824,7 @@ void GXTStudio::importTxtFile(const QString& filePath)
 
         m_currentTabIndex = tabIndex;
         m_tabWidget->setCurrentIndex(tabIndex);
-        QCoreApplication::processEvents();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
         showLogMessage(QString("已导入字符表: %1 (%2 x %3)").arg(newTab.fileName).arg(data.cols).arg(data.rows));
         updateActions();
         updateStatusBar();
@@ -2047,8 +2044,6 @@ void GXTStudio::saveFile()
     
     // 如果是字符表文件，使用异步保存（与GXT一致）
     if (currentTab->isCharTable && currentTab->charTableWidget) {
-        // 在保存前先将文本内字符按 Unicode 排序并格式化，确保保存顺序一致
-        currentTab->charTableWidget->sortCharsInWidget();
         // 从界面文本更新数据，确保保存的是用户编辑的内容
         currentTab->charTableWidget->updateDataFromText();
         
@@ -2413,6 +2408,9 @@ void GXTStudio::saveAsFile()
                         
                         tab->isModified = false;
                         updateWindowTitle();
+                        
+                        // 添加到最近文件列表
+                        addToRecentFiles(result.filePath);
                         
                         // 显示保存成功对话框（与GXT一致）
                         showSaveSuccessDialog(result);
@@ -3735,7 +3733,11 @@ void GXTStudio::handleReplace(const QString& findText, const QString& replaceTex
         return;
     }
     
+    // 映射到源模型行号
     int currentRow = currentIndex.row();
+    if (tab->filterProxyModel) {
+        currentRow = tab->filterProxyModel->mapToSource(currentIndex).row();
+    }
     int currentTableIndex = tab->currentTableIndex;
     int currentPosition = m_searchState.currentMatchPosition;
     
@@ -3944,12 +3946,21 @@ void GXTStudio::startBackgroundReplace(const QString& findText, const QString& r
         QItemSelectionModel* selectionModel = tab->entryTableView->selectionModel();
         const QModelIndexList allSelected = selectionModel->selectedIndexes();
         for (const auto& idx : allSelected) {
-            selectedRows.insert(idx.row());
+            // 映射到源模型行号
+            int sourceRow = idx.row();
+            if (tab->filterProxyModel) {
+                sourceRow = tab->filterProxyModel->mapToSource(idx).row();
+            }
+            selectedRows.insert(sourceRow);
         }
         if (selectedRows.isEmpty()) {
             QModelIndex currentIndex = selectionModel->currentIndex();
             if (currentIndex.isValid()) {
-                selectedRows.insert(currentIndex.row());
+                int sourceRow = currentIndex.row();
+                if (tab->filterProxyModel) {
+                    sourceRow = tab->filterProxyModel->mapToSource(currentIndex).row();
+                }
+                selectedRows.insert(sourceRow);
             }
         }
     }
@@ -3960,7 +3971,12 @@ void GXTStudio::startBackgroundReplace(const QString& findText, const QString& r
     m_pendingReplaceTable = currentTableIndex;
     m_pendingReplaceRow = -1;
     if (tab->entryTableView && tab->entryTableView->currentIndex().isValid()) {
-        m_pendingReplaceRow = tab->entryTableView->currentIndex().row();
+        QModelIndex currentIndex = tab->entryTableView->currentIndex();
+        int sourceRow = currentIndex.row();
+        if (tab->filterProxyModel) {
+            sourceRow = tab->filterProxyModel->mapToSource(currentIndex).row();
+        }
+        m_pendingReplaceRow = sourceRow;
     }
 
     // 执行搜索获取匹配项
@@ -4221,7 +4237,6 @@ void GXTStudio::replaceAllMatchesInEntry(FileTab* tab, int tableIndex, int entry
         if (tab->entryTableView) {
             tab->entryTableView->viewport()->update();
             tab->entryTableView->update(index);
-            tab->entryTableView->repaint();
             
             // 清除高亮缓存以确保显示更新
             auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab->entryTableView->itemDelegate());
@@ -4293,7 +4308,6 @@ void GXTStudio::replaceEntry(FileTab* tab, int tableIndex, int entryIndex, const
         if (tab->entryTableView) {
             tab->entryTableView->viewport()->update();
             tab->entryTableView->update(index);
-            tab->entryTableView->repaint();
             
             // 清除高亮缓存以确保显示更新
             auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab->entryTableView->itemDelegate());
@@ -5124,7 +5138,11 @@ void GXTStudio::onSearchNext()
         return;
     }
     
+    // 映射到源模型行号
     int currentRow = currentIndex.row();
+    if (tab->filterProxyModel) {
+        currentRow = tab->filterProxyModel->mapToSource(currentIndex).row();
+    }
     int currentTableIndex = tab->currentTableIndex;
     
     // 对于无表GXT文件，currentTableIndex为-1，但搜索结果中存储的表索引为0
@@ -5233,7 +5251,11 @@ void GXTStudio::onSearchPrevious()
         return;
     }
     
+    // 映射到源模型行号
     int currentRow = currentIndex.row();
+    if (tab->filterProxyModel) {
+        currentRow = tab->filterProxyModel->mapToSource(currentIndex).row();
+    }
     int currentTableIndex = tab->currentTableIndex;
     
     // 对于无表GXT文件，currentTableIndex为-1，但搜索结果中存储的表索引为0
@@ -5442,10 +5464,23 @@ void GXTStudio::highlightMatch(int entryIndex)
     clearSearchHighlight();
     
     // 选择并滚动到匹配的条目
-    QModelIndex modelIndex = tab->entryTableModel->index(entryIndex, 0);
-    if (modelIndex.isValid()) {
-        tab->entryTableView->selectRow(entryIndex);
-        tab->entryTableView->scrollTo(modelIndex, QAbstractItemView::PositionAtCenter);
+    QModelIndex sourceIndex = tab->entryTableModel->index(entryIndex, 0);
+    if (sourceIndex.isValid()) {
+        // 如果使用过滤代理模型，需要映射索引
+        QModelIndex viewIndex = sourceIndex;
+        if (tab->filterProxyModel) {
+            viewIndex = tab->filterProxyModel->mapFromSource(sourceIndex);
+            if (!viewIndex.isValid()) {
+                // 如果映射失败（行被过滤），清除过滤后再映射
+                tab->filterProxyModel->clearFilter();
+                viewIndex = tab->filterProxyModel->mapFromSource(sourceIndex);
+            }
+        }
+        
+        if (viewIndex.isValid()) {
+            tab->entryTableView->selectRow(viewIndex.row());
+            tab->entryTableView->scrollTo(viewIndex, QAbstractItemView::PositionAtCenter);
+        }
         
         // 使用统一的高亮委托设置搜索文本
         auto* delegate = qobject_cast<OptimizedItemDelegate*>(tab->entryTableView->itemDelegate());
@@ -5482,8 +5517,9 @@ void GXTStudio::applyFilterMode()
     FileTab* tab = getCurrentTab();
     if (!tab) return;
 
-    if (!tab->entryTableView) return;
+    if (!tab->entryTableView || !tab->entryTableModel) return;
 
+    // 收集匹配的行号
     tab->filteredRows.clear();
     int currentTableIndex = tab->currentTableIndex;
 
@@ -5495,16 +5531,12 @@ void GXTStudio::applyFilterMode()
         }
     }
 
-    int totalRows = tab->entryTableModel ? tab->entryTableModel->rowCount(QModelIndex()) : 0;
+    int totalRows = tab->entryTableModel->rowCount(QModelIndex());
 
-    tab->entryTableView->setUpdatesEnabled(false);
-
-    for (int row = 0; row < totalRows; ++row) {
-        bool shouldHide = !tab->filteredRows.contains(row);
-        tab->entryTableView->setRowHidden(row, shouldHide);
+    // 使用过滤代理模型进行高效过滤
+    if (tab->filterProxyModel) {
+        tab->filterProxyModel->setFilterRows(tab->filteredRows);
     }
-
-    tab->entryTableView->setUpdatesEnabled(true);
 
     if (tab->entryTableLabel) {
         int visibleCount = tab->filteredRows.size();
@@ -5531,11 +5563,10 @@ void GXTStudio::clearFilterMode()
 
     int totalRows = tab->entryTableModel ? tab->entryTableModel->rowCount(QModelIndex()) : 0;
 
-    tab->entryTableView->setUpdatesEnabled(false);
-    for (int row = 0; row < totalRows; ++row) {
-        tab->entryTableView->setRowHidden(row, false);
+    // 使用过滤代理模型清除过滤
+    if (tab->filterProxyModel) {
+        tab->filterProxyModel->clearFilter();
     }
-    tab->entryTableView->setUpdatesEnabled(true);
 
     if (tab->entryTableLabel) {
         QString entryFontFamily = FA::solidFontFamily();
@@ -5874,7 +5905,7 @@ void GXTStudio::onGenerateCharTable()
     
     m_currentTabIndex = tabIndex;
     m_tabWidget->setCurrentIndex(tabIndex);
-    QCoreApplication::processEvents();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     
     QString versionName = (version == GXTVersion::GTA_VC) ? "GTA_VC" : "GTA_IV";
     showLogMessage(QString("已生成%1字符表: %2 个非ASCII字符").arg(versionName).arg(charCount));
@@ -5936,8 +5967,16 @@ void GXTStudio::deleteEntry()
     FileTab* currentTab = getCurrentTab();
     if (!currentTab || !currentTab->entryTableView || !currentTab->entryTableModel) return;
     
-    int currentRow = currentTab->entryTableView->currentIndex().row();
-    if (currentRow >= 0) {
+    QModelIndex currentIndex = currentTab->entryTableView->currentIndex();
+    if (!currentIndex.isValid()) return;
+    
+    // 映射到源模型行号
+    int sourceRow = currentIndex.row();
+    if (currentTab->filterProxyModel) {
+        sourceRow = currentTab->filterProxyModel->mapToSource(currentIndex).row();
+    }
+    
+    if (sourceRow >= 0) {
         if (QMessageBox::question(this, "确认删除",
             "确定要删除选中的条目吗？",
             QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes) {
@@ -5945,10 +5984,10 @@ void GXTStudio::deleteEntry()
             int tableIndex = currentTab->currentTableIndex;
             if (tableIndex >= 0 && tableIndex < static_cast<int>(currentTab->tables.size())) {
                 auto& table = currentTab->tables[tableIndex];
-                if (currentRow < static_cast<int>(table.entries.size())) {
+                if (sourceRow < static_cast<int>(table.entries.size())) {
                     // 记录撤销操作
                     if (m_undoSystem) {
-                        auto& entry = table.entries[currentRow];
+                        auto& entry = table.entries[sourceRow];
                         
                         UndoAction action;
                         action.type = UndoActionType::DeleteEntry;
@@ -5957,7 +5996,7 @@ void GXTStudio::deleteEntry()
                         action.description = QString::fromUtf8("删除条目");
                         
                         EntryData entryData;
-                        entryData.row = currentRow;
+                        entryData.row = sourceRow;
                         entryData.key = QString::fromStdString(entry.key);
                         entryData.value = QString::fromStdString(entry.value);
                         action.beforeData = QVariant::fromValue(entryData);
@@ -5965,7 +6004,7 @@ void GXTStudio::deleteEntry()
                         m_undoSystem->pushAction(action);
                     }
                     
-                    table.entries.erase(table.entries.begin() + currentRow);
+                    table.entries.erase(table.entries.begin() + sourceRow);
                     currentTab->isModified = true;
                     updateEntryTable();
                     updateWindowTitle();
@@ -5988,11 +6027,16 @@ void GXTStudio::deleteSelectedRows()
     FileTab* currentTab = getCurrentTab();
     if (!currentTab || !currentTab->entryTableView || !currentTab->entryTableModel) return;
     
-    // 获取选中的行（去重）
+    // 获取选中的行（去重），映射到源模型行号
     QSet<int> selectedRowsSet;
     QModelIndexList selectedIndexes = currentTab->entryTableView->selectionModel()->selectedIndexes();
     for (const QModelIndex& index : selectedIndexes) {
-        selectedRowsSet.insert(index.row());
+        // 映射到源模型行号
+        int sourceRow = index.row();
+        if (currentTab->filterProxyModel) {
+            sourceRow = currentTab->filterProxyModel->mapToSource(index).row();
+        }
+        selectedRowsSet.insert(sourceRow);
     }
     
     if (selectedRowsSet.isEmpty()) return;
@@ -6811,7 +6855,12 @@ void GXTStudio::copySelectedKeys()
     QSet<int> processedRows; // 避免重复处理同一行的不同列
     
     for (const QModelIndex& index : selectedIndexes) {
-        int row = index.row();
+        // 映射到源模型索引
+        QModelIndex sourceIndex = index;
+        if (currentTab->filterProxyModel) {
+            sourceIndex = currentTab->filterProxyModel->mapToSource(index);
+        }
+        int row = sourceIndex.row();
         if (processedRows.contains(row)) continue;
         
         QModelIndex keyIndex = currentTab->entryTableModel->index(row, 0);
@@ -6840,7 +6889,12 @@ void GXTStudio::copySelectedValues()
     QSet<int> processedRows; // 避免重复处理同一行的不同列
     
     for (const QModelIndex& index : selectedIndexes) {
-        int row = index.row();
+        // 映射到源模型索引
+        QModelIndex sourceIndex = index;
+        if (currentTab->filterProxyModel) {
+            sourceIndex = currentTab->filterProxyModel->mapToSource(index);
+        }
+        int row = sourceIndex.row();
         if (processedRows.contains(row)) continue;
         
         QModelIndex valueIndex = currentTab->entryTableModel->index(row, 1);
@@ -6869,7 +6923,12 @@ void GXTStudio::copySelectedKeyValues()
     QSet<int> processedRows; // 避免重复处理同一行的不同列
     
     for (const QModelIndex& index : selectedIndexes) {
-        int row = index.row();
+        // 映射到源模型索引
+        QModelIndex sourceIndex = index;
+        if (currentTab->filterProxyModel) {
+            sourceIndex = currentTab->filterProxyModel->mapToSource(index);
+        }
+        int row = sourceIndex.row();
         if (processedRows.contains(row)) continue;
         
         QModelIndex keyIndex = currentTab->entryTableModel->index(row, 0);
@@ -6914,10 +6973,15 @@ void GXTStudio::translateSelectedRows()
         return;
     }
 
-    // 收集选中的行（去重）
+    // 收集选中的行（去重），映射到源模型行号
     QSet<int> selectedRows;
     for (const QModelIndex& index : selectedIndexes) {
-        selectedRows.insert(index.row());
+        // 映射到源模型行号
+        int sourceRow = index.row();
+        if (currentTab->filterProxyModel) {
+            sourceRow = currentTab->filterProxyModel->mapToSource(index).row();
+        }
+        selectedRows.insert(sourceRow);
     }
 
     if (selectedRows.isEmpty()) {
@@ -7006,8 +7070,14 @@ void GXTStudio::editCellAsDialog()
         return;
     }
     
-    int row = currentIndex.row();
-    int column = currentIndex.column();
+    // 映射到源模型索引
+    QModelIndex sourceIndex = currentIndex;
+    if (currentTab->filterProxyModel) {
+        sourceIndex = currentTab->filterProxyModel->mapToSource(currentIndex);
+    }
+    
+    int row = sourceIndex.row();
+    int column = sourceIndex.column();
     
     openEditDialog(row, column);
 }
@@ -7248,8 +7318,11 @@ void GXTStudio::onTabChanged(int index)
 
             if (currentTab->entryTableView && currentTab->entryTableModel) {
                 QAbstractItemModel* currentModel = currentTab->entryTableView->model();
-                if (currentModel != currentTab->entryTableModel) {
-                    currentTab->entryTableView->setModel(currentTab->entryTableModel);
+                QAbstractItemModel* targetModel = currentTab->filterProxyModel ? 
+                    static_cast<QAbstractItemModel*>(currentTab->filterProxyModel) : 
+                    static_cast<QAbstractItemModel*>(currentTab->entryTableModel);
+                if (currentModel != targetModel) {
+                    currentTab->entryTableView->setModel(targetModel);
                 }
                 currentTab->entryTableView->setEditTriggers(m_isReadOnly ? QAbstractItemView::NoEditTriggers : QAbstractItemView::DoubleClicked);
             }
@@ -7292,7 +7365,7 @@ void GXTStudio::onTabChanged(int index)
                 }
                 currentTab->charTableWidget->update();
             } else if (currentTab->entryTableView) {
-                currentTab->entryTableView->viewport()->repaint();
+                currentTab->entryTableView->viewport()->update();
             }
 
             if (m_backgroundEnabled) {
@@ -7627,8 +7700,11 @@ void GXTStudio::onTabMoved(int from, int to)
     if (currentTab) {
         if (currentTab->entryTableView && currentTab->entryTableModel) {
             // 确保模型正确设置
-            if (currentTab->entryTableView->model() != currentTab->entryTableModel) {
-                currentTab->entryTableView->setModel(currentTab->entryTableModel);
+            QAbstractItemModel* targetModel = currentTab->filterProxyModel ? 
+                static_cast<QAbstractItemModel*>(currentTab->filterProxyModel) : 
+                static_cast<QAbstractItemModel*>(currentTab->entryTableModel);
+            if (currentTab->entryTableView->model() != targetModel) {
+                currentTab->entryTableView->setModel(targetModel);
             }
 
             // 强制重置模型
@@ -7645,7 +7721,6 @@ void GXTStudio::onTabMoved(int from, int to)
 
             // 强制重绘
             currentTab->entryTableView->viewport()->update();
-            currentTab->entryTableView->viewport()->repaint();
         }
 
         // 刷新左侧表格列表
@@ -7655,8 +7730,7 @@ void GXTStudio::onTabMoved(int from, int to)
             scheduleUpdateTableList();
         }
 
-        // 立即处理所有待处理事件
-        QCoreApplication::processEvents();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     }
 
     showLogMessage(QString("标签页已从位置 %1 移动到 %2").arg(from).arg(to));
@@ -7948,8 +8022,11 @@ void GXTStudio::updateEntryTable()
     }
 
     // 【关键修复】确保表格视图的模型正确
-    if (tab->entryTableView->model() != tab->entryTableModel) {
-        tab->entryTableView->setModel(tab->entryTableModel);
+    QAbstractItemModel* targetModel = tab->filterProxyModel ? 
+        static_cast<QAbstractItemModel*>(tab->filterProxyModel) : 
+        static_cast<QAbstractItemModel*>(tab->entryTableModel);
+    if (tab->entryTableView->model() != targetModel) {
+        tab->entryTableView->setModel(targetModel);
     }
 
     // 确保编辑触发器正确设置
@@ -7960,10 +8037,6 @@ void GXTStudio::updateEntryTable()
 
     // 重新启用更新
     tab->entryTableView->setUpdatesEnabled(true);
-
-    // 【关键修复】强制立即重绘，确保内容立即显示
-    tab->entryTableView->viewport()->repaint();
-    tab->entryTableView->repaint();
 
     // 强制完整刷新
     tab->entryTableView->update();
@@ -8607,13 +8680,15 @@ void GXTStudio::startAsyncParse(const QString& filePath)
                             // 立即切换到该标签页（会触发onTabChanged）
                             m_tabWidget->setCurrentIndex(tabIndex);
                             
-                            // 立即处理事件，确保UI立即更新
-                            QCoreApplication::processEvents();
+                            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
                             
                             showLogMessage(QString("成功加载字符表 %1 (%2 x %3)")
                                           .arg(fileInfo.fileName())
                                           .arg(data.cols)
                                           .arg(data.rows));;
+                            
+                            // 添加到最近文件列表
+                            addToRecentFiles(filePath);
                             
                             // 更新UI状态（与onParseCompleted保持一致）
                             updateActions();
@@ -8753,7 +8828,7 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
             updateEntryTable();
         }
 
-        QCoreApplication::processEvents();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
         updateActions();
 
@@ -9238,7 +9313,11 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     GXTTableModel* entryTableModel = new GXTTableModel(this);
     entryTableModel->setTab(&tab);
     entryTableModel->setEditable(!m_isReadOnly);
-    entryTableView->setModel(entryTableModel);
+    
+    // 创建过滤代理模型
+    FilterProxyModel* filterProxyModel = new FilterProxyModel(this);
+    filterProxyModel->setSourceModel(entryTableModel);
+    entryTableView->setModel(filterProxyModel);
 
     // 连接自动保存信号 - 数据修改时重置定时器
     connect(entryTableModel, &GXTTableModel::dataModified, this, [this]() {
@@ -9335,7 +9414,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
                 // 获取第一个选中行的值列（第二列）
                 QModelIndex selectedIndex = selectedIndexes.first();
                 if (selectedIndex.column() != 1) {  // 值列
-                    // 尝试获取同一行的值列
+                    // 尝试获取同一行的值列（代理模型索引）
                     selectedIndex = entryTableView->model()->index(selectedIndex.row(), 1);
                 }
                 
@@ -9356,6 +9435,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     tab.tableList = tableList;
     tab.entryTableView = entryTableView;
     tab.entryTableModel = entryTableModel;
+    tab.filterProxyModel = filterProxyModel;
     tab.searchEdit = searchEdit;
     tab.searchPrevButton = prevButton;
     tab.searchNextButton = nextButton;
@@ -9441,10 +9521,10 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     scheduleUpdateTableList();
     
     // 【关键修复】强制刷新表格视图，确保内容立即显示
-    if (entryTableView && entryTableModel) {
+    if (entryTableView && entryTableModel && filterProxyModel) {
         // 确保模型正确设置
-        if (entryTableView->model() != entryTableModel) {
-            entryTableView->setModel(entryTableModel);
+        if (entryTableView->model() != filterProxyModel) {
+            entryTableView->setModel(filterProxyModel);
         }
         
         // 强制重置模型以确保数据正确
@@ -9453,11 +9533,6 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
         // 强制立即重绘
         entryTableView->viewport()->update();
         entryTableView->update();
-        entryTableView->viewport()->repaint();
-        entryTableView->repaint();
-        
-        // 【性能优化】立即处理事件，确保UI立即更新显示
-        QCoreApplication::processEvents();
     }
     
     // 如果启用了背景，更新标签颜色
@@ -9527,7 +9602,7 @@ void GXTStudio::setupTableOptimizations(QTableView* table)
     header->setHighlightSections(false);
     header->setStretchLastSection(false);
     if (table->model() && table->model()->columnCount() > 0) {
-        header->setSectionResizeMode(0, QHeaderView::Fixed);
+        header->setSectionResizeMode(0, QHeaderView::Interactive);
         int keyColumnWidth = calculateKeyColumnWidth();
         header->resizeSection(0, keyColumnWidth);
         header->setSectionResizeMode(1, QHeaderView::Stretch);
@@ -9643,33 +9718,19 @@ QIcon GXTStudio::getVersionIcon(GXTVersion version) const
             return QIcon();
     }
     
-    QString fullPath = QCoreApplication::applicationDirPath() + "/" + iconPath;
-    if (QFile::exists(fullPath)) {
-        return QIcon(fullPath);
-    }
-    return QIcon();
+    return IconCache::instance().getIcon(iconPath);
 }
 
 QIcon GXTStudio::getFileTypeIcon(const FileTab& tab) const
 {
     if (tab.isWHM) {
-        QString fullPath = QCoreApplication::applicationDirPath() + "/icon/IV.ico";
-        if (QFile::exists(fullPath)) {
-            return QIcon(fullPath);
-        }
+        return IconCache::instance().getIcon("icon/IV.ico");
     }
     
     if (tab.isCharTable) {
-        QString iconPath;
-        if (tab.charTableData.type == CharTableData::GTA_VC) {
-            iconPath = "icon/VC.ico";
-        } else {
-            iconPath = "icon/IV.ico";
-        }
-        QString fullPath = QCoreApplication::applicationDirPath() + "/" + iconPath;
-        if (QFile::exists(fullPath)) {
-            return QIcon(fullPath);
-        }
+        QString iconPath = (tab.charTableData.type == CharTableData::GTA_VC) ? 
+            "icon/VC.ico" : "icon/IV.ico";
+        return IconCache::instance().getIcon(iconPath);
     }
     
     if (tab.isDAT) {
@@ -9678,17 +9739,11 @@ QIcon GXTStudio::getFileTypeIcon(const FileTab& tab) const
             case GXTVersion::GTA_VC:
                 iconPath = "icon/VC.ico";
                 break;
-            case GXTVersion::GTA_IV:
-                iconPath = "icon/IV.ico";
-                break;
             default:
                 iconPath = "icon/IV.ico";
                 break;
         }
-        QString fullPath = QCoreApplication::applicationDirPath() + "/" + iconPath;
-        if (QFile::exists(fullPath)) {
-            return QIcon(fullPath);
-        }
+        return IconCache::instance().getIcon(iconPath);
     }
     
     return getVersionIcon(tab.version);
@@ -9936,13 +9991,12 @@ void GXTStudio::resizeEvent(QResizeEvent* event)
     QSize targetSize = centralWidget ? centralWidget->size() : newSize;
 
     m_isResizing = true;
-    QPixmap scaledPixmap = m_originalBackgroundPixmap.scaled(
+    m_scaledBackgroundPixmap = m_originalBackgroundPixmap.scaled(
         targetSize,
         Qt::KeepAspectRatio,
         Qt::FastTransformation
     );
 
-    m_backgroundPixmap = scaledPixmap;
     m_cachedBackgroundPixmap = QPixmap();
     m_cachedBackgroundSize = QSize();
 
@@ -9955,28 +10009,26 @@ void GXTStudio::onResizeTimerTimeout()
     m_resizeTimer.stop();
     m_isResizing = false;
 
-    if (m_backgroundPixmap.isNull()) {
+    if (m_scaledBackgroundPixmap.isNull()) {
         return;
     }
 
     QWidget* centralWidget = this->centralWidget();
     QSize targetSize = centralWidget ? centralWidget->size() : size();
 
-    QPixmap scaledPixmap = m_originalBackgroundPixmap.scaled(
+    m_scaledBackgroundPixmap = m_originalBackgroundPixmap.scaled(
         targetSize,
         Qt::KeepAspectRatio,
         Qt::SmoothTransformation
     );
 
-    m_backgroundPixmap = scaledPixmap;
     m_cachedBackgroundPixmap = QPixmap();
     m_cachedBackgroundSize = QSize();
 
     applyBackgroundEffects();
 
-    QPixmap pixmapToUse = m_processedBackgroundPixmap.isNull() ? m_backgroundPixmap : m_processedBackgroundPixmap;
-    if (!pixmapToUse.isNull()) {
-        m_textColorCalculator.updateBackground(pixmapToUse, m_backgroundAspectRatioMode, m_backgroundOpacity);
+    if (!m_scaledBackgroundPixmap.isNull()) {
+        m_textColorCalculator.updateBackground(m_scaledBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
     }
 
     update();
@@ -9988,7 +10040,7 @@ void GXTStudio::paintEvent(QPaintEvent* event)
 {
     QMainWindow::paintEvent(event);
 
-    if (m_backgroundEnabled && !m_backgroundPixmap.isNull()) {
+    if (m_backgroundEnabled && !m_scaledBackgroundPixmap.isNull()) {
         QPainter painter(this);
         drawBackground(&painter);
     }
@@ -9996,9 +10048,7 @@ void GXTStudio::paintEvent(QPaintEvent* event)
 
 void GXTStudio::drawBackground(QPainter* painter)
 {
-    QPixmap pixmapToDraw = m_processedBackgroundPixmap.isNull() ? m_backgroundPixmap : m_processedBackgroundPixmap;
-    
-    if (!painter || pixmapToDraw.isNull()) {
+    if (!painter || m_scaledBackgroundPixmap.isNull()) {
         return;
     }
 
@@ -10018,7 +10068,7 @@ void GXTStudio::drawBackground(QPainter* painter)
     QSize currentSize = targetRect.size();
     if (m_cachedBackgroundPixmap.isNull() || m_cachedBackgroundSize != currentSize) {
         Qt::TransformationMode mode = m_isResizing ? Qt::FastTransformation : Qt::SmoothTransformation;
-        m_cachedBackgroundPixmap = pixmapToDraw.scaled(
+        m_cachedBackgroundPixmap = m_scaledBackgroundPixmap.scaled(
             currentSize,
             m_backgroundAspectRatioMode,
             mode
@@ -10057,7 +10107,7 @@ void GXTStudio::updateLabelColors()
     FileTab* currentTab = getCurrentTab();
     if (!currentTab || currentTab->isCharTable) return;
     
-    bool hasBackground = m_backgroundEnabled && !m_backgroundPixmap.isNull();
+    bool hasBackground = m_backgroundEnabled && !m_scaledBackgroundPixmap.isNull();
     
     if (!hasBackground) {
         QColor defaultColor(TextColor::DEFAULT_COLOR);
@@ -10157,35 +10207,31 @@ void GXTStudio::setBackgroundImage(const QString& imagePath)
         return;
     }
 
-    m_backgroundPixmap = newPixmap;
+    m_scaledBackgroundPixmap = newPixmap;
     m_backgroundEnabled = true;
     
-    // 更新文本颜色计算器的缓存
     m_textColorCalculator.setEnabled(true);
-    m_textColorCalculator.updateBackground(m_backgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+    m_textColorCalculator.updateBackground(m_scaledBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
     
     if (m_clearBackgroundAction) {
         m_clearBackgroundAction->setEnabled(true);
     }
     showLogMessage(QString("已设置背景图片: %1").arg(imagePath));
-    update();  // 触发重绘
+    update();
     
-    // 更新标签颜色以匹配背景
     QTimer::singleShot(100, this, &GXTStudio::updateLabelColors);
 }
 
 void GXTStudio::setBackgroundOpacity(qreal opacity)
 {
-    // 限制透明度范围在 0.0 - 1.0 之间
     m_backgroundOpacity = qBound(0.0, opacity, 1.0);
     
-    // 更新颜色计算器的透明度设置
-    if (m_backgroundEnabled && !m_backgroundPixmap.isNull()) {
-        m_textColorCalculator.updateBackground(m_backgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+    if (m_backgroundEnabled && !m_scaledBackgroundPixmap.isNull()) {
+        m_textColorCalculator.updateBackground(m_scaledBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
     }
     
     if (m_backgroundEnabled) {
-        update();  // 触发重绘
+        update();
     }
 }
 
@@ -10193,14 +10239,13 @@ void GXTStudio::setBackgroundEnabled(bool enabled)
 {
     m_backgroundEnabled = enabled;
     m_textColorCalculator.setEnabled(enabled);
-    update();  // 触发重绘
+    update();
 }
 
 void GXTStudio::clearBackground()
 {
     m_originalBackgroundPixmap = QPixmap();
-    m_backgroundPixmap = QPixmap();
-    m_processedBackgroundPixmap = QPixmap();
+    m_scaledBackgroundPixmap = QPixmap();
     m_cachedBackgroundPixmap = QPixmap();
     m_cachedBackgroundSize = QSize();
     m_backgroundImagePath.clear();
@@ -10270,8 +10315,10 @@ void GXTStudio::onSetBackground()
 
         if (dialog.exec() == QDialog::Accepted) {
             m_originalBackgroundPixmap = newPixmap;
-            m_backgroundPixmap = scaledPixmap;
-            m_processedBackgroundPixmap = dialog.getProcessedImage();
+            m_scaledBackgroundPixmap = dialog.getProcessedImage();
+            if (m_scaledBackgroundPixmap.isNull()) {
+                m_scaledBackgroundPixmap = scaledPixmap;
+            }
             m_backgroundEnabled = true;
             m_backgroundOpacity = dialog.getOpacity() / 100.0;
             m_backgroundBlurRadius = dialog.getBlurRadius();
@@ -10280,13 +10327,8 @@ void GXTStudio::onSetBackground()
             m_cachedBackgroundPixmap = QPixmap();
             m_cachedBackgroundSize = QSize();
 
-            if (!m_processedBackgroundPixmap.isNull()) {
-                m_textColorCalculator.setEnabled(true);
-                m_textColorCalculator.updateBackground(m_processedBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
-            } else {
-                m_textColorCalculator.setEnabled(true);
-                m_textColorCalculator.updateBackground(m_backgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
-            }
+            m_textColorCalculator.setEnabled(true);
+            m_textColorCalculator.updateBackground(m_scaledBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
 
             if (m_clearBackgroundAction) {
                 m_clearBackgroundAction->setEnabled(true);
@@ -10318,8 +10360,10 @@ void GXTStudio::onSetBackground()
                 this, &GXTStudio::onBackgroundSettingsChanged);
 
         if (dialog.exec() == QDialog::Accepted) {
-            m_backgroundPixmap = scaledPixmap;
-            m_processedBackgroundPixmap = dialog.getProcessedImage();
+            m_scaledBackgroundPixmap = dialog.getProcessedImage();
+            if (m_scaledBackgroundPixmap.isNull()) {
+                m_scaledBackgroundPixmap = scaledPixmap;
+            }
             m_backgroundOpacity = dialog.getOpacity() / 100.0;
             m_backgroundBlurRadius = dialog.getBlurRadius();
             m_backgroundBrightness = dialog.getBrightness();
@@ -10327,11 +10371,7 @@ void GXTStudio::onSetBackground()
             m_cachedBackgroundPixmap = QPixmap();
             m_cachedBackgroundSize = QSize();
 
-            if (!m_processedBackgroundPixmap.isNull()) {
-                m_textColorCalculator.updateBackground(m_processedBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
-            } else {
-                m_textColorCalculator.updateBackground(m_backgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
-            }
+            m_textColorCalculator.updateBackground(m_scaledBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
 
             saveBackgroundSettings();
             update();
@@ -10351,8 +10391,8 @@ void GXTStudio::onBackgroundSettingsChanged(int blurRadius, int brightness, int 
     m_cachedBackgroundPixmap = QPixmap();
     m_cachedBackgroundSize = QSize();
     
-    if (!m_processedBackgroundPixmap.isNull()) {
-        m_textColorCalculator.updateBackground(m_processedBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
+    if (!m_scaledBackgroundPixmap.isNull()) {
+        m_textColorCalculator.updateBackground(m_scaledBackgroundPixmap, m_backgroundAspectRatioMode, m_backgroundOpacity);
     }
     
     saveBackgroundSettings();
@@ -10361,16 +10401,15 @@ void GXTStudio::onBackgroundSettingsChanged(int blurRadius, int brightness, int 
 
 void GXTStudio::applyBackgroundEffects()
 {
-    if (m_backgroundPixmap.isNull()) {
+    if (m_scaledBackgroundPixmap.isNull()) {
         return;
     }
     
     if (m_backgroundBlurRadius == 0 && m_backgroundBrightness == 0) {
-        m_processedBackgroundPixmap = m_backgroundPixmap;
         return;
     }
     
-    QImage sourceImage = m_backgroundPixmap.toImage();
+    QImage sourceImage = m_scaledBackgroundPixmap.toImage();
     QImage resultImage = sourceImage.convertToFormat(QImage::Format_ARGB32);
     
     if (m_backgroundBlurRadius > 0) {
@@ -10455,7 +10494,7 @@ void GXTStudio::applyBackgroundEffects()
         }
     }
     
-    m_processedBackgroundPixmap = QPixmap::fromImage(resultImage);
+    m_scaledBackgroundPixmap = QPixmap::fromImage(resultImage);
 }
 
 void GXTStudio::saveBackgroundSettings()
@@ -12222,7 +12261,7 @@ void GXTStudio::onExecuteTranslate()
                     
                     // 每处理1000个任务检查一次内存状态
                     if (tasks.size() > 0 && tasks.size() % 1000 == 0) {
-                        QCoreApplication::processEvents();
+                        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
                     }
                     
                     // 使用try-catch防止内存分配失败
@@ -12289,7 +12328,7 @@ void GXTStudio::onExecuteTranslate()
                         
                         // 每处理1000个任务检查一次内存状态
                         if (tasks.size() > 0 && tasks.size() % 1000 == 0) {
-                            QCoreApplication::processEvents();
+                            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
                         }
                         
                         // 直接使用key，因为每个表内的key是唯一的
@@ -12373,7 +12412,7 @@ void GXTStudio::onExecuteTranslate()
     }
 
     m_translateProgressDialog->show();
-    QApplication::processEvents(); // 确保对话框立即显示
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     
     // 以 queued 方式调用翻译，在翻译线程执行，避免阻塞主线程
     try {
@@ -12474,7 +12513,7 @@ void GXTStudio::onTranslationProgress(int completed, int total, const QString& m
                 // 将对话框移到屏幕中央并保持在前面
                 progressDialog->raise();
                 progressDialog->activateWindow();
-                QApplication::processEvents();
+                QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
             } catch (...) {
                 qWarning() << "显示进度对话框时发生异常";
             }
@@ -13660,6 +13699,24 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     });
     connect(searchState->searchTimer, &QTimer::timeout, performSearch);
     connect(caseSensitiveButton, &QToolButton::toggled, performSearch);
+    
+    // 连接撤销/重做状态变化信号
+    connect(widget->document(), &QTextDocument::undoAvailable, this, [this](bool available) {
+        Q_UNUSED(available);
+        FileTab* currentTab = getCurrentTab();
+        if (currentTab && currentTab->isCharTable) {
+            onUndoStackChanged(currentTab->charTableWidget->document()->isUndoAvailable(),
+                              currentTab->charTableWidget->document()->isRedoAvailable());
+        }
+    });
+    connect(widget->document(), &QTextDocument::redoAvailable, this, [this](bool available) {
+        Q_UNUSED(available);
+        FileTab* currentTab = getCurrentTab();
+        if (currentTab && currentTab->isCharTable) {
+            onUndoStackChanged(currentTab->charTableWidget->document()->isUndoAvailable(),
+                              currentTab->charTableWidget->document()->isRedoAvailable());
+        }
+    });
 
     // 返回CharTableWidget指针，但它的父窗口是page
     widget->setProperty("parentPage", QVariant::fromValue<QWidget*>(page));
@@ -13705,6 +13762,17 @@ void GXTStudio::scheduleUpdateTableList(int delayMs)
 
 void GXTStudio::undo()
 {
+    // 检查是否是CharTable文件，使用Qt内置撤销
+    FileTab* currentTab = getCurrentTab();
+    if (currentTab && currentTab->isCharTable && currentTab->charTableWidget) {
+        currentTab->charTableWidget->undo();
+        currentTab->isModified = true;
+        updateWindowTitle();
+        onUndoStackChanged(currentTab->charTableWidget->document()->isUndoAvailable(),
+                          currentTab->charTableWidget->document()->isRedoAvailable());
+        return;
+    }
+    
     if (!m_undoSystem || !m_undoSystem->canUndo()) return;
     
     UndoAction action = m_undoSystem->undo();
@@ -13886,6 +13954,17 @@ void GXTStudio::undo()
 
 void GXTStudio::redo()
 {
+    // 检查是否是CharTable文件，使用Qt内置重做
+    FileTab* currentTab = getCurrentTab();
+    if (currentTab && currentTab->isCharTable && currentTab->charTableWidget) {
+        currentTab->charTableWidget->redo();
+        currentTab->isModified = true;
+        updateWindowTitle();
+        onUndoStackChanged(currentTab->charTableWidget->document()->isUndoAvailable(),
+                          currentTab->charTableWidget->document()->isRedoAvailable());
+        return;
+    }
+    
     if (!m_undoSystem || !m_undoSystem->canRedo()) return;
     
     UndoAction action = m_undoSystem->redo();
@@ -14055,10 +14134,21 @@ void GXTStudio::redo()
 
 void GXTStudio::onUndoStackChanged(bool canUndo, bool canRedo)
 {
+    // 检查是否是CharTable文件，使用Qt内置撤销/重做状态
+    FileTab* currentTab = getCurrentTab();
+    if (currentTab && currentTab->isCharTable && currentTab->charTableWidget) {
+        canUndo = currentTab->charTableWidget->document()->isUndoAvailable();
+        canRedo = currentTab->charTableWidget->document()->isRedoAvailable();
+    }
+    
     if (m_undoAction) {
         m_undoAction->setEnabled(canUndo);
-        if (canUndo && m_undoSystem) {
-            m_undoAction->setText(QString::fromUtf8("撤销 - %1").arg(m_undoSystem->getUndoDescription()));
+        if (canUndo) {
+            if (currentTab && currentTab->isCharTable) {
+                m_undoAction->setText(QString::fromUtf8("撤销(&U)"));
+            } else if (m_undoSystem) {
+                m_undoAction->setText(QString::fromUtf8("撤销 - %1").arg(m_undoSystem->getUndoDescription()));
+            }
         } else {
             m_undoAction->setText(QString::fromUtf8("撤销(&U)"));
         }
@@ -14066,8 +14156,12 @@ void GXTStudio::onUndoStackChanged(bool canUndo, bool canRedo)
     
     if (m_redoAction) {
         m_redoAction->setEnabled(canRedo);
-        if (canRedo && m_undoSystem) {
-            m_redoAction->setText(QString::fromUtf8("重做 - %1").arg(m_undoSystem->getRedoDescription()));
+        if (canRedo) {
+            if (currentTab && currentTab->isCharTable) {
+                m_redoAction->setText(QString::fromUtf8("重做(&R)"));
+            } else if (m_undoSystem) {
+                m_redoAction->setText(QString::fromUtf8("重做 - %1").arg(m_undoSystem->getRedoDescription()));
+            }
         } else {
             m_redoAction->setText(QString::fromUtf8("重做(&R)"));
         }

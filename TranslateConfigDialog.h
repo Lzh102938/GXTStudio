@@ -16,8 +16,6 @@
 #include <QtWidgets/QScrollArea>
 #include <QtCore/QSettings>
 
-#include "GXTStudio.h"
-
 class TranslateConfigDialog : public QDialog
 {
     Q_OBJECT

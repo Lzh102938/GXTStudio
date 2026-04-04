@@ -18,6 +18,9 @@
 #include <QThread>
 #include <QRegularExpression>
 #include <QShortcut>
+#include <QFile>
+#include <QIcon>
+#include <QHash>
 #include <functional>
 #include <QtCore/QCache>
 
@@ -26,6 +29,47 @@ namespace TextColor {
     constexpr const char* DARK_TEXT_COLOR = "#495057";
     constexpr const char* LIGHT_TEXT_COLOR = "#ffffff";
 }
+
+class IconCache {
+public:
+    static IconCache& instance() {
+        static IconCache inst;
+        return inst;
+    }
+    
+    QIcon getIcon(const QString& relativePath) {
+        QString fullPath = QCoreApplication::applicationDirPath() + "/" + relativePath;
+        if (!m_cache.contains(fullPath)) {
+            if (QFile::exists(fullPath)) {
+                m_cache[fullPath] = QIcon(fullPath);
+            } else {
+                m_cache[fullPath] = QIcon();
+            }
+        }
+        return m_cache[fullPath];
+    }
+    
+    QIcon getIconFullPath(const QString& fullPath) {
+        if (!m_cache.contains(fullPath)) {
+            if (QFile::exists(fullPath)) {
+                m_cache[fullPath] = QIcon(fullPath);
+            } else {
+                m_cache[fullPath] = QIcon();
+            }
+        }
+        return m_cache[fullPath];
+    }
+    
+    void clear() { m_cache.clear(); }
+    int size() const { return m_cache.size(); }
+    
+private:
+    IconCache() = default;
+    IconCache(const IconCache&) = delete;
+    IconCache& operator=(const IconCache&) = delete;
+    
+    QHash<QString, QIcon> m_cache;
+};
 
 class TextColorCalculator {
 public:
@@ -174,18 +218,14 @@ private:
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QProgressDialog>
 #include <QtWidgets/QCheckBox>
+#include <QtWidgets/QMenu>
 #include <QDialog>
 #include <QProgressBar>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QLabel>
 #include <QScrollArea>
 #include <QGroupBox>
 #include <QGridLayout>
 #include <QMap>
 #include <QDateTime>
-#include <QMessageBox>
-#include <QtWidgets/QMenu>
 #include <QAction>
 #include <QtCore/QTimer>
 #include <QtCore/QSet>
@@ -196,7 +236,6 @@ private:
 #include <QtCore/QMimeData>
 #include <QtCore/QUrl>
 #include <QToolTip>
-#include "GXTEditor.h"
 #include <QDrag>
 #include <QtCore/QMutex>
 #include <QtCore/QWaitCondition>
@@ -205,14 +244,12 @@ private:
 #include <QtGui/QPainter>
 #include <QtGui/QFontMetrics>
 #include <QtWidgets/QStyledItemDelegate>
+#include <QSortFilterProxyModel>
 #include <QRandomGenerator>
 #include <QDesktopServices>
 #include <QApplication>
 #include <QStandardPaths>
-#include <QDateTime>
-#include <QUrl>
 #include <QToolButton>
-#include <QMenu>
 #include <functional>
 #include <map>
 #include "ReplaceDialog.h"
@@ -229,6 +266,51 @@ class BackgroundConfigDialog;
 
 // TranslateResult结构体前向声明
 struct TranslateResult;
+
+// 高性能过滤代理模型 - 基于行号集合进行快速过滤
+class FilterProxyModel : public QSortFilterProxyModel {
+public:
+    explicit FilterProxyModel(QObject* parent = nullptr) 
+        : QSortFilterProxyModel(parent), m_filterEnabled(false) {
+        setDynamicSortFilter(false);
+    }
+    
+    void setFilterRows(const QSet<int>& rows) {
+        m_filterEnabled = !rows.isEmpty();
+        m_filteredRows = rows;
+        invalidateFilter();
+    }
+    
+    void clearFilter() {
+        m_filterEnabled = false;
+        m_filteredRows.clear();
+        invalidateFilter();
+    }
+    
+    bool isFilterEnabled() const { return m_filterEnabled; }
+    
+    // 映射源模型行号到代理模型行号
+    int mapFromSourceRow(int sourceRow) const {
+        if (!m_filterEnabled) return sourceRow;
+        return mapFromSource(sourceModel()->index(sourceRow, 0)).row();
+    }
+    
+    // 映射代理模型行号到源模型行号
+    int mapToSourceRow(int proxyRow) const {
+        return mapToSource(index(proxyRow, 0)).row();
+    }
+    
+protected:
+    bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override {
+        Q_UNUSED(sourceParent)
+        if (!m_filterEnabled) return true;
+        return m_filteredRows.contains(sourceRow);
+    }
+    
+private:
+    bool m_filterEnabled;
+    QSet<int> m_filteredRows;
+};
 
 #include "ui_GXTStudio.h"
 #include "GXTParser.h"
@@ -266,6 +348,7 @@ struct FileTab {
     QListWidget* tableList = nullptr;
     QTableView* entryTableView = nullptr;  // 改为QTableView
     GXTTableModel* entryTableModel = nullptr; // 新增模型
+    FilterProxyModel* filterProxyModel = nullptr; // 过滤代理模型
     QLineEdit* searchEdit = nullptr;
     QPushButton* searchPrevButton = nullptr; // 上一个按钮
     QPushButton* searchNextButton = nullptr; // 下一个按钮
@@ -743,12 +826,10 @@ protected:
 private:
     Ui::GXTStudioClass ui;
 
-    // 自定义背景相关
-    QPixmap m_originalBackgroundPixmap;  // 原始背景图片（未缩放）
-    QPixmap m_backgroundPixmap;  // 当前使用的背景图片（可能已缩放）
-    QPixmap m_processedBackgroundPixmap;  // 处理后的背景图片（模糊、亮度）
-    QPixmap m_cachedBackgroundPixmap;  // 【关键优化】缓存的缩放背景图片
-    QSize m_cachedBackgroundSize;  // 【关键优化】缓存时的尺寸
+    QPixmap m_originalBackgroundPixmap;
+    QPixmap m_scaledBackgroundPixmap;
+    QPixmap m_cachedBackgroundPixmap;
+    QSize m_cachedBackgroundSize;
     qreal m_backgroundOpacity;   // 背景透明度 (0.0 - 1.0)
     bool m_backgroundEnabled;    // 是否启用背景
     Qt::AspectRatioMode m_backgroundAspectRatioMode;  // 图片缩放模式
@@ -1077,26 +1158,22 @@ class OptimizedItemDelegate : public QStyledItemDelegate {
 public:
     explicit OptimizedItemDelegate(QObject* parent = nullptr) 
         : QStyledItemDelegate(parent), m_isHashKeyColumn(false) {
-        // 预创建字体对象，避免每次绘制都创建
         m_monospaceFont.setFamily("Consolas");
         m_monospaceFont.setStyleHint(QFont::Monospace);
         m_monospaceFont.setFixedPitch(true);
         m_monospaceFont.setHintingPreference(QFont::PreferFullHinting);
         m_monospaceFont.setStyleStrategy(QFont::PreferAntialias);
-        m_monospaceFont.setPointSize(QApplication::font().pointSize()); // 立即设置字体大小
+        m_monospaceFont.setPointSize(QApplication::font().pointSize());
         
         m_yaheiFont.setFamily("Microsoft YaHei");
         m_yaheiFont.setHintingPreference(QFont::PreferFullHinting);
         m_yaheiFont.setStyleStrategy(QFont::PreferAntialias);
-        m_yaheiFont.setPointSize(QApplication::font().pointSize()); // 立即设置字体大小
+        m_yaheiFont.setPointSize(QApplication::font().pointSize());
         
-        // 预计算颜色，避免每次都查询
-        m_zebraColor = QColor(227, 242, 253, 200);  // 加深斑马纹蓝色：从(240,248,255,180)到(227,242,253,200)
+        m_zebraColor = QColor(227, 242, 253, 200);
         m_highlightColor = QColor(255, 235, 59, 180);
         
-        // 初始化缓存系统
-        m_textWidthCache.setMaxCost(500);  // 缓存500个文本宽度
-        m_highlightCache.setMaxCost(100);   // 缓存100个高亮结果
+        m_highlightCache.setMaxCost(500);
     }
     
     void setSearchText(const QString& text, bool useRegex = false, bool caseSensitive = false) {
@@ -1108,12 +1185,10 @@ public:
         m_useRegex = useRegex;
         m_caseSensitive = caseSensitive;
         
-        // 【关键优化】预编译正则表达式
         if (m_useRegex && !m_searchText.isEmpty()) {
-            QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
-            if (!m_caseSensitive) {
-                options |= QRegularExpression::CaseInsensitiveOption;
-            }
+            QRegularExpression::PatternOptions options = m_caseSensitive ? 
+                QRegularExpression::NoPatternOption : 
+                QRegularExpression::CaseInsensitiveOption;
             m_cachedRegex.setPattern(m_searchText);
             m_cachedRegex.setPatternOptions(options);
             m_regexValid = m_cachedRegex.isValid();
@@ -1122,38 +1197,55 @@ public:
         }
     }
 
-    // 设置是否为哈希键列（使用等宽字体）
     void setHashKeyColumn(bool isHashKey) { 
         m_isHashKeyColumn = isHashKey;
     }
     
     // 极致优化的绘制方法 - 减少条件判断和函数调用
     void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        // 先设置字体（后续可能需要用于计算）
+        const QFont& font = index.column() == 0 ? m_monospaceFont : m_yaheiFont;
+        painter->setFont(font);
+        
+        // 获取文本
         const QString text = index.data(Qt::DisplayRole).toString();
+        
+        // 绘制背景
+        const bool isSelected = (option.state & QStyle::State_Selected);
+        QColor textColor;
+        if (isSelected) {
+            painter->fillRect(option.rect, option.palette.highlight());
+            textColor = option.palette.highlightedText().color();
+        } else {
+            if (index.row() & 1) {
+                painter->fillRect(option.rect, m_zebraColor);
+            }
+            textColor = option.palette.text().color();
+        }
+        
+        // 绘制浅色边框（只绘右边和底边，避免重复）
+        painter->setPen(QColor(220, 220, 220));
+        painter->drawLine(option.rect.topRight(), option.rect.bottomRight());
+        painter->drawLine(option.rect.bottomLeft(), option.rect.bottomRight());
+        
+        // 恢复文本颜色
+        painter->setPen(textColor);
+        
+        // 空文本直接返回
         if (text.isEmpty()) {
             return;
         }
 
-        const bool isSelected = (option.state & QStyle::State_Selected);
-
-        if (isSelected) {
-            painter->fillRect(option.rect, option.palette.highlight());
-        } else if (index.row() & 1) {
-            painter->fillRect(option.rect, m_zebraColor);
-        }
-
-        painter->setPen(isSelected ? option.palette.highlightedText().color() : option.palette.text().color());
-        painter->setFont(index.column() == 0 ? m_monospaceFont : m_yaheiFont);
-
         const QRect textRect = option.rect.adjusted(4, 2, -4, -2);
 
+        // 检查是否需要高亮
         if (!m_searchText.isEmpty()) {
             bool shouldHighlight = false;
             if (m_useRegex && m_regexValid) {
                 shouldHighlight = m_cachedRegex.match(text).hasMatch();
             } else {
-                Qt::CaseSensitivity cs = m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
-                shouldHighlight = text.contains(m_searchText, cs);
+                shouldHighlight = text.contains(m_searchText, 
+                    m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive);
             }
             
             if (shouldHighlight) {
@@ -1162,8 +1254,7 @@ public:
             }
         }
 
-        // 【关键优化】直接绘制文本，不使用 elidedText（非常慢）
-        // 使用 QFontMetrics::elidedText 每次都要计算文本宽度，非常耗时
+        // 直接绘制文本
         painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine, text);
     }
 
@@ -1287,54 +1378,42 @@ public:
         return QStyledItemDelegate::eventFilter(watched, event);
     }
     
-    // 清理缓存 - 当需要强制刷新时调用
     void clearCache() const {
-        m_textWidthCache.clear();
         m_highlightCache.clear();
     }
     
-    // 获取缓存大小 - 用于调试和监控
     int getCacheSize() const {
-        return m_textWidthCache.size() + m_highlightCache.size();
+        return m_highlightCache.size();
     }
     
-    // 优化的搜索高亮绘制 - 使用缓存减少重复计算（支持正则表达式）
+    // 优化的搜索高亮绘制 - 使用缓存减少重复计算
     void paintTextWithSimpleHighlight(QPainter* painter, const QString& text, const QRect& rect) const {
-        // 检查缓存（包含正则表达式模式标记）
-        QString cacheKey = text + "|" + m_searchText + "|" + 
-                          QString::number(m_caseSensitive ? 1 : 0) + "|" +
-                          QString::number(m_useRegex ? 1 : 0);
-        HighlightCacheEntry* cachedEntry = m_highlightCache.object(cacheKey);
+        // 使用哈希值作为缓存键，避免字符串拼接开销
+        const uint cacheKey = qHash(text) ^ qHash(m_searchText) ^ 
+                             (m_caseSensitive ? 0x1 : 0) ^ 
+                             (m_useRegex ? 0x2 : 0);
+        HighlightCacheEntry* cachedEntry = m_highlightCache.object(QString::number(cacheKey));
         
         if (cachedEntry && cachedEntry->textHash == qHash(text)) {
             // 使用缓存的高亮片段
-            painter->save();
             const int rectTop = rect.top();
             const int rectBottom = rect.bottom() - painter->fontMetrics().descent();
             const int rectLeft = rect.left();
             const int rectHeight = rect.height();
             
-            // 使用缓存的片段信息进行绘制
             int currentXOffset = 0;
             for (const auto& fragment : cachedEntry->fragments) {
                 const int xOffset = rectLeft + currentXOffset;
-                
                 if (fragment.isMatch) {
-                    // 绘制高亮背景和匹配文本
                     painter->fillRect(xOffset, rectTop, fragment.width, rectHeight, m_highlightColor);
-                    painter->drawText(xOffset, rectBottom, fragment.text);
-                } else {
-                    // 绘制普通文本
-                    painter->drawText(xOffset, rectBottom, fragment.text);
                 }
+                painter->drawText(xOffset, rectBottom, fragment.text);
                 currentXOffset += fragment.width;
             }
-            painter->restore();
             return;
         }
         
-        // 缓存未命中，执行完整的计算和绘制
-        painter->save();
+        // 缓存未命中，执行计算和绘制
         QFontMetrics fm = painter->fontMetrics();
         const Qt::CaseSensitivity cs = m_caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
         
@@ -1347,109 +1426,68 @@ public:
         const int rectLeft = rect.left();
         const int rectHeight = rect.height();
         
-        // 预计算累计宽度，避免重复计算
         int currentXOffset = 0;
         
         // 创建缓存条目
         HighlightCacheEntry* cacheEntry = new HighlightCacheEntry();
         cacheEntry->textHash = qHash(text);
-        cacheEntry->fragments.reserve(10); // 预分配，减少重新分配
+        cacheEntry->fragments.reserve(8);
         
         if (m_useRegex && m_regexValid) {
-            // 【关键优化】使用预编译的正则表达式
             QRegularExpressionMatchIterator matchIterator = m_cachedRegex.globalMatch(text);
             
             while (matchIterator.hasNext()) {
                 QRegularExpressionMatch match = matchIterator.next();
                 const int matchStart = match.capturedStart();
                 const int matchEnd = match.capturedEnd();
-                const int matchLen = matchEnd - matchStart;
                 
-                // 绘制匹配前的文本
                 if (matchStart > lastPos) {
                     const QString before = text.mid(lastPos, matchStart - lastPos);
                     const int beforeWidth = fm.horizontalAdvance(before);
-                    const int xOffset = rectLeft + currentXOffset;
-                    painter->drawText(xOffset, rectBottom, before);
+                    painter->drawText(rectLeft + currentXOffset, rectBottom, before);
                     currentXOffset += beforeWidth;
                     cacheEntry->fragments.append({before, beforeWidth, false});
                 }
                 
-                // 计算并绘制高亮背景
-                const QString matched = text.mid(matchStart, matchLen);
+                const QString matched = text.mid(matchStart, matchEnd - matchStart);
                 const int matchWidth = fm.horizontalAdvance(matched);
-                const int xOffset = rectLeft + currentXOffset;
-                painter->fillRect(xOffset, rectTop, matchWidth, rectHeight, m_highlightColor);
-                
-                // 绘制匹配文本
-                painter->drawText(xOffset, rectBottom, matched);
+                painter->fillRect(rectLeft + currentXOffset, rectTop, matchWidth, rectHeight, m_highlightColor);
+                painter->drawText(rectLeft + currentXOffset, rectBottom, matched);
                 currentXOffset += matchWidth;
-                
-                // 添加到缓存片段
                 cacheEntry->fragments.append({matched, matchWidth, true});
                 
                 lastPos = matchEnd;
             }
-            
-            // 绘制剩余文本
-            if (lastPos < textLength) {
-                const QString remaining = text.mid(lastPos);
-                const int remainingWidth = fm.horizontalAdvance(remaining);
-                const int xOffset = rectLeft + currentXOffset;
-                painter->drawText(xOffset, rectBottom, remaining);
-                currentXOffset += remainingWidth;
-                cacheEntry->fragments.append({remaining, remainingWidth, false});
-            }
         } else {
-            // 普通字符串模式（原逻辑）
             while ((pos = text.indexOf(m_searchText, pos, cs)) != -1) {
-                // 绘制匹配前的文本
-                const int beforeLength = pos - lastPos;
-                if (beforeLength > 0) {
-                    const QString before = text.mid(lastPos, beforeLength);
+                if (pos > lastPos) {
+                    const QString before = text.mid(lastPos, pos - lastPos);
                     const int beforeWidth = fm.horizontalAdvance(before);
-                    const int xOffset = rectLeft + currentXOffset;
-                    painter->drawText(xOffset, rectBottom, before);
+                    painter->drawText(rectLeft + currentXOffset, rectBottom, before);
                     currentXOffset += beforeWidth;
-                    
-                    // 添加到缓存片段
                     cacheEntry->fragments.append({before, beforeWidth, false});
                 }
                 
-                // 计算并绘制高亮背景
-                const QString matched = text.mid(pos, searchTextLength);  // 从原始文本中提取匹配部分
+                const QString matched = text.mid(pos, searchTextLength);
                 const int matchWidth = fm.horizontalAdvance(matched);
-                const int xOffset = rectLeft + currentXOffset;
-                painter->fillRect(xOffset, rectTop, matchWidth, rectHeight, m_highlightColor);
-
-                // 绘制匹配文本（使用原始文本中的大小写样式）
-                painter->drawText(xOffset, rectBottom, matched);
+                painter->fillRect(rectLeft + currentXOffset, rectTop, matchWidth, rectHeight, m_highlightColor);
+                painter->drawText(rectLeft + currentXOffset, rectBottom, matched);
                 currentXOffset += matchWidth;
-
-                // 添加到缓存片段
                 cacheEntry->fragments.append({matched, matchWidth, true});
                 
                 pos += searchTextLength;
                 lastPos = pos;
             }
-            
-            // 绘制剩余文本
-            if (lastPos < textLength) {
-                const QString remaining = text.mid(lastPos);
-                const int remainingWidth = fm.horizontalAdvance(remaining);
-                const int xOffset = rectLeft + currentXOffset;
-                painter->drawText(xOffset, rectBottom, remaining);
-                currentXOffset += remainingWidth;
-                
-                // 添加到缓存片段
-                cacheEntry->fragments.append({remaining, remainingWidth, false});
-            }
         }
         
-        // 存储到缓存
-        m_highlightCache.insert(cacheKey, cacheEntry);
+        if (lastPos < textLength) {
+            const QString remaining = text.mid(lastPos);
+            const int remainingWidth = fm.horizontalAdvance(remaining);
+            painter->drawText(rectLeft + currentXOffset, rectBottom, remaining);
+            cacheEntry->fragments.append({remaining, remainingWidth, false});
+        }
         
-        painter->restore();
+        m_highlightCache.insert(QString::number(cacheKey), cacheEntry);
     }
     
 private:
@@ -1471,21 +1509,14 @@ private:
     bool m_useRegex = false;
     bool m_caseSensitive = false;
     
-    // 【关键优化】缓存的正则表达式，避免每次绘制都编译
     mutable QRegularExpression m_cachedRegex;
     mutable bool m_regexValid = false;
     
-    // 预创建的字体对象，避免每次绘制都创建
     QFont m_monospaceFont;
     QFont m_yaheiFont;
     
-    // 预计算的颜色，提升性能
     QColor m_zebraColor;
     QColor m_highlightColor;
     
-    // 【新增性能优化】文本宽度缓存 - 避免重复计算
-    mutable QCache<QString, int> m_textWidthCache;  // 缓存文本字符串的宽度
-    
-    // 【新增性能优化】搜索高亮缓存 - 避免重复计算高亮片段
-    mutable QCache<QString, HighlightCacheEntry> m_highlightCache;  // 缓存高亮结果
+    mutable QCache<QString, HighlightCacheEntry> m_highlightCache;
 };

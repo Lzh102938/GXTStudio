@@ -6,6 +6,8 @@
 #include <QFontMetrics>
 #include <QMenu>
 #include <QWidgetAction>
+#include <QCheckBox>
+#include <QSpinBox>
 #include <QRegularExpression>
 #include <QFileDialog>
 #include <QImage>

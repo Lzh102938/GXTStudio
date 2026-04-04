@@ -5,9 +5,6 @@
 #include <QFont>
 #include <QFontDatabase>
 #include <QMenu>
-#include <QWidgetAction>
-#include <QCheckBox>
-#include <QSpinBox>
 #include <QLabel>
 #include <QHBoxLayout>
 #include <QRegularExpression>

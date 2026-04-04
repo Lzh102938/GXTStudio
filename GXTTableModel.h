@@ -3,7 +3,6 @@
 #include <QAbstractTableModel>
 #include <QMap>
 #include <QFont>
-#include <QApplication>
 #include <QDebug>
 #include <cstdint>
 #include <QHash>
@@ -194,12 +193,4 @@ private:
     
     // 缓存的版本信息，避免每次调用都从tab获取
     mutable int m_cachedVersion;
-    
-    // SATKEY映射（静态，全局共享）- 使用QHash提升查找性能O(1)
-    static QHash<uint32_t, QString> s_satKeyMap;
-    static QHash<QString, uint32_t> s_satKeyReverseMap;
-    
-    // IVTKEY映射（静态，全局共享）- 使用QHash提升查找性能O(1)
-    static QHash<uint32_t, QString> s_ivtKeyMap;
-    static QHash<QString, uint32_t> s_ivtKeyReverseMap;
 };

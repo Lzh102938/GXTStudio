@@ -3,8 +3,6 @@
 #include <QString>
 #include <QMap>
 #include <QObject>
-#include <QTableView>
-#include <QSettings>
 #include <memory>
 
 class GXTStudio;

@@ -178,7 +178,7 @@ int main(int argc, char *argv[])
     QApplication::setWheelScrollLines(3); // 减少滚轮滚动行数
     
     // 极致内存优化
-    QCoreApplication::processEvents(); // 预处理事件
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     app.setQuitOnLastWindowClosed(true); // 最后一窗口关闭时退出
     
     GXTStudio window;

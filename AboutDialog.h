@@ -15,7 +15,7 @@
 #include <QSizePolicy>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
-#include "GXTStudio.h"
+#include "FontAwesome.h"
 
 class VersionCard : public QFrame {
     Q_OBJECT

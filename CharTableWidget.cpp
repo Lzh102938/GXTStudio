@@ -10,13 +10,15 @@
 #include <algorithm>
 #include <QMimeData>
 #include <QInputMethodEvent>
+#include <QTextCharFormat>
+#include <QTextCursor>
 
 CharTableWidget::CharTableWidget(QWidget* parent)
     : QPlainTextEdit(parent)
 {
     // 基础设置 - 优化性能
     setLineWrapMode(QPlainTextEdit::NoWrap);
-    setUndoRedoEnabled(false);
+    setUndoRedoEnabled(true);  // 启用撤销/重做
     setCenterOnScroll(false);
     
     // 设置微软雅黑字体
@@ -49,6 +51,12 @@ CharTableWidget::CharTableWidget(QWidget* parent)
     m_cursorPosTimer->setSingleShot(true);
     m_cursorPosTimer->setInterval(100);  // 100ms节流
     connect(m_cursorPosTimer, &QTimer::timeout, this, &CharTableWidget::emitCursorPosition);
+    
+    // 创建高亮清除定时器
+    m_highlightTimer = new QTimer(this);
+    m_highlightTimer->setSingleShot(true);
+    m_highlightTimer->setInterval(3000);  // 3秒后清除高亮
+    connect(m_highlightTimer, &QTimer::timeout, this, &CharTableWidget::clearHighlight);
     
     // 使用默认绘制，不自定义 paintEvent 以利用 Qt 的优化
     
@@ -112,7 +120,7 @@ void CharTableWidget::keyPressEvent(QKeyEvent* event)
             if (m_hintLabel) {
                 m_hintLabel->setText("不允许输入ASCII字符");
                 m_hintLabel->setStyleSheet("color: red; font-size: 12px;");
-                m_hintLabel->repaint();
+                m_hintLabel->update();
             }
             event->accept();
             return;
@@ -134,7 +142,7 @@ void CharTableWidget::keyPressEvent(QKeyEvent* event)
             if (m_hintLabel) {
                 m_hintLabel->setText(QString("字符 '%1' 已存在，不允许重复").arg(inputChar));
                 m_hintLabel->setStyleSheet("color: red; font-size: 12px;");
-                m_hintLabel->repaint();  // 强制刷新
+                m_hintLabel->update();
             }
             emit duplicateChar(inputChar);
             event->accept();
@@ -344,15 +352,15 @@ void CharTableWidget::reformatText()
     int textLen = text.length();
     int processLimit = qMin(textLen, MAX_CHARS);
     
-    QString deduped;
-    deduped.reserve(processLimit);
+    QVector<uint16_t> chars;
+    chars.reserve(processLimit);
     QSet<QChar> seen;
     seen.reserve(processLimit);
     
     bool hasDuplicate = false;
     QChar dupChar;
     
-    for (int i = 0; i < textLen && deduped.size() < MAX_CHARS; ++i) {
+    for (int i = 0; i < textLen && chars.size() < MAX_CHARS; ++i) {
         const QChar& ch = text[i];
         if (ch == '\n') continue;
         if (ch.unicode() < 128) continue;
@@ -364,7 +372,7 @@ void CharTableWidget::reformatText()
             continue;
         }
         seen.insert(ch);
-        deduped.append(ch);
+        chars.append(ch.unicode());
     }
     
     if (hasDuplicate && m_hintLabel) {
@@ -374,10 +382,36 @@ void CharTableWidget::reformatText()
         QTimer::singleShot(2000, this, [this]() { updateHint(); });
     }
     
-    int len = deduped.size();
+    int len = chars.size();
     if (len == 0) {
         m_formatting = false;
         return;
+    }
+    
+    // 记录排序前的字符顺序
+    QVector<uint16_t> oldChars;
+    QString oldText = m_cachedText.isEmpty() ? toPlainText() : m_cachedText;
+    for (QChar ch : oldText) {
+        if (ch == '\n' || ch.unicode() == 0 || ch.unicode() < 128) continue;
+        oldChars.append(ch.unicode());
+    }
+    
+    // 排序字符
+    std::sort(chars.begin(), chars.end());
+    
+    // 找出需要高亮的字符（新字符或位置变更的字符）
+    m_charsToHighlight.clear();
+    
+    // 检测新字符（在排序后的chars中但不在oldChars中）
+    QSet<uint16_t> oldCharSet;
+    for (uint16_t ch : oldChars) {
+        oldCharSet.insert(ch);
+    }
+    
+    for (uint16_t ch : chars) {
+        if (!oldCharSet.contains(ch)) {
+            m_charsToHighlight.insert(QChar(ch));
+        }
     }
     
     // 构建格式化文本
@@ -386,23 +420,33 @@ void CharTableWidget::reformatText()
     formatted.reserve(len + lineCount - 1);
     
     for (int i = 0; i < len; ++i) {
-        formatted.append(deduped[i]);
+        formatted.append(QChar(chars[i]));
         if ((i + 1) % COLS_PER_LINE == 0 && i < len - 1) {
             formatted.append('\n');
         }
     }
     
-    QString oldText = m_cachedText.isEmpty() ? toPlainText() : m_cachedText;
     if (formatted != oldText) {
+        // 使用 beginEditBlock/endEditBlock 合并操作，使撤销更自然
         QTextCursor cursor = textCursor();
-        int oldPos = cursor.position();
+        cursor.beginEditBlock();
         
-        setPlainText(formatted);
+        cursor.select(QTextCursor::Document);
+        cursor.insertText(formatted);
+        
+        cursor.endEditBlock();
+        
         m_cachedText = formatted;
         m_textDirty = false;
         
-        cursor.setPosition(qMin(oldPos, formatted.length()));
+        cursor.setPosition(qMin(cursor.position(), formatted.length()));
         setTextCursor(cursor);
+        
+        // 应用高亮
+        if (!m_charsToHighlight.isEmpty()) {
+            applyHighlight();
+            m_highlightTimer->start();
+        }
     }
     
     m_existingChars = std::move(seen);
@@ -413,9 +457,58 @@ void CharTableWidget::reformatText()
     m_formatting = false;
 }
 
+void CharTableWidget::applyHighlight()
+{
+    if (m_charsToHighlight.isEmpty()) return;
+    
+    QTextCursor cursor = textCursor();
+    cursor.select(QTextCursor::Document);
+    
+    QTextCharFormat defaultFormat;
+    cursor.setCharFormat(defaultFormat);
+    cursor.clearSelection();
+    
+    QTextCharFormat highlightFormat;
+    highlightFormat.setBackground(QColor("#3399ff"));
+    highlightFormat.setForeground(Qt::white);
+    
+    QString text = toPlainText();
+    for (int i = 0; i < text.length(); ++i) {
+        QChar ch = text[i];
+        if (ch == '\n') continue;
+        if (m_charsToHighlight.contains(ch)) {
+            cursor.setPosition(i);
+            cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
+            cursor.setCharFormat(highlightFormat);
+            cursor.clearSelection();
+        }
+    }
+    
+    cursor.movePosition(QTextCursor::End);
+    setTextCursor(cursor);
+}
+
+void CharTableWidget::clearHighlight()
+{
+    m_charsToHighlight.clear();
+    
+    QTextCursor cursor = textCursor();
+    cursor.select(QTextCursor::Document);
+    
+    QTextCharFormat defaultFormat;
+    cursor.setCharFormat(defaultFormat);
+    cursor.clearSelection();
+    
+    cursor.movePosition(QTextCursor::End);
+    setTextCursor(cursor);
+}
+
 void CharTableWidget::setData(const CharTableData& data)
 {
     m_data = data;
+    
+    // 清除撤销栈（加载新文件）
+    clearUndoStack();
     
     if (m_data.rows <= 0 || m_data.cols <= 0 || m_data.cells.isEmpty()) {
         setPlainText(QString());
@@ -445,7 +538,7 @@ void CharTableWidget::setData(const CharTableData& data)
         return;
     }
     
-    // 第二遍：收集有效字符
+    // 第二遍：收集有效字符（保持原始顺序，不排序）
     QVector<uint16_t> characters;
     characters.reserve(validCount);
     for (int i = 0; i < charCount; ++i) {
@@ -454,9 +547,6 @@ void CharTableWidget::setData(const CharTableData& data)
             characters.append(ch);
         }
     }
-    
-    // 排序
-    std::sort(characters.begin(), characters.end());
     
     // 预计算文本长度
     int lineCount = (validCount - 1) / COLS_PER_LINE + 1;

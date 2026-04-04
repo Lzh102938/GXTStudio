@@ -27,6 +27,10 @@ public:
     void setHintLabel(QLabel* label);
     // 对当前文本按 Unicode 排序并重新格式化（按每行 COLS_PER_LINE）
     void sortCharsInWidget();
+    // 清除高亮
+    void clearHighlight();
+    // 清除撤销/重做栈
+    void clearUndoStack() { document()->setUndoRedoEnabled(false); document()->setUndoRedoEnabled(true); }
 
 signals:
     // 光标位置变化信号
@@ -58,11 +62,14 @@ private:
     bool m_textDirty = true;  // 文本是否需要重新缓存
     QTimer* m_reformatTimer;  // 延迟格式化定时器
     QTimer* m_cursorPosTimer;  // 光标位置信号节流定时器
+    QTimer* m_highlightTimer;  // 高亮清除定时器
     int m_lastLine = -1;  // 上次发出的行号
     int m_lastColumn = -1;  // 上次发出的列号
+    QSet<QChar> m_charsToHighlight;  // 需要高亮的字符集合
     
     void emitCursorPosition();
     void reformatText();  // 重新格式化文本，确保每行64字符
     void updateHint();  // 更新提示信息
     void rebuildCharSet();  // 重建字符集合
+    void applyHighlight();  // 应用高亮
 };
