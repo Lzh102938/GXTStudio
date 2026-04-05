@@ -1540,12 +1540,20 @@ void GXTStudio::newFile()
             newTab.charTableWidget = charWidget;
             newTab.isModified = true;
             
-            // 获取parentPage用于添加到tabWidget
             QWidget* parentPage = charWidget->property("parentPage").value<QWidget*>();
             if (!parentPage) parentPage = charWidget->parentWidget();
             if (parentPage) {
                 newTab.pageWidget = parentPage;
             }
+            
+            newTab.charTableNameLabel = charWidget->property("nameLabel").value<QLabel*>();
+            newTab.charTableSearchEdit = charWidget->property("searchEdit").value<QLineEdit*>();
+            newTab.charTableCaseButton = charWidget->property("caseButton").value<QToolButton*>();
+            newTab.charTablePrevButton = charWidget->property("prevButton").value<QPushButton*>();
+            newTab.charTableNextButton = charWidget->property("nextButton").value<QPushButton*>();
+            newTab.charTableExportButton = charWidget->property("exportButton").value<QPushButton*>();
+            newTab.charTablePosLabel = charWidget->property("posLabel").value<QLabel*>();
+            newTab.charTableHintLabel = charWidget->property("hintLabel").value<QLabel*>();
         }
     }
     
@@ -1756,16 +1764,23 @@ void GXTStudio::importTxtFile(const QString& filePath)
             return;
         }
 
-        // 添加FileTab
         FileTab newTab;
         newTab.filePath = filePath;
         newTab.fileName = QFileInfo(filePath).fileName();
         newTab.isCharTable = true;
         newTab.isWHM = false;
-        newTab.isDAT = true; // char tables treated as DAT-like
+        newTab.isDAT = true;
         newTab.isModified = true;
         newTab.charTableData = data;
         newTab.charTableWidget = charWidget;
+        newTab.charTableNameLabel = charWidget->property("nameLabel").value<QLabel*>();
+        newTab.charTableSearchEdit = charWidget->property("searchEdit").value<QLineEdit*>();
+        newTab.charTableCaseButton = charWidget->property("caseButton").value<QToolButton*>();
+        newTab.charTablePrevButton = charWidget->property("prevButton").value<QPushButton*>();
+        newTab.charTableNextButton = charWidget->property("nextButton").value<QPushButton*>();
+        newTab.charTableExportButton = charWidget->property("exportButton").value<QPushButton*>();
+        newTab.charTablePosLabel = charWidget->property("posLabel").value<QLabel*>();
+        newTab.charTableHintLabel = charWidget->property("hintLabel").value<QLabel*>();
 
         int tabIndex = m_fileTabs.size();
         m_fileTabs.push_back(newTab);
@@ -5828,7 +5843,6 @@ void GXTStudio::onGenerateCharTable()
     // 创建标签页名称
     QString tabName = QString("CHAR_%1").arg(QFileInfo(currentTab->fileName).completeBaseName());
     
-    // 创建CharTable标签页
     CharTableWidget* charWidget = createCharTableTab(tabName, charData);
     if (!charWidget) {
         showLogMessage("创建字符表控件失败");
@@ -5836,7 +5850,6 @@ void GXTStudio::onGenerateCharTable()
         return;
     }
     
-    // 添加FileTab
     FileTab newTab;
     newTab.filePath = currentTab->filePath + ".char_table.dat";
     newTab.fileName = tabName + ".dat";
@@ -5847,6 +5860,14 @@ void GXTStudio::onGenerateCharTable()
     newTab.charTableData = charData;
     newTab.charTableWidget = charWidget;
     newTab.version = version;
+    newTab.charTableNameLabel = charWidget->property("nameLabel").value<QLabel*>();
+    newTab.charTableSearchEdit = charWidget->property("searchEdit").value<QLineEdit*>();
+    newTab.charTableCaseButton = charWidget->property("caseButton").value<QToolButton*>();
+    newTab.charTablePrevButton = charWidget->property("prevButton").value<QPushButton*>();
+    newTab.charTableNextButton = charWidget->property("nextButton").value<QPushButton*>();
+    newTab.charTableExportButton = charWidget->property("exportButton").value<QPushButton*>();
+    newTab.charTablePosLabel = charWidget->property("posLabel").value<QLabel*>();
+    newTab.charTableHintLabel = charWidget->property("hintLabel").value<QLabel*>();
     
     int tabIndex = m_fileTabs.size();
     m_fileTabs.push_back(newTab);
@@ -7368,9 +7389,7 @@ void GXTStudio::onTabChanged(int index)
                 currentTab->entryTableView->viewport()->update();
             }
 
-            if (m_backgroundEnabled) {
-                updateSearchUIColors(*currentTab);
-            }
+            updateLabelColors();
 
             QTimer::singleShot(100, [this]() {
                 cleanupDelegatesCache();
@@ -10104,39 +10123,155 @@ void GXTStudio::updateLabelColors()
 {
     if (m_fileTabs.empty()) return;
     
-    FileTab* currentTab = getCurrentTab();
-    if (!currentTab || currentTab->isCharTable) return;
-    
+    for (FileTab& tab : m_fileTabs) {
+        if (tab.isCharTable) {
+            updateCharTableColors(tab);
+        } else {
+            updateGXTTabColors(tab);
+        }
+    }
+}
+
+void GXTStudio::updateGXTTabColors(FileTab& tab)
+{
     bool hasBackground = m_backgroundEnabled && !m_scaledBackgroundPixmap.isNull();
     
     if (!hasBackground) {
         QColor defaultColor(TextColor::DEFAULT_COLOR);
-        if (currentTab->tableListLabel) {
-            applyLabelStyle(currentTab->tableListLabel, defaultColor);
+        if (tab.tableListLabel) {
+            applyLabelStyle(tab.tableListLabel, defaultColor);
         }
-        if (currentTab->entryTableLabel) {
-            applyLabelStyle(currentTab->entryTableLabel, defaultColor);
+        if (tab.entryTableLabel) {
+            applyLabelStyle(tab.entryTableLabel, defaultColor);
         }
-        resetSearchUIColors(*currentTab);
+        resetSearchUIColors(tab);
         return;
     }
     
     QWidget* centralWidget = this->centralWidget();
     QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
     
-    if (currentTab->tableListLabel) {
-        QPoint pos = currentTab->tableListLabel->mapTo(this, QPoint(currentTab->tableListLabel->width() / 2, currentTab->tableListLabel->height() / 2));
+    if (tab.tableListLabel) {
+        QPoint pos = tab.tableListLabel->mapTo(this, QPoint(tab.tableListLabel->width() / 2, tab.tableListLabel->height() / 2));
         QColor textColor = m_textColorCalculator.calculateColor(pos, targetRect);
-        applyLabelStyle(currentTab->tableListLabel, textColor);
+        applyLabelStyle(tab.tableListLabel, textColor);
     }
     
-    if (currentTab->entryTableLabel) {
-        QPoint pos = currentTab->entryTableLabel->mapTo(this, QPoint(currentTab->entryTableLabel->width() / 2, currentTab->entryTableLabel->height() / 2));
+    if (tab.entryTableLabel) {
+        QPoint pos = tab.entryTableLabel->mapTo(this, QPoint(tab.entryTableLabel->width() / 2, tab.entryTableLabel->height() / 2));
         QColor textColor = m_textColorCalculator.calculateColor(pos, targetRect);
-        applyLabelStyle(currentTab->entryTableLabel, textColor);
+        applyLabelStyle(tab.entryTableLabel, textColor);
     }
     
-    updateSearchUIColors(*currentTab);
+    updateSearchUIColors(tab);
+}
+
+void GXTStudio::updateCharTableColors(FileTab& tab)
+{
+    bool hasBackground = m_backgroundEnabled && !m_scaledBackgroundPixmap.isNull();
+    
+    QWidget* centralWidget = this->centralWidget();
+    QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
+    
+    QColor textColor;
+    if (hasBackground) {
+        textColor = m_textColorCalculator.calculateColor(QPoint(150, 50), targetRect);
+    } else {
+        textColor = QColor(TextColor::DEFAULT_COLOR);
+    }
+    QString textColorName = textColor.name();
+    
+    if (tab.charTableNameLabel) {
+        QString entryFontFamily = FA::solidFontFamily();
+        QString fileName = tab.fileName;
+        int cols = tab.charTableData.cols;
+        int rows = tab.charTableData.rows;
+        
+        if (entryFontFamily.isEmpty()) {
+            tab.charTableNameLabel->setText(QString("<b>%1</b> (%2 x %3)").arg(fileName).arg(cols).arg(rows));
+            tab.charTableNameLabel->setStyleSheet(QString("margin-left:6px; color: %1;").arg(textColorName));
+        } else {
+            tab.charTableNameLabel->setText(QString("<span style=\"font-family:'%1'; font-size:14px; color: %2;\">%3</span> <span style=\"font-size:14px; font-weight: bold; color: %4;\">%5</span> <span style=\"font-size:14px; color: %4;\">(%6 x %7)</span>")
+                .arg(entryFontFamily).arg(textColorName).arg(QString(FA::QTable))
+                .arg(textColorName).arg(fileName).arg(cols).arg(rows));
+        }
+    }
+    
+    QString searchEditStyle = QString(R"(
+        QLineEdit {
+            border: 2px solid rgba(200, 200, 200, 0.5);
+            border-radius: 6px;
+            padding: 6px 12px;
+            padding-left: 14px;
+            background-color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            color: %1;
+        }
+        QLineEdit:focus {
+            border-color: rgba(33, 150, 243, 0.6);
+            outline: none;
+        }
+    )").arg(textColorName);
+    
+    if (tab.charTableSearchEdit) {
+        tab.charTableSearchEdit->setStyleSheet(searchEditStyle);
+    }
+    
+    QString innerButtonStyle = QString(
+        "QToolButton {"
+        "  background: transparent;"
+        "  border: none;"
+        "  border-radius: 4px;"
+        "  color: %1;"
+        "  padding: 0px;"
+        "  margin: 0px;"
+        "}"
+        "QToolButton:hover {"
+        "  background: rgba(0, 0, 0, 0.08);"
+        "}"
+        "QToolButton:checked {"
+        "  background: rgba(33, 150, 243, 0.15);"
+        "  color: #2196f3;"
+        "}"
+    ).arg(textColorName);
+    
+    if (tab.charTableCaseButton) {
+        tab.charTableCaseButton->setStyleSheet(innerButtonStyle);
+    }
+    
+    QString navButtonStyle = QString(R"(
+        QPushButton {
+            background-color: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(200, 200, 200, 0.5);
+            border-radius: 6px;
+            color: %1;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: rgba(255, 255, 255, 0.7);
+            border-color: rgba(150, 150, 150, 0.5);
+        }
+        QPushButton:pressed {
+            background-color: rgba(255, 255, 255, 0.9);
+        }
+    )").arg(textColorName);
+    
+    if (tab.charTablePrevButton) {
+        tab.charTablePrevButton->setStyleSheet(navButtonStyle);
+    }
+    if (tab.charTableNextButton) {
+        tab.charTableNextButton->setStyleSheet(navButtonStyle);
+    }
+    if (tab.charTableExportButton) {
+        tab.charTableExportButton->setStyleSheet(navButtonStyle);
+    }
+    
+    if (tab.charTablePosLabel) {
+        tab.charTablePosLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(textColorName));
+    }
+    if (tab.charTableHintLabel) {
+        tab.charTableHintLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(textColorName));
+    }
 }
 
 void GXTStudio::updateSearchUIColors(FileTab& tab)
@@ -13261,39 +13396,50 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
 {
     QWidget* page = new QWidget();
     QVBoxLayout* layout = new QVBoxLayout(page);
-    layout->setContentsMargins(8,8,8,8);
+    layout->setContentsMargins(8, 8, 8, 8);
     layout->setSpacing(6);
 
-    // Top controls: file name label + search box + export button
+    QWidget* centralWidget = this->centralWidget();
+    QRect targetRect = centralWidget ? centralWidget->geometry() : this->rect();
+    QPoint charPos = page->mapTo(this, QPoint(100, 100));
+    QColor textColor = m_textColorCalculator.calculateColor(charPos, targetRect);
+    QString textColorName = textColor.name();
+    
+    QColor widgetTextColor = QColor(TextColor::DARK_TEXT_COLOR);
+
     QHBoxLayout* topRow = new QHBoxLayout();
-    QLabel* nameLabel = new QLabel(QString("%1 (%2 x %3)").arg(fileName).arg(data.cols).arg(data.rows));
-    nameLabel->setStyleSheet("font-weight:600; margin-left:6px;");
+    
+    QLabel* nameLabel = new QLabel();
+    QString entryFontFamily = FA::solidFontFamily();
+    if (entryFontFamily.isEmpty()) {
+        nameLabel->setText(QString("<b>%1</b> (%2 x %3)").arg(fileName).arg(data.cols).arg(data.rows));
+        nameLabel->setStyleSheet(QString("margin-left:6px; color: %1;").arg(textColorName));
+    } else {
+        nameLabel->setText(QString("<span style=\"font-family:'%1'; font-size:14px; color: %2;\">%3</span> <span style=\"font-size:14px; font-weight: bold; color: %4;\">%5</span> <span style=\"font-size:14px; color: %4;\">(%6 x %7)</span>")
+            .arg(entryFontFamily).arg(textColorName).arg(QString(FA::QTable))
+            .arg(textColorName).arg(fileName).arg(data.cols).arg(data.rows));
+    }
+    nameLabel->setTextFormat(Qt::RichText);
     topRow->addWidget(nameLabel);
     topRow->addStretch();
 
-    // 搜索框容器 - 设置固定宽度策略，防止窗口尺寸影响按钮间距
     QWidget* searchWrapper = new QWidget();
     searchWrapper->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     QHBoxLayout* searchLayout = new QHBoxLayout(searchWrapper);
     searchLayout->setContentsMargins(0, 0, 0, 0);
     searchLayout->setSpacing(4);
     
-    // CharTable标签页使用白色背景，直接使用深色文字
-    QString searchTextColorName = "#333333";
-    
-    // 搜索框
     QLineEdit* searchEdit = new QLineEdit();
     searchEdit->setPlaceholderText("搜索字符...");
     searchEdit->setMinimumHeight(32);
     searchEdit->setMinimumWidth(180);
     searchEdit->setMaximumWidth(230);
     
-    // 设置搜索框样式和字体 - 使用自动判断的颜色
     QFont searchFont("Microsoft YaHei", m_fontSize);
     searchEdit->setFont(searchFont);
     searchEdit->setStyleSheet(QString(R"(
         QLineEdit {
-            border: 2px solid #e1e5e9;
+            border: 2px solid rgba(200, 200, 200, 0.5);
             border-radius: 6px;
             padding: 6px 12px;
             padding-left: 14px;
@@ -13302,12 +13448,11 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
             color: %1;
         }
         QLineEdit:focus {
-            border-color: #2196f3;
+            border-color: rgba(33, 150, 243, 0.6);
             outline: none;
         }
-    )").arg(searchTextColorName));
+    )").arg(textColorName));
     
-    // 创建嵌入搜索框内部的大小写按钮
     QToolButton* caseSensitiveButton = new QToolButton(searchEdit);
     caseSensitiveButton->setFixedSize(22, 22);
     caseSensitiveButton->setCheckable(true);
@@ -13315,7 +13460,6 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     caseSensitiveButton->setToolTip("区分大小写");
     caseSensitiveButton->setCursor(Qt::PointingHandCursor);
     
-    // 内嵌按钮样式
     QString innerButtonStyle = QString(
         "QToolButton {"
         "  background: transparent;"
@@ -13332,7 +13476,7 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         "  background: rgba(33, 150, 243, 0.15);"
         "  color: #2196f3;"
         "}"
-    ).arg(searchTextColorName);
+    ).arg(textColorName);
     
     caseSensitiveButton->setStyleSheet(innerButtonStyle);
     
@@ -13340,36 +13484,33 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     caseFont.setStyleStrategy(QFont::PreferMatch);
     caseSensitiveButton->setFont(caseFont);
     
-    // 使用布局将按钮嵌入搜索框内部右侧
     QHBoxLayout* innerButtonLayout = new QHBoxLayout(searchEdit);
     innerButtonLayout->setContentsMargins(0, 0, 4, 0);
     innerButtonLayout->setSpacing(2);
     innerButtonLayout->addStretch();
     innerButtonLayout->addWidget(caseSensitiveButton);
     
-    // 设置搜索框内部边距，为按钮留出空间
     searchEdit->setTextMargins(4, 0, 32, 0);
     
     searchLayout->addWidget(searchEdit);
     
-    // 上一个/下一个按钮 - 使用FontAwesome图标
     int btnSize = qMax(30, m_fontSize + 10);
     QString navButtonStyle = QString(R"(
         QPushButton {
             background-color: rgba(255, 255, 255, 0.5);
-            border: 1px solid #dee2e6;
+            border: 1px solid rgba(200, 200, 200, 0.5);
             border-radius: 6px;
             color: %1;
             font-weight: bold;
         }
         QPushButton:hover {
             background-color: rgba(255, 255, 255, 0.7);
-            border-color: #adb5bd;
+            border-color: rgba(150, 150, 150, 0.5);
         }
         QPushButton:pressed {
             background-color: rgba(255, 255, 255, 0.9);
         }
-    )").arg(searchTextColorName);
+    )").arg(textColorName);
     
     QPushButton* prevButton = new QPushButton();
     prevButton->setText(FA::QChevronLeft);
@@ -13389,34 +13530,37 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     
     topRow->addWidget(searchWrapper);
 
-    QPushButton* exportBtn = new QPushButton("导出为图片");
+    QPushButton* exportBtn = new QPushButton();
+    exportBtn->setText(FA::QFileExport);
+    exportBtn->setToolTip("导出为图片");
+    exportBtn->setFixedSize(btnSize, btnSize);
+    exportBtn->setStyleSheet(navButtonStyle);
+    exportBtn->setFont(FA::solidFont(10));
+    exportBtn->setCursor(Qt::PointingHandCursor);
     topRow->addWidget(exportBtn);
 
     layout->addLayout(topRow);
 
-    // CharTableWidget inside scroll area
     CharTableWidget* widget = new CharTableWidget(page);
     widget->setData(data);
-    // 确保初始创建时正确应用只读模式
     widget->setReadOnly(m_isReadOnly);
+    widget->setTextColor(widgetTextColor);
 
     QScrollArea* scroll = new QScrollArea(page);
     scroll->setWidgetResizable(true);
     scroll->setWidget(widget);
+    scroll->setStyleSheet("QScrollArea { border: none; background: transparent; }");
     layout->addWidget(scroll);
 
-    // 底部状态栏
     QHBoxLayout* bottomRow = new QHBoxLayout();
     bottomRow->setContentsMargins(4, 0, 4, 0);
     
-    // 行列位置标签
     QLabel* posLabel = new QLabel("第 1 行, 第 1 列", page);
-    posLabel->setStyleSheet("color: #666; font-size: 12px;");
+    posLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(textColorName));
     posLabel->setMinimumWidth(120);
     
-    // 字符数提示标签
     QLabel* hintLabel = new QLabel(page);
-    hintLabel->setStyleSheet("color: #666; font-size: 12px;");
+    hintLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(textColorName));
     hintLabel->setMinimumWidth(200);
     
     bottomRow->addWidget(posLabel);
@@ -13424,34 +13568,75 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     bottomRow->addWidget(hintLabel);
     layout->addLayout(bottomRow);
 
-    // 设置提示标签
     widget->setHintLabel(hintLabel);
     
-    // 延迟连接信号，减少初始化时的开销
-    QTimer::singleShot(0, widget, [widget, posLabel, hintLabel]() {
-        // 连接光标位置变化信号
+    QTimer::singleShot(0, widget, [widget, posLabel, hintLabel, textColorName]() {
         connect(widget, &CharTableWidget::cursorPositionChanged, [posLabel](int line, int column) {
             posLabel->setText(QString("第 %1 行, 第 %2 列").arg(line).arg(column));
         });
         
-        // 连接字符数超限信号
         connect(widget, &CharTableWidget::maxCharsReached, [hintLabel]() {
             hintLabel->setText("字符数最多 64 x 64 (已达上限)");
             hintLabel->setStyleSheet("color: red; font-size: 12px;");
         });
         
-        // 连接重复字符信号
-        connect(widget, &CharTableWidget::duplicateChar, [hintLabel](QChar ch) {
+        connect(widget, &CharTableWidget::duplicateChar, [hintLabel, textColorName](QChar ch) {
             hintLabel->setText(QString("字符 '%1' 已存在，不允许重复").arg(ch));
             hintLabel->setStyleSheet("color: red; font-size: 12px;");
+            QTimer::singleShot(2000, [hintLabel, textColorName]() {
+                hintLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(textColorName));
+            });
         });
     });
 
-    // export button: export as character grid image
     connect(exportBtn, &QPushButton::clicked, [this, widget, fileName, data]() {
         QDialog exportDialog(this);
         exportDialog.setWindowTitle("导出字符表图片");
-        exportDialog.setMinimumWidth(350);
+        exportDialog.setMinimumWidth(420);
+        exportDialog.setMinimumHeight(380);
+        
+        exportDialog.setStyleSheet(R"(
+            QDialog {
+                background-color: #f5f7fa;
+            }
+            QGroupBox {
+                font-weight: bold;
+                font-size: 13px;
+                color: #2c3e50;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 10px;
+                background-color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px;
+            }
+            QLabel {
+                color: #333;
+            }
+            QPushButton {
+                padding: 8px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+            QComboBox {
+                padding: 6px 12px;
+                border: 1px solid #d0d0d0;
+                border-radius: 6px;
+                background: white;
+                min-width: 100px;
+            }
+            QComboBox:hover {
+                border-color: #5b9fd6;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 24px;
+            }
+        )");
         
         QVBoxLayout* dialogLayout = new QVBoxLayout(&exportDialog);
         dialogLayout->setSpacing(12);
@@ -13459,53 +13644,166 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         
         int defaultFontSize = (data.type == CharTableData::GTA_IV) ? 48 : 42;
         
+        QGroupBox* settingsGroup = new QGroupBox("导出设置", &exportDialog);
+        QVBoxLayout* settingsLayout = new QVBoxLayout(settingsGroup);
+        settingsLayout->setSpacing(12);
+        settingsLayout->setContentsMargins(15, 20, 15, 15);
+        
         QHBoxLayout* fontLayout = new QHBoxLayout();
-        QLabel* fontLabel = new QLabel("字体设置:", &exportDialog);
-        QPushButton* fontBtn = new QPushButton("选择字体...", &exportDialog);
-        fontBtn->setMinimumWidth(120);
-        QFont selectedFont("Microsoft YaHei", defaultFontSize);
-        fontBtn->setText(selectedFont.family() + " " + QString::number(defaultFontSize) + "pt");
+        QLabel* fontIconLabel = new QLabel(&exportDialog);
+        fontIconLabel->setFont(FA::solidFont(14));
+        fontIconLabel->setText(FA::QEdit);
+        fontIconLabel->setStyleSheet("color: #5b9fd6;");
+        fontIconLabel->setFixedWidth(24);
+        QLabel* fontLabel = new QLabel("字体:", &exportDialog);
+        fontLabel->setMinimumWidth(50);
+        QPushButton* fontBtn = new QPushButton("Microsoft YaHei, " + QString::number(defaultFontSize) + "pt", &exportDialog);
+        fontBtn->setStyleSheet(R"(
+            QPushButton {
+                background-color: white;
+                color: #333;
+                border: 1px solid #d0d0d0;
+                text-align: left;
+                padding: 8px 12px;
+            }
+            QPushButton:hover {
+                border-color: #5b9fd6;
+                background-color: #f8f9fa;
+            }
+        )");
+        fontBtn->setCursor(Qt::PointingHandCursor);
+        fontLayout->addWidget(fontIconLabel);
         fontLayout->addWidget(fontLabel);
-        fontLayout->addWidget(fontBtn);
-        fontLayout->addStretch();
-        dialogLayout->addLayout(fontLayout);
+        fontLayout->addWidget(fontBtn, 1);
+        settingsLayout->addLayout(fontLayout);
         
         QHBoxLayout* formatLayout = new QHBoxLayout();
-        QLabel* formatLabel = new QLabel("输出格式:", &exportDialog);
+        QLabel* formatIconLabel = new QLabel(&exportDialog);
+        formatIconLabel->setFont(FA::solidFont(14));
+        formatIconLabel->setText(FA::QFileAlt);
+        formatIconLabel->setStyleSheet("color: #5b9fd6;");
+        formatIconLabel->setFixedWidth(24);
+        QLabel* formatLabel = new QLabel("格式:", &exportDialog);
+        formatLabel->setMinimumWidth(50);
         QComboBox* formatCombo = new QComboBox(&exportDialog);
-        formatCombo->addItem("PNG", "png");
+        formatCombo->addItem("PNG (推荐)", "png");
         formatCombo->addItem("BMP", "bmp");
         formatCombo->addItem("JPG", "jpg");
         formatCombo->addItem("TIFF", "tiff");
+        formatLayout->addWidget(formatIconLabel);
         formatLayout->addWidget(formatLabel);
-        formatLayout->addWidget(formatCombo);
-        formatLayout->addStretch();
-        dialogLayout->addLayout(formatLayout);
+        formatLayout->addWidget(formatCombo, 1);
+        settingsLayout->addLayout(formatLayout);
         
-        QString versionName = (data.type == CharTableData::GTA_IV) ? "GTA_IV" : "GTA_VC";
+        dialogLayout->addWidget(settingsGroup);
+        
+        QGroupBox* previewGroup = new QGroupBox("渲染预览", &exportDialog);
+        QVBoxLayout* previewLayout = new QVBoxLayout(previewGroup);
+        previewLayout->setContentsMargins(10, 15, 10, 10);
+        
+        QLabel* previewLabel = new QLabel(&exportDialog);
+        previewLabel->setMinimumHeight(100);
+        previewLabel->setAlignment(Qt::AlignCenter);
+        previewLabel->setStyleSheet("background-color: #2d2d2d; border-radius: 6px;");
+        previewLayout->addWidget(previewLabel);
+        
+        QLabel* previewHint = new QLabel("使用当前字体渲染 \"测试文本\"", &exportDialog);
+        previewHint->setStyleSheet("color: #888; font-size: 11px;");
+        previewHint->setAlignment(Qt::AlignCenter);
+        previewLayout->addWidget(previewHint);
+        dialogLayout->addWidget(previewGroup);
+        
+        QString versionName = (data.type == CharTableData::GTA_IV) ? "GTA IV" : "GTA VC";
         int rows = (data.type == CharTableData::GTA_IV) ? 62 : 64;
         int cellHeight = (data.type == CharTableData::GTA_IV) ? 66 : 64;
-        QLabel* infoLabel = new QLabel(QString("版本: %1\n输出尺寸: 4096 x 4096 像素\n排列: 64 x %2 格子 (每格 64 x %3)")
-            .arg(versionName).arg(rows).arg(cellHeight), &exportDialog);
-        infoLabel->setStyleSheet("color: #666; font-size: 11px;");
+        int exportType = (data.type == CharTableData::GTA_IV) ? 1 : 0;
+        
+        QFont selectedFont("Microsoft YaHei", defaultFontSize);
+        
+        auto updatePreview = [previewLabel, exportType, cellHeight](const QFont& font) {
+            const int previewCellSize = 64;
+            const int previewCols = 4;
+            const int previewRows = 1;
+            const int previewWidth = previewCols * previewCellSize;
+            const int previewHeight = previewRows * cellHeight;
+            
+            QImage previewImage(previewWidth, previewHeight, QImage::Format_ARGB32);
+            previewImage.fill(Qt::transparent);
+            
+            QPainter painter(&previewImage);
+            painter.setRenderHint(QPainter::Antialiasing);
+            painter.setRenderHint(QPainter::TextAntialiasing);
+            painter.setRenderHint(QPainter::SmoothPixmapTransform);
+            painter.setFont(font);
+            
+            QColor textColor(255, 255, 255, 230);
+            painter.setPen(textColor);
+            
+            int yOffset = -2;
+            QString testText = QString::fromUtf8("测试文本");
+            
+            for (int col = 0; col < previewCols && col < testText.length(); ++col) {
+                int x = col * previewCellSize;
+                int y = yOffset;
+                QRect cellRect(x, y, previewCellSize, cellHeight);
+                painter.drawText(cellRect, Qt::AlignCenter, QString(testText[col]));
+            }
+            painter.end();
+            
+            QPixmap pixmap = QPixmap::fromImage(previewImage);
+            previewLabel->setPixmap(pixmap.scaled(previewLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        };
+        
+        updatePreview(selectedFont);
+        
+        QLabel* infoLabel = new QLabel(&exportDialog);
+        infoLabel->setStyleSheet("color: #666; font-size: 12px; padding: 4px 0;");
+        infoLabel->setText(QString("<b>版本:</b> %1 &nbsp;&nbsp; <b>尺寸:</b> 4096×4096px &nbsp;&nbsp; <b>排列:</b> 64×%2格子")
+            .arg(versionName).arg(rows));
         dialogLayout->addWidget(infoLabel);
         
         QHBoxLayout* btnLayout = new QHBoxLayout();
         btnLayout->addStretch();
-        QPushButton* okBtn = new QPushButton("确定", &exportDialog);
-        okBtn->setMinimumWidth(80);
+        
         QPushButton* cancelBtn = new QPushButton("取消", &exportDialog);
-        cancelBtn->setMinimumWidth(80);
-        btnLayout->addWidget(okBtn);
+        cancelBtn->setMinimumWidth(90);
+        cancelBtn->setStyleSheet(R"(
+            QPushButton {
+                background-color: #f0f0f0;
+                color: #333;
+                border: 1px solid #d0d0d0;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+        )");
+        
+        QPushButton* okBtn = new QPushButton("导出", &exportDialog);
+        okBtn->setMinimumWidth(90);
+        okBtn->setStyleSheet(R"(
+            QPushButton {
+                background-color: #5b9fd6;
+                color: white;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #4a90d9;
+            }
+        )");
+        okBtn->setDefault(true);
+        
         btnLayout->addWidget(cancelBtn);
+        btnLayout->addSpacing(8);
+        btnLayout->addWidget(okBtn);
         dialogLayout->addLayout(btnLayout);
         
-        connect(fontBtn, &QPushButton::clicked, [&exportDialog, &selectedFont, fontBtn]() {
+        connect(fontBtn, &QPushButton::clicked, [&exportDialog, &selectedFont, fontBtn, &updatePreview]() {
             bool ok = false;
             QFont font = QFontDialog::getFont(&ok, selectedFont, &exportDialog, "选择字体");
             if (ok) {
                 selectedFont = font;
-                fontBtn->setText(selectedFont.family() + " " + QString::number(selectedFont.pointSize()) + "pt");
+                fontBtn->setText(selectedFont.family() + ", " + QString::number(selectedFont.pointSize()) + "pt");
+                updatePreview(selectedFont);
             }
         });
         
@@ -13718,8 +14016,15 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         }
     });
 
-    // 返回CharTableWidget指针，但它的父窗口是page
     widget->setProperty("parentPage", QVariant::fromValue<QWidget*>(page));
+    widget->setProperty("nameLabel", QVariant::fromValue<QLabel*>(nameLabel));
+    widget->setProperty("searchEdit", QVariant::fromValue<QLineEdit*>(searchEdit));
+    widget->setProperty("caseButton", QVariant::fromValue<QToolButton*>(caseSensitiveButton));
+    widget->setProperty("prevButton", QVariant::fromValue<QPushButton*>(prevButton));
+    widget->setProperty("nextButton", QVariant::fromValue<QPushButton*>(nextButton));
+    widget->setProperty("exportButton", QVariant::fromValue<QPushButton*>(exportBtn));
+    widget->setProperty("posLabel", QVariant::fromValue<QLabel*>(posLabel));
+    widget->setProperty("hintLabel", QVariant::fromValue<QLabel*>(hintLabel));
     return widget;
 }
 

@@ -373,8 +373,16 @@ struct FileTab {
     QLabel* entryTableLabel = nullptr;
 
     // 字符表相关控件和数据
-    class CharTableWidget* charTableWidget = nullptr;  // 字符表显示控件
-    CharTableData charTableData;  // 字符表数据
+    class CharTableWidget* charTableWidget = nullptr;
+    CharTableData charTableData;
+    QLabel* charTableNameLabel = nullptr;
+    QLineEdit* charTableSearchEdit = nullptr;
+    QToolButton* charTableCaseButton = nullptr;
+    QPushButton* charTablePrevButton = nullptr;
+    QPushButton* charTableNextButton = nullptr;
+    QPushButton* charTableExportButton = nullptr;
+    QLabel* charTablePosLabel = nullptr;
+    QLabel* charTableHintLabel = nullptr;
     
     // 异步解析状态
     bool isParsing = false;
@@ -836,17 +844,19 @@ private:
     int m_backgroundBlurRadius;  // 高斯模糊半径 (0-50)
     int m_backgroundBrightness;  // 亮度调节 (-100 到 100)
     QString m_backgroundImagePath;  // 背景图片路径（用于重新加载）
-    QTimer m_resizeTimer;  // 窗口缩放防抖定时器
-    bool m_isResizing;  // 是否正在缩放中
-    TextColorCalculator m_textColorCalculator;  // 优化的文本颜色计算器
-    void drawBackground(QPainter* painter);  // 绘制背景方法
-    QColor getTextColorForPosition(const QPoint& pos);  // 根据背景位置获取文字颜色（包装方法）
+    QTimer m_resizeTimer;
+    bool m_isResizing;
+    TextColorCalculator m_textColorCalculator;
+    void drawBackground(QPainter* painter);
+    QColor getTextColorForPosition(const QPoint& pos);
     void updateLabelColors();
+    void updateGXTTabColors(FileTab& tab);
+    void updateCharTableColors(FileTab& tab);
     void updateSearchUIColors(FileTab& tab);
     void resetSearchUIColors(FileTab& tab);
     void applyBackgroundEffects();
-    void onResizeTimerTimeout();  // 窗口缩放防抖处理
-    void saveBackgroundSettings();  // 保存背景设置到配置
+    void onResizeTimerTimeout();
+    void saveBackgroundSettings();
     void loadBackgroundSettings();  // 从配置加载背景设置
     
     // 最近文件列表相关

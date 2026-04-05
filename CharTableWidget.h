@@ -11,35 +11,26 @@ class CharTableWidget : public QPlainTextEdit {
 public:
     explicit CharTableWidget(QWidget* parent = nullptr);
     
-    // 加载字符表数据
     void setData(const CharTableData& data);
     
-    // 获取当前数据
     CharTableData data() const { return m_data; }
     
-    // 从当前文本更新数据
     void updateDataFromText();
     
-    // 获取当前行列位置（从1开始，像记事本一样）
     void getCursorPosition(int& line, int& column) const;
     
-    // 设置提示标签
     void setHintLabel(QLabel* label);
-    // 对当前文本按 Unicode 排序并重新格式化（按每行 COLS_PER_LINE）
     void sortCharsInWidget();
-    // 清除高亮
     void clearHighlight();
-    // 清除撤销/重做栈
     void clearUndoStack() { document()->setUndoRedoEnabled(false); document()->setUndoRedoEnabled(true); }
+    
+    void setTextColor(const QColor& color);
+    QColor textColor() const { return m_textColor; }
 
 signals:
-    // 光标位置变化信号
     void cursorPositionChanged(int line, int column);
-    // 字符数超限信号
     void maxCharsReached();
-    // 重复字符信号
     void duplicateChar(QChar ch);
-    // 文本被修改信号
     void textModified();
 
 protected:
@@ -53,23 +44,25 @@ private:
     int m_cellSize = 0;
     static const int COLS_PER_LINE = 64;
     static const int MAX_ROWS = 64;
-    static const int MAX_CHARS = COLS_PER_LINE * MAX_ROWS;  // 64x64 = 4096
-    bool m_formatting = false;  // 防止递归
-    bool m_maxReached = false;  // 是否已达到最大字符数
-    QLabel* m_hintLabel = nullptr;  // 提示标签
-    QSet<QChar> m_existingChars;  // 已存在的字符集合，用于查重
-    QString m_cachedText;  // 缓存的纯文本
-    bool m_textDirty = true;  // 文本是否需要重新缓存
-    QTimer* m_reformatTimer;  // 延迟格式化定时器
-    QTimer* m_cursorPosTimer;  // 光标位置信号节流定时器
-    QTimer* m_highlightTimer;  // 高亮清除定时器
-    int m_lastLine = -1;  // 上次发出的行号
-    int m_lastColumn = -1;  // 上次发出的列号
-    QSet<QChar> m_charsToHighlight;  // 需要高亮的字符集合
+    static const int MAX_CHARS = COLS_PER_LINE * MAX_ROWS;
+    bool m_formatting = false;
+    bool m_maxReached = false;
+    QLabel* m_hintLabel = nullptr;
+    QSet<QChar> m_existingChars;
+    QString m_cachedText;
+    bool m_textDirty = true;
+    QTimer* m_reformatTimer;
+    QTimer* m_cursorPosTimer;
+    QTimer* m_highlightTimer;
+    int m_lastLine = -1;
+    int m_lastColumn = -1;
+    QSet<QChar> m_charsToHighlight;
+    QColor m_textColor = QColor("#333333");
     
     void emitCursorPosition();
-    void reformatText();  // 重新格式化文本，确保每行64字符
-    void updateHint();  // 更新提示信息
-    void rebuildCharSet();  // 重建字符集合
-    void applyHighlight();  // 应用高亮
+    void reformatText();
+    void updateHint();
+    void rebuildCharSet();
+    void applyHighlight();
+    void updateStyle();
 };

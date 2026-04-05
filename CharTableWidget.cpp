@@ -16,71 +16,81 @@
 CharTableWidget::CharTableWidget(QWidget* parent)
     : QPlainTextEdit(parent)
 {
-    // 基础设置 - 优化性能
     setLineWrapMode(QPlainTextEdit::NoWrap);
-    setUndoRedoEnabled(true);  // 启用撤销/重做
+    setUndoRedoEnabled(true);
     setCenterOnScroll(false);
     
-    // 设置微软雅黑字体
     QFont font("Microsoft YaHei", 11);
     font.setStyleHint(QFont::SansSerif);
     setFont(font);
     
-    // 计算单元格大小
     QFontMetrics fm(font);
     m_cellSize = fm.horizontalAdvance('W');
     
-    // 移除所有边距
     setViewportMargins(0, 0, 0, 0);
     document()->setDocumentMargin(0);
     
-    // 优化文本选项
     QTextOption option;
     option.setWrapMode(QTextOption::NoWrap);
-    option.setUseDesignMetrics(false);  // 使用整数度量，更快
+    option.setUseDesignMetrics(false);
     document()->setDefaultTextOption(option);
     
-    // 创建延迟格式化定时器（防抖）
     m_reformatTimer = new QTimer(this);
     m_reformatTimer->setSingleShot(true);
-    m_reformatTimer->setInterval(50);  // 50ms延迟
+    m_reformatTimer->setInterval(50);
     connect(m_reformatTimer, &QTimer::timeout, this, &CharTableWidget::reformatText);
     
-    // 创建光标位置信号节流定时器
     m_cursorPosTimer = new QTimer(this);
     m_cursorPosTimer->setSingleShot(true);
-    m_cursorPosTimer->setInterval(100);  // 100ms节流
+    m_cursorPosTimer->setInterval(100);
     connect(m_cursorPosTimer, &QTimer::timeout, this, &CharTableWidget::emitCursorPosition);
     
-    // 创建高亮清除定时器
     m_highlightTimer = new QTimer(this);
     m_highlightTimer->setSingleShot(true);
-    m_highlightTimer->setInterval(3000);  // 3秒后清除高亮
+    m_highlightTimer->setInterval(3000);
     connect(m_highlightTimer, &QTimer::timeout, this, &CharTableWidget::clearHighlight);
     
-    // 使用默认绘制，不自定义 paintEvent 以利用 Qt 的优化
+    updateStyle();
     
-    // 设置样式
-    setStyleSheet(R"(
-        QPlainTextEdit {
-            background-color: white;
-            border: 1px solid #ccc;
-            selection-background-color: #3399ff;
-            padding: 0px;
-        }
-    )");
-    
-    // 连接 Qt 自带的光标位置变化信号（使用节流）
     connect(this, &QPlainTextEdit::cursorPositionChanged, [this]() {
-        m_cursorPosTimer->start();  // 重置定时器，实现节流
+        m_cursorPosTimer->start();
     });
     
-    // 连接文本变化信号，使用延迟格式化
     connect(this, &QPlainTextEdit::textChanged, [this]() {
-        m_textDirty = true;  // 标记文本缓存失效
-        m_reformatTimer->start();  // 重置定时器，实现防抖
-        emit textModified();  // 发出文本修改信号
+        m_textDirty = true;
+        m_reformatTimer->start();
+        emit textModified();
     });
+}
+
+void CharTableWidget::setTextColor(const QColor& color)
+{
+    if (m_textColor != color) {
+        m_textColor = color;
+        updateStyle();
+    }
+}
+
+void CharTableWidget::updateStyle()
+{
+    setStyleSheet(QString(R"(
+        QPlainTextEdit {
+            background-color: rgba(255, 255, 255, 0.5);
+            border: 1px solid rgba(200, 200, 200, 0.5);
+            border-radius: 6px;
+            selection-background-color: rgba(33, 150, 243, 0.3);
+            selection-color: %1;
+            padding: 4px;
+            color: %1;
+        }
+        QPlainTextEdit:focus {
+            border: 1px solid rgba(33, 150, 243, 0.6);
+        }
+    )").arg(m_textColor.name()));
+    
+    QPalette pal = palette();
+    pal.setColor(QPalette::Text, m_textColor);
+    setPalette(pal);
 }
 
 void CharTableWidget::getCursorPosition(int& line, int& column) const
