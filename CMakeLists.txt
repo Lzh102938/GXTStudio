@@ -81,6 +81,13 @@ set(PROJECT_SOURCES
     GXTStudio.ui
     GXTStudio.h
     GXTStudio.cpp
+    IconCache.h
+    TextColorCalculator.h
+    FilterProxyModel.h
+    GXTStyleManager.h
+    GXTStyleManager.cpp
+    GXTVersionUtils.h
+    GXTVersionUtils.cpp
     FontAwesome.h
     VersionInfo.h
     VersionInfo.cpp

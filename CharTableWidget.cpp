@@ -37,7 +37,7 @@ CharTableWidget::CharTableWidget(QWidget* parent)
     
     m_reformatTimer = new QTimer(this);
     m_reformatTimer->setSingleShot(true);
-    m_reformatTimer->setInterval(50);
+    m_reformatTimer->setInterval(100);
     connect(m_reformatTimer, &QTimer::timeout, this, &CharTableWidget::reformatText);
     
     m_cursorPosTimer = new QTimer(this);
@@ -358,7 +358,6 @@ void CharTableWidget::reformatText()
         return;
     }
     
-    // 一次性遍历：过滤ASCII、去重、收集有效字符
     int textLen = text.length();
     int processLimit = qMin(textLen, MAX_CHARS);
     
@@ -398,33 +397,25 @@ void CharTableWidget::reformatText()
         return;
     }
     
-    // 记录排序前的字符顺序
-    QVector<uint16_t> oldChars;
-    QString oldText = m_cachedText.isEmpty() ? toPlainText() : m_cachedText;
-    for (QChar ch : oldText) {
-        if (ch == '\n' || ch.unicode() == 0 || ch.unicode() < 128) continue;
-        oldChars.append(ch.unicode());
-    }
-    
-    // 排序字符
     std::sort(chars.begin(), chars.end());
     
-    // 找出需要高亮的字符（新字符或位置变更的字符）
     m_charsToHighlight.clear();
     
-    // 检测新字符（在排序后的chars中但不在oldChars中）
-    QSet<uint16_t> oldCharSet;
-    for (uint16_t ch : oldChars) {
-        oldCharSet.insert(ch);
-    }
-    
-    for (uint16_t ch : chars) {
-        if (!oldCharSet.contains(ch)) {
-            m_charsToHighlight.insert(QChar(ch));
+    if (!m_cachedText.isEmpty()) {
+        QSet<uint16_t> oldCharSet;
+        QString oldText = m_cachedText;
+        for (const QChar& ch : oldText) {
+            if (ch == '\n' || ch.unicode() == 0 || ch.unicode() < 128) continue;
+            oldCharSet.insert(ch.unicode());
+        }
+        
+        for (uint16_t ch : chars) {
+            if (!oldCharSet.contains(ch)) {
+                m_charsToHighlight.insert(QChar(ch));
+            }
         }
     }
     
-    // 构建格式化文本
     int lineCount = (len - 1) / COLS_PER_LINE + 1;
     QString formatted;
     formatted.reserve(len + lineCount - 1);
@@ -436,32 +427,31 @@ void CharTableWidget::reformatText()
         }
     }
     
-    if (formatted != oldText) {
-        // 使用 beginEditBlock/endEditBlock 合并操作，使撤销更自然
+    if (formatted != text) {
         QTextCursor cursor = textCursor();
-        cursor.beginEditBlock();
+        int savedPos = cursor.position();
         
+        cursor.beginEditBlock();
         cursor.select(QTextCursor::Document);
         cursor.insertText(formatted);
-        
         cursor.endEditBlock();
         
         m_cachedText = formatted;
         m_textDirty = false;
         
-        cursor.setPosition(qMin(cursor.position(), formatted.length()));
+        cursor.setPosition(qMin(savedPos, formatted.length()));
         setTextCursor(cursor);
         
-        // 应用高亮
         if (!m_charsToHighlight.isEmpty()) {
             applyHighlight();
             m_highlightTimer->start();
         }
+    } else {
+        m_cachedText = formatted;
+        m_textDirty = false;
     }
     
     m_existingChars = std::move(seen);
-    m_cachedText = formatted;
-    m_textDirty = false;
     updateHint();
     
     m_formatting = false;
@@ -472,29 +462,32 @@ void CharTableWidget::applyHighlight()
     if (m_charsToHighlight.isEmpty()) return;
     
     QTextCursor cursor = textCursor();
+    int savedPos = cursor.position();
+    
+    cursor.beginEditBlock();
     cursor.select(QTextCursor::Document);
     
     QTextCharFormat defaultFormat;
-    cursor.setCharFormat(defaultFormat);
-    cursor.clearSelection();
-    
     QTextCharFormat highlightFormat;
     highlightFormat.setBackground(QColor("#3399ff"));
     highlightFormat.setForeground(Qt::white);
     
     QString text = toPlainText();
-    for (int i = 0; i < text.length(); ++i) {
+    int textLen = text.length();
+    
+    for (int i = 0; i < textLen; ++i) {
         QChar ch = text[i];
         if (ch == '\n') continue;
         if (m_charsToHighlight.contains(ch)) {
             cursor.setPosition(i);
             cursor.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, 1);
             cursor.setCharFormat(highlightFormat);
-            cursor.clearSelection();
         }
     }
     
-    cursor.movePosition(QTextCursor::End);
+    cursor.endEditBlock();
+    
+    cursor.setPosition(qMin(savedPos, textLen));
     setTextCursor(cursor);
 }
 
@@ -503,13 +496,17 @@ void CharTableWidget::clearHighlight()
     m_charsToHighlight.clear();
     
     QTextCursor cursor = textCursor();
+    int savedPos = cursor.position();
+    
+    cursor.beginEditBlock();
     cursor.select(QTextCursor::Document);
     
     QTextCharFormat defaultFormat;
     cursor.setCharFormat(defaultFormat);
-    cursor.clearSelection();
     
-    cursor.movePosition(QTextCursor::End);
+    cursor.endEditBlock();
+    
+    cursor.setPosition(qMin(savedPos, toPlainText().length()));
     setTextCursor(cursor);
 }
 
@@ -517,7 +514,6 @@ void CharTableWidget::setData(const CharTableData& data)
 {
     m_data = data;
     
-    // 清除撤销栈（加载新文件）
     clearUndoStack();
     
     if (m_data.rows <= 0 || m_data.cols <= 0 || m_data.cells.isEmpty()) {
@@ -531,7 +527,6 @@ void CharTableWidget::setData(const CharTableData& data)
     const int charCount = m_data.cells.size();
     int validCount = 0;
     
-    // 第一遍：统计有效字符数量
     const uint16_t* cells = m_data.cells.constData();
     for (int i = 0; i < charCount; ++i) {
         uint16_t ch = cells[i];
@@ -548,7 +543,6 @@ void CharTableWidget::setData(const CharTableData& data)
         return;
     }
     
-    // 第二遍：收集有效字符（保持原始顺序，不排序）
     QVector<uint16_t> characters;
     characters.reserve(validCount);
     for (int i = 0; i < charCount; ++i) {
@@ -558,11 +552,9 @@ void CharTableWidget::setData(const CharTableData& data)
         }
     }
     
-    // 预计算文本长度
     int lineCount = (validCount - 1) / COLS_PER_LINE + 1;
     int totalLength = validCount + (lineCount - 1);
     
-    // 构建文本
     QString text;
     text.reserve(totalLength);
     
@@ -573,12 +565,10 @@ void CharTableWidget::setData(const CharTableData& data)
         }
     }
     
-    // 直接设置文本
     setPlainText(text);
     m_cachedText = text;
     m_textDirty = false;
     
-    // 重建字符集合
     m_existingChars.clear();
     m_existingChars.reserve(validCount);
     for (int i = 0; i < validCount; ++i) {

@@ -96,14 +96,10 @@ void startFontLoading()
 
 int main(int argc, char *argv[])
 {
-    // 强制使用 FreeType 字体引擎
     qputenv("QT_QPA_PLATFORM", QByteArray("windows:fontengine=freetype"));
     
-    // 高DPI显示设置
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
-    QCoreApplication::setAttribute(Qt::AA_NativeWindows);
-    QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL);
+    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps, false);
     
     QApplication app(argc, argv);
     
@@ -138,48 +134,30 @@ int main(int argc, char *argv[])
     appFont.setFixedPitch(false);
     app.setFont(appFont);
     
-    // 极致图形渲染优化 - 修复黑色块闪烁
     QSurfaceFormat format;
-    format.setDepthBufferSize(24); // 恢复深度缓冲防止闪烁
-    format.setStencilBufferSize(8);  // 恢复模板缓冲
-    format.setSamples(4); // 启用抗锯齿减少闪烁
-    format.setSwapInterval(1); // 启用垂直同步防止撕裂
+    format.setDepthBufferSize(16);
+    format.setStencilBufferSize(0);
+    format.setSamples(0);
+    format.setSwapInterval(1);
     format.setRedBufferSize(8);
     format.setGreenBufferSize(8);
     format.setBlueBufferSize(8);
-    format.setAlphaBufferSize(8); // 启用Alpha通道
-    format.setProfile(QSurfaceFormat::OpenGLContextProfile::CompatibilityProfile); // 兼容性配置
+    format.setAlphaBufferSize(0);
+    format.setProfile(QSurfaceFormat::OpenGLContextProfile::CoreProfile);
     QSurfaceFormat::setDefaultFormat(format);
     
-    // 优化Qt引擎设置 - 修复黑色块闪烁
     qputenv("QT_AUTO_SCREEN_SCALE_FACTOR", QByteArray("1"));
-    qputenv("QT_USE_NATIVE_WINDOWS", QByteArray("1"));
-    qputenv("QT_DEVICE_PIXEL_RATIO", QByteArray("auto"));
-    qputenv("QT_HIGHDPI_SCALE_FACTOR_ROUNDING_POLICY", QByteArray("PassThrough"));
-    qputenv("QT_OPENGL", QByteArray("desktop")); // 强制桌面OpenGL
-    qputenv("QT_LOGGING_RULES", QByteArray("qt.qpa.*=false")); // 禁用日志
-    qputenv("QT_DEBUG_PLUGINS", QByteArray("0")); // 禁用插件调试
-    // 移除可能导致闪烁的设置
-    // qputenv("QT_QUICK_BACKEND", QByteArray("software"));
-    // qputenv("QT_WIDGETS_RHI", QByteArray("1"));
-    // qputenv("QT_ENABLE_HIGHDPI_SCALING", QByteArray("0"));
+    qputenv("QT_OPENGL", QByteArray("desktop"));
+    qputenv("QT_LOGGING_RULES", QByteArray("qt.qpa.*=false"));
     
-    // 选择性禁用UI动画 - 保留必要的动画减少闪烁
     QApplication::setEffectEnabled(Qt::UI_AnimateMenu, false);
     QApplication::setEffectEnabled(Qt::UI_AnimateCombo, false);
     QApplication::setEffectEnabled(Qt::UI_FadeMenu, false);
-    // 保留渐变动画防止闪烁
-    // QApplication::setEffectEnabled(Qt::UI_AnimateTooltip, false);
-    // QApplication::setEffectEnabled(Qt::UI_FadeTooltip, false);
-    // QApplication::setEffectEnabled(Qt::UI_AnimateToolBox, false);
     
-    // 极致性能设置
-    QApplication::setDesktopSettingsAware(false); // 忽略桌面设置提升一致性
-    QApplication::setWheelScrollLines(3); // 减少滚轮滚动行数
+    QApplication::setDesktopSettingsAware(false);
+    QApplication::setWheelScrollLines(3);
     
-    // 极致内存优化
-    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
-    app.setQuitOnLastWindowClosed(true); // 最后一窗口关闭时退出
+    app.setQuitOnLastWindowClosed(true);
     
     GXTStudio window;
     window.show();

@@ -600,7 +600,7 @@ void AboutDialog::createTeamSection()
     devLayout->addStretch();
     teamLayout->addLayout(devLayout);
 
-    QLabel* teamDescLabel = new QLabel("GXTStudio Team", teamFrame);
+    QLabel* teamDescLabel = new QLabel("GTAmod中文组", teamFrame);
     teamDescLabel->setStyleSheet(s_descStyle);
     teamLayout->addWidget(teamDescLabel);
 

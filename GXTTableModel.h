@@ -25,21 +25,17 @@ public:
         return inst;
     }
     
-    // SATKEY/IVTKEY 映射缓存
     QHash<uint32_t, QString> satKeyMap;
     QHash<QString, uint32_t> satKeyReverseMap;
     QHash<uint32_t, QString> ivtKeyMap;
     QHash<QString, uint32_t> ivtKeyReverseMap;
     
-    // 映射是否已加载
     bool satKeyLoaded = false;
     bool ivtKeyLoaded = false;
     
-    // 线程安全锁
     std::mutex satKeyMutex;
     std::mutex ivtKeyMutex;
     
-    // 清除所有缓存
     void clear() {
         std::lock_guard<std::mutex> lock1(satKeyMutex);
         std::lock_guard<std::mutex> lock2(ivtKeyMutex);
@@ -51,7 +47,24 @@ public:
         ivtKeyLoaded = false;
     }
     
-    // 获取缓存统计
+    void squeeze() {
+        std::lock_guard<std::mutex> lock1(satKeyMutex);
+        std::lock_guard<std::mutex> lock2(ivtKeyMutex);
+        satKeyMap.squeeze();
+        satKeyReverseMap.squeeze();
+        ivtKeyMap.squeeze();
+        ivtKeyReverseMap.squeeze();
+    }
+    
+    size_t memoryUsage() const {
+        size_t total = 0;
+        total += satKeyMap.size() * (sizeof(uint32_t) + sizeof(QString) + 50);
+        total += satKeyReverseMap.size() * (sizeof(QString) + sizeof(uint32_t) + 50);
+        total += ivtKeyMap.size() * (sizeof(uint32_t) + sizeof(QString) + 50);
+        total += ivtKeyReverseMap.size() * (sizeof(QString) + sizeof(uint32_t) + 50);
+        return total;
+    }
+    
     size_t satKeyCount() const { return satKeyMap.size(); }
     size_t ivtKeyCount() const { return ivtKeyMap.size(); }
     

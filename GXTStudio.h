@@ -8,6 +8,8 @@
 #include "ItemPool.h"
 #include "ReplaceWorker.h"
 #include "UndoSystem.h"
+#include "IconCache.h"
+#include "TextColorCalculator.h"
 
 #include <QFont>
 #include <QFontDatabase>
@@ -22,180 +24,6 @@
 #include <QIcon>
 #include <QHash>
 #include <functional>
-#include <QtCore/QCache>
-
-namespace TextColor {
-    constexpr const char* DEFAULT_COLOR = "#495057";
-    constexpr const char* DARK_TEXT_COLOR = "#495057";
-    constexpr const char* LIGHT_TEXT_COLOR = "#ffffff";
-}
-
-class IconCache {
-public:
-    static IconCache& instance() {
-        static IconCache inst;
-        return inst;
-    }
-    
-    QIcon getIcon(const QString& relativePath) {
-        QString fullPath = QCoreApplication::applicationDirPath() + "/" + relativePath;
-        if (!m_cache.contains(fullPath)) {
-            if (QFile::exists(fullPath)) {
-                m_cache[fullPath] = QIcon(fullPath);
-            } else {
-                m_cache[fullPath] = QIcon();
-            }
-        }
-        return m_cache[fullPath];
-    }
-    
-    QIcon getIconFullPath(const QString& fullPath) {
-        if (!m_cache.contains(fullPath)) {
-            if (QFile::exists(fullPath)) {
-                m_cache[fullPath] = QIcon(fullPath);
-            } else {
-                m_cache[fullPath] = QIcon();
-            }
-        }
-        return m_cache[fullPath];
-    }
-    
-    void clear() { m_cache.clear(); }
-    int size() const { return m_cache.size(); }
-    
-private:
-    IconCache() = default;
-    IconCache(const IconCache&) = delete;
-    IconCache& operator=(const IconCache&) = delete;
-    
-    QHash<QString, QIcon> m_cache;
-};
-
-class TextColorCalculator {
-public:
-    // 更新背景图片缓存（在背景图片变化时调用）
-    void updateBackground(const QPixmap& pixmap, Qt::AspectRatioMode aspectRatioMode, qreal opacity) {
-        m_backgroundImage = pixmap.toImage();
-        m_aspectRatioMode = aspectRatioMode;
-        m_opacity = opacity;
-        m_cachedTargetSize = QSize(); // 清除缓存的大小
-
-        // 清除所有颜色缓存
-        m_colorCache.clear();
-        m_gridCache.clear();
-    }
-
-    // 启用/禁用背景
-    void setEnabled(bool enabled) { m_enabled = enabled; }
-    bool isEnabled() const { return m_enabled; }
-
-    QColor calculateColor(const QPoint& pos, const QRect& targetRect) {
-        if (!m_enabled || m_backgroundImage.isNull()) {
-            return m_defaultColor;
-        }
-
-        qint64 cacheKey = (static_cast<qint64>(pos.x()) << 32) | static_cast<qint64>(pos.y());
-        if (auto* cachedColor = m_colorCache.object(cacheKey)) {
-            return *cachedColor;
-        }
-
-        int gridX = pos.x() / GRID_SIZE;
-        int gridY = pos.y() / GRID_SIZE;
-        qint64 gridKey = (static_cast<qint64>(gridX) << 32) | static_cast<qint64>(gridY);
-
-        QColor* gridColor = m_gridCache.object(gridKey);
-        if (gridColor && targetRect.size() == m_cachedTargetSize) {
-            QColor* cachedColor = new QColor(*gridColor);
-            m_colorCache.insert(cacheKey, cachedColor);
-            return *gridColor;
-        }
-
-        QColor result = calculateColorInternal(pos, targetRect);
-
-        QColor* cachedColor = new QColor(result);
-        m_colorCache.insert(cacheKey, cachedColor);
-
-        QColor* newGridColor = new QColor(result);
-        m_gridCache.insert(gridKey, newGridColor);
-
-        return result;
-    }
-
-    QColor calculateColorForRegion(const QRect& region, const QRect& targetRect) {
-        if (!m_enabled || m_backgroundImage.isNull()) {
-            return m_defaultColor;
-        }
-        return calculateColor(region.center(), targetRect);
-    }
-
-    void clearCache() {
-        m_colorCache.clear();
-        m_gridCache.clear();
-    }
-
-    int getColorCacheSize() const { return m_colorCache.size(); }
-    int getGridCacheSize() const { return m_gridCache.size(); }
-
-    void setDefaultColor(const QColor& color) { m_defaultColor = color; }
-    void setDarkTextColor(const QColor& color) { m_darkTextColor = color; }
-    void setLightTextColor(const QColor& color) { m_lightTextColor = color; }
-
-private:
-    QColor calculateColorInternal(const QPoint& pos, const QRect& targetRect) {
-        if (targetRect.size() != m_cachedTargetSize) {
-            m_cachedTargetSize = targetRect.size();
-            m_cachedScaledImage = m_backgroundImage.scaled(
-                targetRect.size(),
-                m_aspectRatioMode,
-                Qt::SmoothTransformation
-            );
-            m_cachedImgX = targetRect.x() + (targetRect.width() - m_cachedScaledImage.width()) / 2;
-            m_cachedImgY = targetRect.y() + (targetRect.height() - m_cachedScaledImage.height()) / 2;
-        }
-
-        int pixelX = pos.x() - m_cachedImgX;
-        int pixelY = pos.y() - m_cachedImgY;
-
-        if (pixelX < 0 || pixelX >= m_cachedScaledImage.width() ||
-            pixelY < 0 || pixelY >= m_cachedScaledImage.height()) {
-            return m_defaultColor;
-        }
-
-        QColor bgColor = m_cachedScaledImage.pixelColor(pixelX, pixelY);
-
-        int luminanceInt = (76 * bgColor.red() + 150 * bgColor.green() + 29 * bgColor.blue()) >> 8;
-
-        int alpha = bgColor.alpha();
-        if (alpha == 255) {
-            return (luminanceInt > 127) ? m_darkTextColor : m_lightTextColor;
-        } else if (alpha == 0) {
-            return (242 > 127) ? m_darkTextColor : m_lightTextColor;
-        } else {
-            int opacityInt = static_cast<int>(m_opacity * 255);
-            int mixedLuminance = (luminanceInt * alpha * opacityInt + 242 * (255 - alpha * opacityInt)) >> 16;
-            return (mixedLuminance > 127) ? m_darkTextColor : m_lightTextColor;
-        }
-    }
-
-    static const int GRID_SIZE = 32;
-
-    QImage m_backgroundImage;
-    Qt::AspectRatioMode m_aspectRatioMode = Qt::KeepAspectRatioByExpanding;
-    qreal m_opacity = 1.0;
-    bool m_enabled = false;
-
-    QImage m_cachedScaledImage;
-    QSize m_cachedTargetSize;
-    int m_cachedImgX = 0;
-    int m_cachedImgY = 0;
-
-    mutable QCache<qint64, QColor> m_colorCache;
-    mutable QCache<qint64, QColor> m_gridCache;
-
-    QColor m_defaultColor = QColor(TextColor::DEFAULT_COLOR);
-    QColor m_darkTextColor = QColor(TextColor::DARK_TEXT_COLOR);
-    QColor m_lightTextColor = QColor(TextColor::LIGHT_TEXT_COLOR);
-};
 
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QMenuBar>
@@ -253,8 +81,8 @@ private:
 #include <functional>
 #include <map>
 #include "ReplaceDialog.h"
+#include "FilterProxyModel.h"
 
-// 前向声明
 class GXTTableModel;
 class OptimizedItemDelegate;
 class GXTStudio;
@@ -264,53 +92,7 @@ class TextRenderWidget;
 class CharTableWidget;
 class BackgroundConfigDialog;
 
-// TranslateResult结构体前向声明
 struct TranslateResult;
-
-// 高性能过滤代理模型 - 基于行号集合进行快速过滤
-class FilterProxyModel : public QSortFilterProxyModel {
-public:
-    explicit FilterProxyModel(QObject* parent = nullptr) 
-        : QSortFilterProxyModel(parent), m_filterEnabled(false) {
-        setDynamicSortFilter(false);
-    }
-    
-    void setFilterRows(const QSet<int>& rows) {
-        m_filterEnabled = !rows.isEmpty();
-        m_filteredRows = rows;
-        invalidateFilter();
-    }
-    
-    void clearFilter() {
-        m_filterEnabled = false;
-        m_filteredRows.clear();
-        invalidateFilter();
-    }
-    
-    bool isFilterEnabled() const { return m_filterEnabled; }
-    
-    // 映射源模型行号到代理模型行号
-    int mapFromSourceRow(int sourceRow) const {
-        if (!m_filterEnabled) return sourceRow;
-        return mapFromSource(sourceModel()->index(sourceRow, 0)).row();
-    }
-    
-    // 映射代理模型行号到源模型行号
-    int mapToSourceRow(int proxyRow) const {
-        return mapToSource(index(proxyRow, 0)).row();
-    }
-    
-protected:
-    bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override {
-        Q_UNUSED(sourceParent)
-        if (!m_filterEnabled) return true;
-        return m_filteredRows.contains(sourceRow);
-    }
-    
-private:
-    bool m_filterEnabled;
-    QSet<int> m_filteredRows;
-};
 
 #include "ui_GXTStudio.h"
 #include "GXTParser.h"
@@ -803,16 +585,12 @@ private slots:
     void onCancelTranslationRequested(MultiThreadProgressDialog::CancelOption option);
     void onTranslationCancelled();
     void applyPartialTranslationResults(const QList<TranslateResult>& results);
-    void onTranslationFinished(const QList<TranslateResult>& results);
 
     // 延迟调度表格列表更新（防抖合并多次更新请求）
     void scheduleUpdateTableList(int delayMs = 80);
 
 private:
     QPair<int, int> applyTranslationResultsToFile(const QList<TranslateResult>& results);
-    void onTranslationRequestProgress(int completed, int total, const QString& message);
-    void onTranslationBatchProgress(int completed, int total, const QString& message);
-    void onTranslationTotalProgress(int completed, int total, const QString& message);
     
     // 工具方法
     QString calculateRemainingTime(int completed, int total);
@@ -990,18 +768,17 @@ private:
     std::map<GXTVersion, SaveStrategy> m_saveStrategies;
     std::vector<SaveStrategy> m_allSaveStrategies;
     
-    // 搜索状态
     struct SearchState {
         QString searchText;
         int currentTableIndex;
         int currentEntryIndex;
-        int currentMatchPosition; // 当前匹配在该条目中的位置
-        std::vector<std::tuple<int, int, int>> allMatches; // (tableIndex, entryIndex, position) 三元组
+        int currentMatchPosition;
+        std::vector<std::tuple<int, int, int>> allMatches;
         bool isValid;
-        bool caseSensitive;  // 大小写敏感
-        bool useRegex;       // 使用正则表达式
-        bool loopSearch;     // 是否循环搜索
-        bool filterMode;     // 过滤模式 - 只显示匹配的行
+        bool caseSensitive;
+        bool useRegex;
+        bool loopSearch;
+        bool filterMode;
 
         SearchState() : currentTableIndex(-1), currentEntryIndex(-1), currentMatchPosition(-1),
                         isValid(false), caseSensitive(false), useRegex(false), loopSearch(false), filterMode(false) {}
@@ -1011,16 +788,20 @@ private:
             currentEntryIndex = -1;
             currentMatchPosition = -1;
             allMatches.clear();
+            allMatches.shrink_to_fit();
             isValid = false;
             caseSensitive = false;
             useRegex = false;
             loopSearch = false;
             filterMode = false;
         }
+        
+        void compact() {
+            allMatches.shrink_to_fit();
+        }
     };
     SearchState m_searchState;
 
-    // 【性能优化】搜索结果缓存结构
     struct SearchResultCache {
         QString searchText;
         bool caseSensitive;
@@ -1039,36 +820,22 @@ private:
             return !search.isEmpty() && searchText == search &&
                    caseSensitive == cs && useRegex == regex && tabIndex == tabIdx;
         }
+        
+        void clear() {
+            searchText.clear();
+            cacheKey.clear();
+            matches.clear();
+            matches.shrink_to_fit();
+            caseSensitive = false;
+            useRegex = false;
+            tabIndex = -1;
+        }
     };
 
-    // 【性能优化】搜索缓存（最近20次搜索结果）
     SearchResultCache* m_searchResultCache;
     int m_cacheIndex;
-    static const int MAX_SEARCH_CACHE = 20;
+    static const int MAX_SEARCH_CACHE = 5;
 
-    // 【性能优化】样式字符串缓存系统
-    struct CachedStyles {
-        QString tabWidgetStyle;
-        QString toolBarStyle;
-        QString toolButtonStyle;
-        QString splitterStyle;
-        QString tableListStyle;
-        QString tableViewStyle;
-        QString searchEditStyleTemplate;
-        QString navButtonStyleTemplate;
-        QString labelStyleTemplate;
-        QString addEntryButtonStyle;
-        QString iconButtonStyleTemplate;
-        bool initialized = false;
-    } m_cachedStyles;
-    
-    void initializeCachedStyles();
-    QString getSearchEditStyle(const QColor& textColor);
-    QString getNavButtonStyle(const QColor& textColor);
-    QString getLabelStyle(const QColor& textColor);
-    QString getIconButtonStyle(const QColor& textColor);
-
-    // 控制搜索时是否跳转（用于替换操作重建搜索结果时保持焦点）
     bool m_suppressSearchJump;
     
     // 初始化方法
@@ -1088,14 +855,12 @@ private:
     // 工具方法
     void addFileTab(const QString& filePath);
     void removeFileTab(int index);
-    void cleanupDelegatesCache(); // 清理委托缓存
-    void cleanupListCache(FileTab* tab); // 清理列表缓存
-    void clearSearchCache(); // 清除搜索缓存
-    QString getVersionString(GXTVersion version) const;
-    QIcon getVersionIcon(GXTVersion version) const;
+    void cleanupDelegatesCache();
+    void cleanupListCache(FileTab* tab);
+    void clearSearchCache();
+    void performMemoryCleanup();
     QIcon getFileTypeIcon(const FileTab& tab) const;
-    std::string getVersionName(GXTVersion version);
-    GXTVersion selectVersionDialog(); // 版本选择对话框
+    GXTVersion selectVersionDialog();
     int calculateKeyColumnWidth(); // 计算键列宽度
     
     // 新建文件相关
@@ -1123,17 +888,15 @@ private:
     bool performVersionSpecificSave(FileTab* tab, const QString& filePath);
     bool handleSaveError(const QString& operation, const std::exception& e, const QString& filePath);
     void logSaveOperation(const QString& operation, GXTVersion version, const QString& filePath, bool success);
+    bool saveHashBasedFile(FileTab* tab, const QString& filePath, bool isWHM);
     bool saveWHMDirectly(FileTab* tab, const QString& filePath);
-    bool saveDATDirectly(FileTab* tab, const QString& filePath);  // DAT文件保存方法（完全独立于WHM）
+    bool saveDATDirectly(FileTab* tab, const QString& filePath);
     
-    // 版本兼容性检查
     std::vector<GXTVersion> getCompatibleVersions(GXTVersion sourceVersion);
     bool canConvertBetweenVersions(GXTVersion from, GXTVersion to);
-    std::string getVersionCompatibilityInfo(GXTVersion version);
     
 
     
-    // 表格优化
     void setupTableOptimizations(QTableView* table);
     void precomputeTableMetrics();
     void setupResizeOptimizations();
@@ -1144,7 +907,7 @@ private:
     
     // 搜索相关辅助方法
     void performSearch(const QString& searchText);
-    void jumpToMatch(int matchIndex);
+    bool jumpToMatch(int matchIndex);
     void highlightMatch(int entryIndex);
     void clearSearchHighlight();
     void applyFilterMode();

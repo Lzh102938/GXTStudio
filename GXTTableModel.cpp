@@ -25,12 +25,12 @@ GXTTableModel::GXTTableModel(QObject* parent)
 
 void GXTTableModel::setTab(FileTab* tab)
 {
-    beginResetModel();
     m_tab = tab;
     m_cachedRowCount = -1;
     m_displayCacheValid = false;
     m_currentTableIndex = tab ? tab->currentTableIndex : -1;
     m_cachedVersion = tab ? static_cast<int>(tab->version) : -1;
+    beginResetModel();
     endResetModel();
 }
 
@@ -201,8 +201,7 @@ void GXTTableModel::resetModel()
 {
     if (!m_tab) return;
 
-    // 总是执行重置以确保表格切换时无内容残留
-    beginResetModel();
+    // 先更新状态，再调用 beginResetModel
     m_currentTableIndex = m_tab->currentTableIndex;
     if (m_tab->isWHM) {
         m_cachedRowCount = static_cast<int>(m_tab->whmEntries.size());
@@ -216,7 +215,9 @@ void GXTTableModel::resetModel()
     } else {
         m_cachedRowCount = 0;
     }
-    m_displayCacheValid = false;  // 【性能优化】清除显示缓存
+    m_displayCacheValid = false;
+    
+    beginResetModel();
     endResetModel();
 }
 
@@ -230,10 +231,9 @@ void GXTTableModel::clearAllCache()
 
 void GXTTableModel::forceDataReset()
 {
-    beginResetModel();
     // 清除所有缓存
     m_cachedRowCount = -1;
-    m_displayCacheValid = false;  // 【性能优化】清除显示缓存
+    m_displayCacheValid = false;
     
     // 从tab重新获取currentTableIndex，确保状态同步
     if (m_tab) {
@@ -258,6 +258,8 @@ void GXTTableModel::forceDataReset()
         m_currentTableIndex = -1;
         m_cachedVersion = -1;
     }
+    
+    beginResetModel();
     m_displayCache.clear();
     m_displayCacheValid = false;
     endResetModel();
@@ -529,11 +531,23 @@ QVariant GXTTableModel::headerData(int section, Qt::Orientation orientation, int
         return QString::number(section + 1);
     }
     
+    if (section < 0 || section >= ColumnCount) {
+        return QVariant();
+    }
+    
     static const QStringList whmHeaders = {"Hash", "值"};
     static const QStringList datHeaders = {"Hash", "值"};
     static const QStringList gxtHeaders = {"键", "值"};
-    const QStringList& headers = (m_tab && (m_tab->isWHM || m_tab->isDAT)) ? (m_tab->isDAT ? datHeaders : whmHeaders) : gxtHeaders;
-    return (section < ColumnCount) ? headers[section] : QVariant();
+    
+    if (!m_tab) {
+        return gxtHeaders.value(section, QString());
+    }
+    
+    const QStringList& headers = (m_tab->isWHM || m_tab->isDAT) 
+        ? (m_tab->isDAT ? datHeaders : whmHeaders) 
+        : gxtHeaders;
+    
+    return headers.value(section, QString());
 }
 
 Qt::ItemFlags GXTTableModel::flags(const QModelIndex& index) const

@@ -18,17 +18,12 @@ bool CharTableParser::loadGtaVc(const QString& datPath, CharTableData& out)
         return false;
     }
 
-    const qint64 expectSize = 0x10000 * 2; // 65536 entries, each 2 bytes
+    const qint64 expectSize = 0x10000 * 2;
     if (dat.size() != expectSize) {
-        // GTA_VC 字符表必须是固定大小，直接返回 false 让系统尝试其他格式
         dat.close();
         return false;
     }
 
-    QByteArray datBytes = dat.readAll();
-    dat.close();
-
-    // Prepare output grid: 64x64
     const int ROWS = 64;
     const int COLS = 64;
     out.type = CharTableData::GTA_VC;
@@ -37,13 +32,16 @@ bool CharTableParser::loadGtaVc(const QString& datPath, CharTableData& out)
     out.cells.fill(0, ROWS * COLS);
     out.sourceFile = datPath;
 
-    // Interpret datBytes as mapping table: index = unicode codepoint (0..0xFFFF), value = (row, col)
-    int entries = qMin<int>(0x10000, datBytes.size() / 2);
+    QByteArray datBytes = dat.readAll();
+    dat.close();
+
+    const char* data = datBytes.constData();
+    int entries = 0x10000;
+    
     for (int code = 0; code < entries; ++code) {
         int pos = code * 2;
-        quint8 row = static_cast<quint8>(datBytes[pos]);
-        quint8 col = static_cast<quint8>(datBytes[pos + 1]);
-        // default unused value in generator is (63,63)
+        quint8 row = static_cast<quint8>(data[pos]);
+        quint8 col = static_cast<quint8>(data[pos + 1]);
         if (row == 63 && col == 63) continue;
         if (row < ROWS && col < COLS) {
             out.cells[row * COLS + col] = static_cast<uint16_t>(code);
@@ -55,7 +53,6 @@ bool CharTableParser::loadGtaVc(const QString& datPath, CharTableData& out)
 
 bool CharTableParser::loadGtaIv(const QString& datPath, CharTableData& out)
 {
-    // IV字符表格式：前4字节为字符数量(uint32_t LE)，后面是UTF-32LE编码的字符序列（每个字符4字节）
     QFile f(datPath);
     if (!f.open(QIODevice::ReadOnly)) {
         qWarning() << "无法打开 IV dat 文件:" << datPath;
@@ -70,31 +67,28 @@ bool CharTableParser::loadGtaIv(const QString& datPath, CharTableData& out)
         return false;
     }
 
-    // 读取字符数量（前4字节，小端序）
-    quint32 charCount = static_cast<quint8>(bytes[0]) |
-                        (static_cast<quint8>(bytes[1]) << 8) |
-                        (static_cast<quint8>(bytes[2]) << 16) |
-                        (static_cast<quint8>(bytes[3]) << 24);
+    const char* data = bytes.constData();
+    int dataSize = bytes.size();
+    
+    quint32 charCount = static_cast<quint8>(data[0]) |
+                        (static_cast<quint8>(data[1]) << 8) |
+                        (static_cast<quint8>(data[2]) << 16) |
+                        (static_cast<quint8>(data[3]) << 24);
 
-    // 从偏移4开始读取UTF-32LE字符序列（每个字符4字节）
     int offset = 4;
 
-    // 读取UTF-32LE字符序列，过滤掉空白字符和换行符
     QVector<uint16_t> characters;
-    characters.reserve(charCount);
+    characters.reserve(qMin(charCount, static_cast<quint32>(4096)));
 
-    for (quint32 i = 0; i < charCount && (offset + 4) <= bytes.size(); ++i) {
-        // 小端序：低字节在前
-        quint32 codepoint = static_cast<quint8>(bytes[offset]) |
-                           (static_cast<quint8>(bytes[offset + 1]) << 8) |
-                           (static_cast<quint8>(bytes[offset + 2]) << 16) |
-                           (static_cast<quint8>(bytes[offset + 3]) << 24);
+    for (quint32 i = 0; i < charCount && (offset + 4) <= dataSize; ++i) {
+        quint32 codepoint = static_cast<quint8>(data[offset]) |
+                           (static_cast<quint8>(data[offset + 1]) << 8) |
+                           (static_cast<quint8>(data[offset + 2]) << 16) |
+                           (static_cast<quint8>(data[offset + 3]) << 24);
         offset += 4;
 
-        // 跳过空白字符
         if (codepoint != 0x0000 && codepoint != 0x0020 && codepoint != 0x0009 &&
             codepoint != 0x000A && codepoint != 0x000D) {
-            // 如果码点超过16位，截断或跳过
             if (codepoint <= 0xFFFF) {
                 characters.append(static_cast<uint16_t>(codepoint));
             }
@@ -106,22 +100,17 @@ bool CharTableParser::loadGtaIv(const QString& datPath, CharTableData& out)
         return false;
     }
 
-    // 固定使用64列布局
     int cols = 64;
-
-    // 计算需要的行数
     int count = characters.size();
     int rows = (count + cols - 1) / cols;
 
-    // 填充输出结构
     out.type = CharTableData::GTA_IV;
     out.rows = rows;
     out.cols = cols;
     out.cells.fill(0, rows * cols);
     out.sourceFile = datPath;
 
-    // 按行优先顺序填充网格
-    for (int idx = 0; idx < characters.size(); ++idx) {
+    for (int idx = 0; idx < count; ++idx) {
         out.cells[idx] = characters[idx];
     }
 

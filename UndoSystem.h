@@ -65,7 +65,7 @@ class UndoSystem : public QObject {
     Q_OBJECT
     
 public:
-    static const int MAX_UNDO_STACK_SIZE = 100;
+    static const int MAX_UNDO_STACK_SIZE = 30;
     
     explicit UndoSystem(QObject* parent = nullptr);
     

@@ -33,24 +33,17 @@ MultiThreadProgressDialog::MultiThreadProgressDialog(QWidget *parent)
     setupUI();
     setWindowTitle("翻译进度");
     setModal(true);
+    setMinimumSize(480, 320);
+    resize(520, 380);
 
-    // 设置合理的窗口尺寸
-    setMinimumSize(600, 450);
-    resize(750, 550);
-
-    // 设置窗口位置在屏幕中央
     QScreen* screen = QGuiApplication::primaryScreen();
     if (screen) {
         QRect screenGeometry = screen->geometry();
-        int x = (screenGeometry.width() - width()) / 2;
-        int y = (screenGeometry.height() - height()) / 2;
-        move(x, y);
+        move((screenGeometry.width() - width()) / 2, (screenGeometry.height() - height()) / 2);
     }
 
-    // 设置窗口标志
     setWindowFlags(Qt::Dialog | Qt::WindowCloseButtonHint);
 
-    // 启动统计更新定时器（每1秒更新一次）
     m_statsUpdateTimer = new QTimer(this);
     m_statsUpdateTimer->setInterval(1000);
     connect(m_statsUpdateTimer, &QTimer::timeout, this, &MultiThreadProgressDialog::updateStatistics);
@@ -59,168 +52,155 @@ MultiThreadProgressDialog::MultiThreadProgressDialog(QWidget *parent)
 
 MultiThreadProgressDialog::~MultiThreadProgressDialog()
 {
-    // 停止定时器
-    if (m_statsUpdateTimer) {
-        m_statsUpdateTimer->stop();
-    }
-
-    // Qt会自动清理子控件
+    if (m_statsUpdateTimer) m_statsUpdateTimer->stop();
 }
 
 void MultiThreadProgressDialog::setupUI()
 {
-    m_mainLayout = new QVBoxLayout(this);
-    m_mainLayout->setSpacing(8);
-    m_mainLayout->setContentsMargins(12, 12, 12, 12);
+    auto ss = [](const QString& s) { return s; };
 
-    // ========== 标题和总体进度区域 ==========
-    setupStatisticsPanel();
-    m_mainLayout->addWidget(m_statsWidget);
+    QString baseStyle = R"(
+        QDialog { background: #ffffff; }
+        QLabel { color: #374151; }
+        QProgressBar {
+            border: none;
+            border-radius: 6px;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 600;
+            background: #f3f4f6;
+            color: #6b7280;
+        }
+        QProgressBar::chunk {
+            border-radius: 6px;
+        }
+        QPushButton {
+            border: none;
+            border-radius: 8px;
+            padding: 10px 24px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        QPushButton:hover { opacity: 0.9; }
+        QPushButton:pressed { opacity: 0.8; }
+    )";
+
+    setStyleSheet(baseStyle);
+
+    m_mainLayout = new QVBoxLayout(this);
+    m_mainLayout->setSpacing(16);
+    m_mainLayout->setContentsMargins(28, 24, 28, 20);
+
+    // ========== 标题区域 ==========
+    QHBoxLayout* headerLayout = new QHBoxLayout();
+
+    m_overallProgressLabel = new QLabel("准备中...");
+    m_overallProgressLabel->setStyleSheet("font-size: 15px; font-weight: 700; color: #111827;");
+    headerLayout->addWidget(m_overallProgressLabel);
+    headerLayout->addStretch();
+
+    // 百分比大数字
+    m_concurrentLabel = new QLabel("0%");
+    m_concurrentLabel->setStyleSheet("font-size: 22px; font-weight: 800; color: #3b82f6; font-family: 'Segoe UI', Arial;");
+    headerLayout->addWidget(m_concurrentLabel);
+
+    m_mainLayout->addLayout(headerLayout);
+
+    // ========== 进度条 ==========
+    m_overallProgressBar = new QProgressBar(this);
+    m_overallProgressBar->setRange(0, 100);
+    m_overallProgressBar->setValue(0);
+    m_overallProgressBar->setMinimumHeight(8);
+    m_overallProgressBar->setTextVisible(false);
+    m_overallProgressBar->setStyleSheet(R"(
+        QProgressBar {
+            border: none;
+            border-radius: 4px;
+            background: #e5e7eb;
+        }
+        QProgressBar::chunk {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #3b82f6, stop:1 #8b5cf6);
+            border-radius: 4px;
+        }
+    )");
+    m_mainLayout->addWidget(m_overallProgressBar);
+
+    // ========== 统计信息（单行紧凑布局） ==========
+    QWidget* statsRow = new QWidget();
+    QHBoxLayout* statsLayout = new QHBoxLayout(statsRow);
+    statsLayout->setContentsMargins(0, 4, 0, 4);
+    statsLayout->setSpacing(20);
+
+    auto makeStatItem = [&](const QString& icon, const QString& label, const QString& value, const QString& color) -> std::pair<QLabel*, QLabel*> {
+        QWidget* item = new QWidget();
+        QVBoxLayout* itemLayout = new QVBoxLayout(item);
+        itemLayout->setSpacing(2);
+        itemLayout->setContentsMargins(0, 0, 0, 0);
+
+        QLabel* val = new QLabel(value);
+        val->setStyleSheet(QString("font-size: 18px; font-weight: 700; color: %1;").arg(color));
+        itemLayout->addWidget(val);
+
+        QLabel* lbl = new QLabel(label);
+        lbl->setStyleSheet("font-size: 11px; color: #9ca3af;");
+        itemLayout->addWidget(lbl);
+
+        statsLayout->addWidget(item);
+        return {val, lbl};
+    };
+
+    auto [s1, l1] = makeStatItem("✓", "成功", "0", "#22c55e");
+    auto [f1, f2] = makeStatItem("✗", "失败", "0", "#ef4444");
+    auto [a1, a2] = makeStatItem("⟳", "进行中", "0", "#f59e0b");
+    auto [sp1, sp2] = makeStatItem("⚡", "速度", "--", "#6366f1");
+
+    m_successLabel = s1;
+    m_failedLabel = f1;
+    m_activeLabel = a1;
+    m_speedLabel = sp1;
+
+    statsLayout->addStretch();
+
+    auto [e1, e2] = makeStatItem("◷", "剩余", "计算...", "#8b5cf6");
+    m_etaLabel = e1;
+
+    m_mainLayout->addWidget(statsRow);
 
     // ========== 分隔线 ==========
-    QFrame* line = new QFrame(this);
+    QFrame* line = new QFrame();
     line->setFrameShape(QFrame::HLine);
-    line->setFrameShadow(QFrame::Sunken);
-    line->setStyleSheet("background-color: #dcdcdc; max-height: 1px;");
+    line->setStyleSheet("background: #f3f4f6; max-height: 1px;");
     m_mainLayout->addWidget(line);
 
-    // ========== 请求列表区域（IDM风格）==========
+    // ========== 线程列表 ==========
     setupCompactThreadView();
-    m_mainLayout->addWidget(m_threadScrollArea);
+    m_mainLayout->addWidget(m_threadScrollArea, 1);
 
     // ========== 底部按钮 ==========
     QHBoxLayout* buttonLayout = new QHBoxLayout();
-    buttonLayout->setSpacing(8);
-    buttonLayout->setContentsMargins(0, 8, 0, 0);
+    buttonLayout->setContentsMargins(0, 12, 0, 0);
     buttonLayout->addStretch();
 
-    m_cancelButton = new QPushButton("取消翻译", this);
-    m_cancelButton->setMinimumWidth(90);
-    m_cancelButton->setMinimumHeight(30);
-    m_cancelButton->setStyleSheet(
-        "QPushButton {"
-        "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f5f5f5, stop:1 #e0e0e0);"
-        "color: #333;"
-        "border: 1px solid #aaa;"
-        "border-radius: 4px;"
-        "padding: 6px 16px;"
-        "font-weight: 500;"
-        "font-size: 12px;"
-        "}"
-        "QPushButton:hover {"
-        "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e8f0fe, stop:1 #d2e3fc);"
-        "border-color: #1a73e8;"
-        "color: #1a73e8;"
-        "}"
-        "QPushButton:pressed {"
-        "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d2e3fc, stop:1 #c5d8ff);"
-        "}"
-        "QPushButton:disabled {"
-        "background: #f5f5f5;"
-        "color: #9aa0a6;"
-        "border-color: #dadce0;"
-        "}"
-    );
+    m_cancelButton = new QPushButton("取消翻译");
+    m_cancelButton->setMinimumWidth(100);
+    m_cancelButton->setFixedHeight(36);
+    m_cancelButton->setStyleSheet(R"(
+        QPushButton {
+            background: #f3f4f6;
+            color: #374151;
+        }
+        QPushButton:hover {
+            background: #e5e7eb;
+        }
+    )");
     connect(m_cancelButton, &QPushButton::clicked, this, &MultiThreadProgressDialog::onCancelClicked);
     buttonLayout->addWidget(m_cancelButton);
 
     m_mainLayout->addLayout(buttonLayout);
 }
 
-void MultiThreadProgressDialog::setupStatisticsPanel()
-{
-    m_statsWidget = new QWidget(this);
-    QVBoxLayout* statsLayout = new QVBoxLayout(m_statsWidget);
-    statsLayout->setSpacing(8);
-    statsLayout->setContentsMargins(0, 0, 0, 0);
-
-    // 标题
-    m_overallProgressLabel = new QLabel("翻译进度", this);
-    m_overallProgressLabel->setStyleSheet(
-        "font-weight: bold; font-size: 14px; color: #333;"
-    );
-    statsLayout->addWidget(m_overallProgressLabel);
-
-    // 总体进度条（IDM风格）
-    m_overallProgressBar = new QProgressBar(this);
-    m_overallProgressBar->setRange(0, 100);
-    m_overallProgressBar->setValue(0);
-    m_overallProgressBar->setMinimumHeight(24);
-    m_overallProgressBar->setTextVisible(true);
-    m_overallProgressBar->setFormat("%p%");
-    m_overallProgressBar->setStyleSheet(QString(R"(
-        QProgressBar {
-            border: 1px solid #c0c0c0;
-            border-radius: 3px;
-            text-align: center;
-            font-weight: 500;
-            font-size: 11px;
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f9f9f9, stop:1 #e8e8e8);
-            color: #333;
-        }
-        QProgressBar::chunk {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a90e2, stop:1 #357abd);
-            border-radius: 2px;
-        }
-    )"));
-    statsLayout->addWidget(m_overallProgressBar);
-
-    // 统计信息网格（IDM风格的紧凑布局）
-    QWidget* gridWidget = new QWidget(this);
-    QGridLayout* gridLayout = new QGridLayout(gridWidget);
-    gridLayout->setSpacing(12);
-    gridLayout->setContentsMargins(0, 0, 0, 0);
-
-    // 成功数
-    m_successLabel = new QLabel("0", this);
-    m_successLabel->setStyleSheet(getLabelStyle("#27ae60", 12));
-    QLabel* successText = new QLabel("成功", this);
-    successText->setStyleSheet("font-size: 11px; color: #666;");
-    gridLayout->addWidget(m_successLabel, 0, 0, Qt::AlignRight);
-    gridLayout->addWidget(successText, 0, 1);
-
-    // 失败数
-    m_failedLabel = new QLabel("0", this);
-    m_failedLabel->setStyleSheet(getLabelStyle("#e74c3c", 12));
-    QLabel* failedText = new QLabel("失败", this);
-    failedText->setStyleSheet("font-size: 11px; color: #666;");
-    gridLayout->addWidget(m_failedLabel, 0, 2, Qt::AlignRight);
-    gridLayout->addWidget(failedText, 0, 3);
-
-    // 处理中
-    m_activeLabel = new QLabel("0", this);
-    m_activeLabel->setStyleSheet(getLabelStyle("#f39c12", 12));
-    QLabel* activeText = new QLabel("进行中", this);
-    activeText->setStyleSheet("font-size: 11px; color: #666;");
-    gridLayout->addWidget(m_activeLabel, 0, 4, Qt::AlignRight);
-    gridLayout->addWidget(activeText, 0, 5);
-
-    // 速度
-    m_speedLabel = new QLabel("0.0 条/秒", this);
-    m_speedLabel->setStyleSheet(getLabelStyle("#333", 12));
-    QLabel* speedText = new QLabel("速度", this);
-    speedText->setStyleSheet("font-size: 11px; color: #666;");
-    gridLayout->addWidget(m_speedLabel, 0, 6, Qt::AlignRight);
-    gridLayout->addWidget(speedText, 0, 7);
-
-    // 并发数
-    m_concurrentLabel = new QLabel("12", this);
-    m_concurrentLabel->setStyleSheet(getLabelStyle("#333", 12));
-    QLabel* concurrentText = new QLabel("并发", this);
-    concurrentText->setStyleSheet("font-size: 11px; color: #666;");
-    gridLayout->addWidget(m_concurrentLabel, 0, 8, Qt::AlignRight);
-    gridLayout->addWidget(concurrentText, 0, 9);
-
-    // 预计剩余时间
-    m_etaLabel = new QLabel("计算中...", this);
-    m_etaLabel->setStyleSheet(getLabelStyle("#333", 12));
-    QLabel* etaText = new QLabel("剩余时间", this);
-    etaText->setStyleSheet("font-size: 11px; color: #666;");
-    gridLayout->addWidget(m_etaLabel, 0, 10, Qt::AlignRight);
-    gridLayout->addWidget(etaText, 0, 11);
-
-    statsLayout->addWidget(gridWidget);
-}
+void MultiThreadProgressDialog::setupStatisticsPanel() {}
 
 void MultiThreadProgressDialog::setupCompactThreadView()
 {
@@ -228,36 +208,20 @@ void MultiThreadProgressDialog::setupCompactThreadView()
     m_threadScrollArea->setWidgetResizable(true);
     m_threadScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_threadScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_threadScrollArea->setMinimumHeight(180);
+    m_threadScrollArea->setMinimumHeight(120);
     m_threadScrollArea->setFrameShape(QFrame::NoFrame);
     m_threadScrollArea->setStyleSheet(
-        "QScrollArea {"
-        "border: 1px solid #dcdcdc;"
-        "background-color: #fafafa;"
-        "}"
-        "QScrollBar:vertical {"
-        "border: none;"
-        "background: #f5f5f5;"
-        "width: 12px;"
-        "margin: 0px;"
-        "}"
-        "QScrollBar::handle:vertical {"
-        "background: #c0c0c0;"
-        "min-height: 30px;"
-        "border-radius: 6px;"
-        "}"
-        "QScrollBar::handle:vertical:hover {"
-        "background: #a0a0a0;"
-        "}"
-        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
-        "height: 0px;"
-        "}"
+        "QScrollArea { border: 1px solid #f3f4f6; border-radius: 8px; background: #fafafa; }"
+        "QScrollBar:vertical { border: none; background: transparent; width: 6px; margin: 0; }"
+        "QScrollBar::handle:vertical { background: #d1d5db; border-radius: 3px; min-height: 30px; }"
+        "QScrollBar::handle:vertical:hover { background: #9ca3af; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
     );
 
     m_threadContainer = new QWidget();
-    m_threadContainer->setStyleSheet("background-color: #fafafa;");
+    m_threadContainer->setStyleSheet("background: transparent;");
     m_threadListLayout = new QVBoxLayout(m_threadContainer);
-    m_threadListLayout->setSpacing(4);
+    m_threadListLayout->setSpacing(3);
     m_threadListLayout->setContentsMargins(8, 8, 8, 8);
     m_threadListLayout->addStretch();
 
@@ -267,48 +231,44 @@ void MultiThreadProgressDialog::setupCompactThreadView()
 void MultiThreadProgressDialog::updateThreadProgress(int threadId, int completed, int total, const QString& message)
 {
     Q_UNUSED(message)
-    
-    // 直接使用传入的参数更新总体进度
+
     m_overallCompleted = completed;
     m_overallTotal = total;
     updateOverallProgress(completed, total);
 
     if (!m_threads.contains(threadId)) {
-        // 创建新的请求信息（IDM风格的单行布局）
         ThreadInfo info;
-        info.container = new QWidget(this);
+        info.container = new QWidget();
         info.container->setStyleSheet(
-            "QWidget {"
-            "background-color: #ffffff;"
-            "border: 1px solid #e0e0e0;"
-            "border-radius: 3px;"
-            "}"
+            "background: #ffffff;"
+            "border-radius: 6px;"
+            "border: 1px solid #f3f4f6;"
         );
         QHBoxLayout* containerLayout = new QHBoxLayout(info.container);
-        containerLayout->setSpacing(6);
-        containerLayout->setContentsMargins(6, 4, 6, 4);
+        containerLayout->setSpacing(10);
+        containerLayout->setContentsMargins(10, 6, 10, 6);
 
-        // ID标签
-        info.idLabel = new QLabel(QString("R%1").arg(threadId + 1), this);
-        info.idLabel->setMinimumWidth(45);
-        info.idLabel->setStyleSheet("font-weight: bold; font-size: 11px; color: #e74c3c;");
+        info.idLabel = new QLabel(QString("#%1").arg(threadId + 1));
+        info.idLabel->setFixedWidth(32);
+        info.idLabel->setStyleSheet("font-size: 11px; font-weight: 700; color: #3b82f6;");
         containerLayout->addWidget(info.idLabel);
 
-        // 状态标签
-        info.statusLabel = new QLabel("进行中", this);
-        info.statusLabel->setMinimumWidth(55);
-        info.statusLabel->setStyleSheet("font-size: 10px; color: #f39c12; font-weight: bold;");
+        info.statusLabel = new QLabel("请求中");
+        info.statusLabel->setFixedWidth(50);
+        info.statusLabel->setStyleSheet("font-size: 10px; font-weight: 600; color: #f59e0b;");
         containerLayout->addWidget(info.statusLabel);
 
-        // 进度条（IDM风格）
-        info.progressBar = new QProgressBar(this);
+        info.progressBar = new QProgressBar();
         info.progressBar->setRange(0, total > 0 ? total : 100);
         info.progressBar->setValue(completed);
-        info.progressBar->setMinimumHeight(16);
-        info.progressBar->setStyleSheet(getProgressBarStyle("#4a90e2"));
-        containerLayout->addWidget(info.progressBar);
+        info.progressBar->setFixedHeight(6);
+        info.progressBar->setTextVisible(false);
+        info.progressBar->setStyleSheet(R"(
+            QProgressBar { border: none; border-radius: 3px; background: #e5e7eb; }
+            QProgressBar::chunk { border-radius: 3px; background: #93c5fd; }
+        )");
+        containerLayout->addWidget(info.progressBar, 1);
 
-        // 添加到列表（在stretch之前）
         m_threadListLayout->insertWidget(m_threadListLayout->count() - 1, info.container);
 
         info.completed = completed;
@@ -320,48 +280,45 @@ void MultiThreadProgressDialog::updateThreadProgress(int threadId, int completed
         m_totalThreads = qMax(m_totalThreads, threadId + 1);
         m_activeCount++;
     } else {
-        // 更新现有请求信息
         ThreadInfo& info = m_threads[threadId];
         info.completed = completed;
         info.total = total;
         info.lastUpdateTime = QDateTime::currentDateTime();
 
-        // 计算进度百分比
         int percentage = total > 0 ? (completed * 100 / total) : 0;
-
-        // 更新进度条
         info.progressBar->setRange(0, total > 0 ? total : 100);
         info.progressBar->setValue(completed);
 
-        // 更新状态
-        QString newStatus;
-        QString newColor;
-        QString newIcon;
+        QString newStatus, statusColor, idColor, chunkBg;
 
         if (percentage >= 100) {
             newStatus = "已完成";
-            newColor = "#27ae60";
-            newIcon = "#27ae60";
-            info.progressBar->setStyleSheet(getProgressBarStyle("#27ae60"));
+            statusColor = "#22c55e";
+            idColor = "#22c55e";
+            chunkBg = "#86efac";
         } else {
-            // 检查是否卡住
             int elapsed = info.lastUpdateTime.secsTo(QDateTime::currentDateTime());
             if (elapsed > 30) {
-                newStatus = QString("卡住(%1s)").arg(elapsed);
-                newColor = "#e74c3c";
-                newIcon = "#e74c3c";
+                newStatus = QString("超时%1s").arg(elapsed);
+                statusColor = "#ef4444";
+                idColor = "#ef4444";
+                chunkBg = "#fca5a5";
             } else {
-                newStatus = "进行中";
-                newColor = "#f39c12";
-                newIcon = "#e74c3c";
+                newStatus = "请求中";
+                statusColor = "#f59e0b";
+                idColor = "#3b82f6";
+                chunkBg = "#93c5fd";
             }
         }
 
-        // 更新状态标签和图标
         if (info.status != newStatus) {
             info.statusLabel->setText(newStatus);
-            info.statusLabel->setStyleSheet(QString("font-size: 10px; color: %1; font-weight: bold;").arg(newColor));
-            info.idLabel->setStyleSheet(QString("font-weight: bold; font-size: 11px; color: %1;").arg(newIcon));
+            info.statusLabel->setStyleSheet(QString("font-size: 10px; font-weight: 600; color: %1;").arg(statusColor));
+            info.idLabel->setStyleSheet(QString("font-size: 11px; font-weight: 700; color: %1;").arg(idColor));
+            info.progressBar->setStyleSheet(QString(
+                "QProgressBar { border: none; border-radius: 3px; background: #e5e7eb; }"
+                "QProgressBar::chunk { border-radius: 3px; background: %1; }"
+            ).arg(chunkBg));
             info.status = newStatus;
         }
     }
@@ -374,41 +331,37 @@ void MultiThreadProgressDialog::setTotalThreads(int count)
 
 void MultiThreadProgressDialog::updateOverallProgress(int completed, int total)
 {
-    // 更新进度数据
     m_overallCompleted = completed;
     m_overallTotal = total;
 
-    // 更新进度条和标签
     if (total > 0) {
         int percentage = (completed * 100) / total;
         m_overallProgressBar->setValue(percentage);
-        m_overallProgressLabel->setText(QString("总体进度: %1% (%2/%3)")
-                                      .arg(percentage)
-                                      .arg(completed)
-                                      .arg(total));
+        m_concurrentLabel->setText(QString("%1%").arg(percentage));
+
+        QString pctText = percentage < 100
+            ? QString("翻译中 %1/%2").arg(completed).arg(total)
+            : "翻译完成";
+        m_overallProgressLabel->setText(pctText);
     }
 }
 
 void MultiThreadProgressDialog::updateStatistics()
 {
-    // 更新成功/失败/处理中统计
     m_successLabel->setText(QString::number(m_successCount));
     m_failedLabel->setText(QString::number(m_failedCount));
     m_activeLabel->setText(QString::number(m_activeCount));
 
-    // 计算速度
     qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - m_startTime;
     if (elapsed > 0 && m_startTime > 0) {
-        double speed = (m_overallCompleted * 1000.0) / elapsed; // 条/秒
-        m_speedLabel->setText(QString("%1 条/秒").arg(speed, 0, 'f', 1));
+        double speed = (m_overallCompleted * 1000.0) / elapsed;
+        m_speedLabel->setText(QString("%1/s").arg(speed, 0, 'f', 1));
 
-        // 计算预计剩余时间
         if (m_overallTotal > m_overallCompleted) {
-            int remaining = m_overallTotal - m_overallCompleted;
-            int eta = static_cast<int>(remaining / speed);
+            int eta = static_cast<int>((m_overallTotal - m_overallCompleted) / speed);
             m_etaLabel->setText(formatTime(eta));
         } else {
-            m_etaLabel->setText("已完成");
+            m_etaLabel->setText("--");
         }
     }
 }
@@ -430,226 +383,135 @@ void MultiThreadProgressDialog::setStartTime(qint64 startTime)
 
 QString MultiThreadProgressDialog::formatTime(int seconds)
 {
-    if (seconds < 60) {
-        return QString("%1秒").arg(seconds);
-    } else if (seconds < 3600) {
-        int minutes = seconds / 60;
-        int secs = seconds % 60;
-        return QString("%1分%2秒").arg(minutes).arg(secs);
-    } else {
-        int hours = seconds / 3600;
-        int minutes = (seconds % 3600) / 60;
-        return QString("%1小时%2分").arg(hours).arg(minutes);
-    }
+    if (seconds < 60) return QString("%1s").arg(seconds);
+    if (seconds < 3600) return QString("%1m%2s").arg(seconds / 60).arg(seconds % 60);
+    return QString("%1h%2m").arg(seconds / 3600).arg((seconds % 3600) / 60);
 }
 
-QString MultiThreadProgressDialog::getProgressBarStyle(const QString& chunkColor) const
-{
-    return QString(R"(
-        QProgressBar {
-            border: 1px solid #c0c0c0;
-            border-radius: 2px;
-            text-align: center;
-            font-size: 9px;
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f9f9f9, stop:1 #e8e8e8);
-            color: #333;
-        }
-        QProgressBar::chunk {
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 %1, stop:1 %2);
-            border-radius: 1px;
-        }
-    )").arg(chunkColor).arg(QColor(chunkColor).darker(20).name());
-}
+QString MultiThreadProgressDialog::getProgressBarStyle(const QString&) const { return QString(); }
 
-QString MultiThreadProgressDialog::getLabelStyle(const QString& color, int size) const
-{
-    return QString("font-size: %1px; color: %2; font-weight: bold;").arg(size).arg(color);
-}
+QString MultiThreadProgressDialog::getLabelStyle(const QString&, int) const { return QString(); }
 
 void MultiThreadProgressDialog::translationCompleted()
 {
-    // 立即标记翻译已完成
     m_isTranslationCompleted = true;
+    if (m_statsUpdateTimer) m_statsUpdateTimer->stop();
 
-    // 停止统计定时器
-    if (m_statsUpdateTimer) {
-        m_statsUpdateTimer->stop();
-    }
-
-    // 更新进度条为绿色完成状态（IDM风格）
     m_overallProgressBar->setValue(100);
     m_overallProgressLabel->setText("翻译完成");
-    m_overallProgressBar->setStyleSheet(getProgressBarStyle("#27ae60"));
+    m_overallProgressBar->setStyleSheet(R"(
+        QProgressBar { border: none; border-radius: 4px; background: #e5e7eb; }
+        QProgressBar::chunk { border-radius: 4px; background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #22c55e,stop:1 #86efac); }
+    )");
+    m_concurrentLabel->setStyleSheet("font-size: 22px; font-weight: 800; color: #22c55e; font-family: 'Segoe UI', Arial;");
 
-    // 更新所有线程状态为完成
     for (auto& info : m_threads) {
         info.statusLabel->setText("已完成");
-        info.statusLabel->setStyleSheet(getLabelStyle("#27ae60", 10));
-        info.idLabel->setStyleSheet("font-weight: bold; font-size: 11px; color: #27ae60;");
+        info.statusLabel->setStyleSheet("font-size: 10px; font-weight: 600; color: #22c55e;");
+        info.idLabel->setStyleSheet("font-size: 11px; font-weight: 700; color: #22c55e;");
         info.progressBar->setValue(100);
-        info.progressBar->setStyleSheet(getProgressBarStyle("#27ae60"));
+        info.progressBar->setStyleSheet(
+            "QProgressBar { border: none; border-radius: 3px; background: #e5e7eb; }"
+            "QProgressBar::chunk { border-radius: 3px; background: #86efac; }"
+        );
     }
 
-    // 最终统计更新
     updateStatistics();
-    m_etaLabel->setText("已完成");
-
-    // 更新按钮
+    m_etaLabel->setText("--");
     m_cancelButton->setText("关闭");
-
-    // 更新活动数（应变为0）
+    m_cancelButton->setStyleSheet(R"(
+        QPushButton { background: #3b82f6; color: white; }
+        QPushButton:hover { background: #2563eb; }
+    )");
     m_activeCount = 0;
     m_activeLabel->setText("0");
-
-    qWarning() << "translationCompleted: m_isTranslationCompleted=" << m_isTranslationCompleted
-               << "button text=" << m_cancelButton->text();
 }
 
 void MultiThreadProgressDialog::reset()
 {
-    // 停止定时器
-    if (m_statsUpdateTimer) {
-        m_statsUpdateTimer->stop();
-    }
+    if (m_statsUpdateTimer) m_statsUpdateTimer->stop();
 
-    // 清除所有线程信息
     for (auto& info : m_threads) {
-        if (info.container) {
-            info.container->deleteLater();
-        }
+        if (info.container) info.container->deleteLater();
     }
     m_threads.clear();
-    m_threadListLayout->addStretch(); // 添加回stretch
+    m_threadListLayout->addStretch();
 
-    // 重置统计
     m_successCount = 0;
     m_failedCount = 0;
     m_activeCount = 0;
     m_startTime = 0;
-
-    // 重置UI（IDM风格）
     m_totalThreads = 0;
     m_overallCompleted = 0;
     m_overallTotal = 0;
+
     m_overallProgressBar->setValue(0);
-    m_overallProgressLabel->setText("翻译进度");
-    m_overallProgressBar->setStyleSheet(getProgressBarStyle("#4a90e2"));
+    m_overallProgressLabel->setText("准备中...");
+    m_overallProgressBar->setStyleSheet(R"(
+        QProgressBar { border: none; border-radius: 4px; background: #e5e7eb; }
+        QProgressBar::chunk { border-radius: 4px; background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #3b82f6,stop:1 #8b5cf6); }
+    )");
+    m_concurrentLabel->setStyleSheet("font-size: 22px; font-weight: 800; color: #3b82f6; font-family: 'Segoe UI', Arial;");
+    m_concurrentLabel->setText("0%");
 
     m_successLabel->setText("0");
     m_failedLabel->setText("0");
     m_activeLabel->setText("0");
-    m_speedLabel->setText("0.0 条/秒");
-    m_etaLabel->setText("计算中...");
-    m_concurrentLabel->setText("12");
+    m_speedLabel->setText("--");
+    m_etaLabel->setText("计算...");
 
     m_cancelButton->setText("取消翻译");
+    m_cancelButton->setStyleSheet(R"(
+        QPushButton { background: #f3f4f6; color: #374151; }
+        QPushButton:hover { background: #e5e7eb; }
+    )");
     m_cancelButton->setEnabled(true);
     m_isTranslationCompleted = false;
 
-    // 重启统计定时器
     m_statsUpdateTimer->start();
 }
 
 void MultiThreadProgressDialog::closeEvent(QCloseEvent* event)
 {
-    qWarning() << "closeEvent - m_isTranslationCompleted:" << m_isTranslationCompleted
-               << "buttonText:" << (m_cancelButton ? m_cancelButton->text() : "null");
-
-    // 情况1：翻译已完成，允许关闭
     if (m_isTranslationCompleted || (m_cancelButton && m_cancelButton->text() == "关闭")) {
-        qWarning() << "翻译已完成，允许关闭对话框";
         event->accept();
         return;
     }
-
-    // 情况2：翻译未完成，调用取消按钮的逻辑（但不立即关闭窗口）
-    if (m_cancelButton && m_cancelButton->text() == "取消翻译") {
-        qWarning() << "翻译未完成，触发取消翻译逻辑";
-        // 忽略关闭事件，让 onCancelClicked() 处理后续逻辑
-        event->ignore();
-        onCancelClicked();
-        return;
-    }
-
-    // 其他情况，允许关闭
-    event->accept();
+    event->ignore();
+    onCancelClicked();
 }
 
 void MultiThreadProgressDialog::onCancelClicked()
 {
-    qWarning() << "onCancelClicked - m_isTranslationCompleted:" << m_isTranslationCompleted
-               << "buttonText:" << m_cancelButton->text()
-               << "buttonEnabled:" << m_cancelButton->isEnabled();
-
-    // 情况1：翻译已完成，直接关闭对话框
-    if (m_isTranslationCompleted || m_cancelButton->text() == "关闭") {
-        qWarning() << "翻译已完成，直接关闭对话框";
+    if (m_isTranslationCompleted || (m_cancelButton && m_cancelButton->text() == "关闭")) {
         accept();
         return;
     }
 
-    // 情况2：翻译未完成，弹出确认对话框
-    if (m_cancelButton->text() == "取消翻译") {
-        qWarning() << "翻译未完成，弹出确认对话框";
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle("确认取消");
+    msgBox.setText("确定要取消翻译吗？");
+    msgBox.setInformativeText("可以选择保留或丢弃已完成的翻译结果。");
+    msgBox.setIcon(QMessageBox::Question);
+    msgBox.setStandardButtons(QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+    msgBox.button(QMessageBox::Save)->setText("保留结果");
+    msgBox.button(QMessageBox::Discard)->setText("丢弃结果");
+    msgBox.button(QMessageBox::Cancel)->setText("继续翻译");
+    msgBox.setDefaultButton(QMessageBox::Cancel);
 
-        // 创建自定义对话框
-        QMessageBox msgBox(this);
-        msgBox.setWindowTitle("确认取消翻译");
-        msgBox.setText("确定要取消翻译吗？");
-        msgBox.setInformativeText("请选择如何处理已完成的翻译结果：");
+    int result = msgBox.exec();
 
-        // "确定" - 取消翻译，保留已完成的翻译
-        QAbstractButton* keepButton = msgBox.addButton("确定", QMessageBox::AcceptRole);
-        // "不保留" - 取消翻译，不保留已完成的翻译
-        QAbstractButton* discardButton = msgBox.addButton("不保留", QMessageBox::DestructiveRole);
-        // "取消" - 不取消翻译，回到进度条窗口
-        QAbstractButton* noCancelButton = msgBox.addButton("取消", QMessageBox::RejectRole);
-
-        msgBox.setIcon(QMessageBox::Question);
-
-        msgBox.exec();
-
-        QAbstractButton* clickedButton = msgBox.clickedButton();
-
-        if (clickedButton == keepButton) {
-            qWarning() << "用户选择：取消翻译并保留已完成结果";
-            // 禁用按钮防止重复点击
-            m_cancelButton->setEnabled(false);
-            m_cancelButton->setText("取消中...");
-
-            // 发出取消请求信号，带上保留选项
-            emit cancelTranslationRequested(CancelAndKeep);
-
-            // 添加超时保护：如果 5 秒后对话框还没关闭，强制关闭
-            QTimer::singleShot(5000, this, [this]() {
-                if (m_cancelButton && m_cancelButton->text() == "取消中...") {
-                    qWarning() << "取消超时，强制关闭对话框";
-                    reject();
-                }
-            });
-        } else if (clickedButton == discardButton) {
-            qWarning() << "用户选择：取消翻译并丢弃已完成结果";
-            // 禁用按钮防止重复点击
-            m_cancelButton->setEnabled(false);
-            m_cancelButton->setText("取消中...");
-
-            // 发出取消请求信号，带上不保留选项
-            emit cancelTranslationRequested(CancelAndDiscard);
-
-            // 添加超时保护：如果 5 秒后对话框还没关闭，强制关闭
-            QTimer::singleShot(5000, this, [this]() {
-                if (m_cancelButton && m_cancelButton->text() == "取消中...") {
-                    qWarning() << "取消超时，强制关闭对话框";
-                    reject();
-                }
-            });
-        } else {
-            qWarning() << "用户选择：不取消翻译";
-            // 不做任何事情，保持对话框打开
-        }
-    } else {
-        // 其他情况，直接关闭
-        qWarning() << "未知按钮状态，直接关闭对话框";
-        accept();
+    switch (result) {
+    case QMessageBox::Save:
+        emit cancelTranslationRequested(CancelAndKeep);
+        break;
+    case QMessageBox::Discard:
+        emit cancelTranslationRequested(CancelAndDiscard);
+        break;
+    default:
+        return;
     }
+
+    m_cancelButton->setText("关闭");
+    m_cancelButton->setEnabled(false);
 }

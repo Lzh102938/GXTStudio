@@ -951,7 +951,7 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
             const auto& task = originalTasks[i];
             TranslateResult translateResult(task.key, task.value, task.row);
             translateResult.success = false;
-            translateResult.errorMessage = "API返回空结果";
+            translateResult.errorMessage = "模型未返回翻译内容(可能被安全过滤或文本过长)";
             results.append(translateResult);
         }
         return results;
@@ -993,7 +993,7 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
                                 translateResult.success = true;
                             } else {
                                 translateResult.success = false;
-                                translateResult.errorMessage = "缺少text字段";
+                                translateResult.errorMessage = QString("模型返回格式异常(条目%1缺text字段)").arg(i+1);
                             }
 
                             results.append(translateResult);
@@ -1025,7 +1025,7 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
                                 translateResult.success = true;
                             } else {
                                 translateResult.success = false;
-                                translateResult.errorMessage = QString("未找到index %1的翻译结果").arg(taskIndex);
+                                translateResult.errorMessage = QString("模型未返回第%1条的翻译").arg(i+1);
                             }
 
                             results.append(translateResult);
@@ -1099,11 +1099,11 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
                                 translateResult.success = true;
                             } else {
                                 translateResult.success = false;
-                                translateResult.errorMessage = "缺少text字段";
+                                translateResult.errorMessage = "修复后仍缺text字段";
                             }
                         } else {
                             translateResult.success = false;
-                            translateResult.errorMessage = "翻译结果不足";
+                            translateResult.errorMessage = QString("模型仅返回%1条(需%2条)").arg(repairedArray.size()).arg(originalTasks.size());
                         }
 
                         results.append(translateResult);
@@ -1112,7 +1112,7 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
                     if (!results.isEmpty()) {
                         return results;
                     }
-                }
+    }
             }
         }
     }
@@ -1230,7 +1230,7 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
                 translateResult.success = true;
             } else {
                 translateResult.success = false;
-                translateResult.errorMessage = "翻译结果数量不匹配";
+                translateResult.errorMessage = QString("按行解析仅获得%1条(需%2条)").arg(translations.size()).arg(originalTasks.size());
             }
             
             results.append(translateResult);
@@ -1242,7 +1242,7 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
             const auto& task = originalTasks[i];
             TranslateResult translateResult(task.key, task.value, task.row);
             translateResult.success = false;
-            translateResult.errorMessage = "无法解析翻译结果";
+            translateResult.errorMessage = "模型返回格式无法识别(JSON/行解析均失败)";
             results.append(translateResult);
         }
     }
