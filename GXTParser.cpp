@@ -1530,8 +1530,11 @@ void GXTParser::exportWHMToTxt(const std::string& whmPath, const std::string& tx
     }
 
     // 按哈希值排序以保持输出一致
-    std::sort(entries.begin(), entries.end(), 
-        [](const WHMEntry& a, const WHMEntry& b) { return a.hash < b.hash; });
+    if (!std::is_sorted(entries.begin(), entries.end(), 
+        [](const WHMEntry& a, const WHMEntry& b) { return a.hash < b.hash; })) {
+        std::sort(entries.begin(), entries.end(), 
+            [](const WHMEntry& a, const WHMEntry& b) { return a.hash < b.hash; });
+    }
 
     // 预分配输出缓冲（减少磁盘 I/O），换行使用 CRLF
     size_t total = 0;
@@ -1658,8 +1661,11 @@ void GXTParser::exportDATToTxt(const std::string& datPath, const std::string& tx
     }
 
     // 按哈希值排序以保持输出一致
-    std::sort(entries.begin(), entries.end(), 
-        [](const DATEntry& a, const DATEntry& b) { return a.hash < b.hash; });
+    if (!std::is_sorted(entries.begin(), entries.end(), 
+        [](const DATEntry& a, const DATEntry& b) { return a.hash < b.hash; })) {
+        std::sort(entries.begin(), entries.end(), 
+            [](const DATEntry& a, const DATEntry& b) { return a.hash < b.hash; });
+    }
 
     // 预分配输出缓冲（减少磁盘 I/O），换行使用 CRLF
     size_t total = 0;

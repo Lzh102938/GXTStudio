@@ -280,29 +280,29 @@ void CharTableWidget::inputMethodEvent(QInputMethodEvent* event)
 
 void CharTableWidget::sortCharsInWidget()
 {
-    // 获取当前所有有效字符，去掉换行与 ASCII
     QString text = toPlainText();
-    QVector<uint16_t> chars;
-    chars.reserve(text.length());
+    
+    QSet<uint16_t> uniqueChars;
+    uniqueChars.reserve(text.length());
+    
     for (QChar ch : text) {
         if (ch == '\n' || ch.unicode() == 0) continue;
         if (ch.unicode() < 128) continue;
-        chars.append(ch.unicode());
-        if (chars.size() >= MAX_CHARS) break;
+        uniqueChars.insert(ch.unicode());
+        if (uniqueChars.size() >= MAX_CHARS) break;
     }
 
-    if (chars.empty()) return;
+    if (uniqueChars.empty()) return;
 
-    std::sort(chars.begin(), chars.end());
-
-    // 去重（保留一个）
-    int write = 0;
-    for (int i = 0; i < chars.size(); ++i) {
-        if (write == 0 || chars[i] != chars[write - 1]) {
-            chars[write++] = chars[i];
-        }
+    QVector<uint16_t> chars;
+    chars.reserve(uniqueChars.size());
+    for (uint16_t ch : uniqueChars) {
+        chars.append(ch);
     }
-    chars.resize(write);
+    
+    if (!std::is_sorted(chars.begin(), chars.end())) {
+        std::sort(chars.begin(), chars.end());
+    }
 
     // 构建格式化文本
     int charCount = chars.size();
@@ -397,7 +397,9 @@ void CharTableWidget::reformatText()
         return;
     }
     
-    std::sort(chars.begin(), chars.end());
+    if (!std::is_sorted(chars.begin(), chars.end())) {
+        std::sort(chars.begin(), chars.end());
+    }
     
     m_charsToHighlight.clear();
     

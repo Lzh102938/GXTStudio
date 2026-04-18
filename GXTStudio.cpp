@@ -12,6 +12,8 @@
 #include "BackgroundConfigDialog.h"
 #include "DebugConfigDialog.h"
 #include "AppConfig.h"
+#include "InvertedIndex.h"
+#include "StyleSheetCache.h"
 #include <QApplication>
 #include <QGuiApplication>
 #include <QScreen>
@@ -119,6 +121,10 @@ std::string normalizeKeyStdString(const std::string& key) {
     return normalized;
 }
 
+QString formatHashHex(uint32_t hash) {
+    return "0x" + QString::number(hash, 16).toUpper().rightJustified(8, '0');
+}
+
 GXTStudio::GXTStudio(QWidget *parent)
     : QMainWindow(parent)
     , m_tabWidget(nullptr)
@@ -162,6 +168,8 @@ GXTStudio::GXTStudio(QWidget *parent)
     , m_currentTabIndex(-1)
     , m_isReadOnly(true)
     , m_fontSize(11)
+    , m_useIndexSearch(true)
+    , m_indexBuilding(false)
     , m_parseThread(nullptr)
     , m_parseWorker(nullptr)
     , m_saveThread(nullptr)
@@ -998,8 +1006,6 @@ void GXTStudio::clearSearchCache()
     }
     
     m_searchState.clear();
-    
-    showLogMessage("搜索缓存已清除");
 }
 
 // 延迟初始化非必要组件
@@ -1156,22 +1162,82 @@ GXTStudio::NewFileOptions GXTStudio::showNewFileDialog()
     QDialog dialog(this);
     dialog.setWindowTitle("新建文件");
     dialog.setModal(true);
-    dialog.resize(400, 300);
+    dialog.resize(450, 320);
+    
+    dialog.setStyleSheet(R"(
+        QDialog {
+            background-color: #f8f9fa;
+        }
+        QLabel {
+            color: #2c3e50;
+        }
+        QRadioButton {
+            font-size: 12px;
+            padding: 4px;
+            spacing: 6px;
+        }
+        QRadioButton::indicator {
+            width: 16px;
+            height: 16px;
+        }
+        QComboBox {
+            padding: 5px 10px;
+            border: 1px solid #bdc3c7;
+            border-radius: 3px;
+            background: white;
+            font-size: 12px;
+        }
+        QComboBox:hover {
+            border-color: #3498db;
+        }
+        QComboBox::drop-down {
+            border: none;
+            width: 18px;
+        }
+    )");
     
     QVBoxLayout* layout = new QVBoxLayout(&dialog);
+    layout->setSpacing(8);
+    layout->setContentsMargins(15, 15, 15, 15);
+    
+    QLabel* titleLabel = new QLabel("创建新文件", &dialog);
+    titleLabel->setStyleSheet("font-weight: bold; font-size: 16px; color: #2c3e50; padding-bottom: 2px;");
+    layout->addWidget(titleLabel);
     
     QLabel* label = new QLabel("请选择要新建的文件类型：", &dialog);
-    label->setStyleSheet("font-weight: bold; font-size: 14px; color: #333;");
+    label->setStyleSheet("font-size: 13px; color: #555;");
     layout->addWidget(label);
     
     QButtonGroup* buttonGroup = new QButtonGroup(&dialog);
     
-    QRadioButton* gxtButton = new QRadioButton("GXT 文件 (GTA III/VC/SA)", &dialog);
-    QRadioButton* gxt2Button = new QRadioButton("GXT2 文件 (GTA V)", &dialog);
-    QRadioButton* datVcButton = new QRadioButton("DAT 文件 - GTA VC 格式", &dialog);
-    QRadioButton* datIvButton = new QRadioButton("DAT 文件 - GTA IV 格式", &dialog);
+    QWidget* optionsWidget = new QWidget(&dialog);
+    QVBoxLayout* optionsLayout = new QVBoxLayout(optionsWidget);
+    optionsLayout->setSpacing(6);
+    optionsLayout->setContentsMargins(0, 0, 0, 0);
     
-    gxtButton->setToolTip("GXT 文件支持 GTA III、GTA Vice City、GTA San Andreas 版本");
+    QRadioButton* gxtButton = new QRadioButton(optionsWidget);
+    QRadioButton* gxt2Button = new QRadioButton(optionsWidget);
+    QRadioButton* datVcButton = new QRadioButton(optionsWidget);
+    QRadioButton* datIvButton = new QRadioButton(optionsWidget);
+    
+    QString iconPath = QDir::currentPath() + "/icon/";
+    
+    gxtButton->setText("GXT 文件 (支持 GTA III / Vice City / San Andreas / IV)");
+    gxt2Button->setText("GXT2 文件 (用于 GTA V)");
+    datVcButton->setText("DAT 文件 - GTA VC 格式");
+    datIvButton->setText("DAT 文件 - GTA IV 格式");
+    
+    gxtButton->setIcon(QIcon(iconPath + "III.ico"));
+    gxt2Button->setIcon(QIcon(iconPath + "V.ico"));
+    datVcButton->setIcon(QIcon(iconPath + "VC.ico"));
+    datIvButton->setIcon(QIcon(iconPath + "IV.ico"));
+    
+    gxtButton->setIconSize(QSize(18, 18));
+    gxt2Button->setIconSize(QSize(18, 18));
+    datVcButton->setIconSize(QSize(18, 18));
+    datIvButton->setIconSize(QSize(18, 18));
+    
+    gxtButton->setToolTip("GXT 文件支持 GTA III、GTA Vice City、GTA San Andreas、GTA IV 版本");
     gxt2Button->setToolTip("GXT2 文件用于 GTA V");
     datVcButton->setToolTip("DAT 文件用于 GTA Vice City，使用 VC 格式哈希");
     datIvButton->setToolTip("DAT 文件用于 GTA IV，使用 IV 格式哈希");
@@ -1181,22 +1247,24 @@ GXTStudio::NewFileOptions GXTStudio::showNewFileDialog()
     buttonGroup->addButton(datVcButton, 2);
     buttonGroup->addButton(datIvButton, 3);
     
-    layout->addWidget(gxtButton);
-    layout->addWidget(gxt2Button);
-    layout->addWidget(datVcButton);
-    layout->addWidget(datIvButton);
+    optionsLayout->addWidget(gxtButton);
+    optionsLayout->addWidget(gxt2Button);
+    optionsLayout->addWidget(datVcButton);
+    optionsLayout->addWidget(datIvButton);
+    
+    layout->addWidget(optionsWidget);
     
     gxtButton->setChecked(true);
     
-    QLabel* versionLabel = new QLabel("\nGXT 版本选择：", &dialog);
-    versionLabel->setStyleSheet("font-weight: bold; font-size: 12px; color: #555;");
+    QLabel* versionLabel = new QLabel("GXT 版本选择：", &dialog);
+    versionLabel->setStyleSheet("font-weight: bold; font-size: 12px; color: #34495e; margin-top: 5px;");
     layout->addWidget(versionLabel);
     
     QComboBox* versionCombo = new QComboBox(&dialog);
-    versionCombo->addItem("GTA III", static_cast<int>(GXTVersion::GTA_III));
-    versionCombo->addItem("GTA Vice City", static_cast<int>(GXTVersion::GTA_VC));
-    versionCombo->addItem("GTA San Andreas", static_cast<int>(GXTVersion::GTA_SA));
-    versionCombo->addItem("GTA IV", static_cast<int>(GXTVersion::GTA_IV));
+    versionCombo->addItem(QIcon(iconPath + "III.ico"), "GTA III", static_cast<int>(GXTVersion::GTA_III));
+    versionCombo->addItem(QIcon(iconPath + "VC.ico"), "GTA Vice City", static_cast<int>(GXTVersion::GTA_VC));
+    versionCombo->addItem(QIcon(iconPath + "SA.ico"), "GTA San Andreas", static_cast<int>(GXTVersion::GTA_SA));
+    versionCombo->addItem(QIcon(iconPath + "IV.ico"), "GTA IV", static_cast<int>(GXTVersion::GTA_IV));
     versionCombo->setCurrentIndex(2);
     versionCombo->setToolTip("选择 GXT 文件的版本（仅对 GXT 类型有效）");
     layout->addWidget(versionCombo);
@@ -1204,22 +1272,24 @@ GXTStudio::NewFileOptions GXTStudio::showNewFileDialog()
     layout->addStretch();
     
     QHBoxLayout* buttonLayout = new QHBoxLayout();
+    buttonLayout->setSpacing(10);
     QPushButton* okButton = new QPushButton("确定", &dialog);
     QPushButton* cancelButton = new QPushButton("取消", &dialog);
     okButton->setDefault(true);
+    okButton->setMinimumWidth(100);
+    cancelButton->setMinimumWidth(100);
     
     QString buttonStyle = R"(
         QPushButton {
-            padding: 8px 20px;
-            border-radius: 4px;
-            font-size: 13px;
-        }
-        QPushButton:hover {
-            background-color: #e0e0e0;
+            padding: 10px 25px;
+            border-radius: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            border: none;
         }
     )";
-    okButton->setStyleSheet(buttonStyle + "QPushButton { background-color: #4a90e2; color: white; } QPushButton:hover { background-color: #3a80d2; }");
-    cancelButton->setStyleSheet(buttonStyle);
+    okButton->setStyleSheet(buttonStyle + "QPushButton { background-color: #3498db; color: white; } QPushButton:hover { background-color: #2980b9; } QPushButton:pressed { background-color: #21618c; }");
+    cancelButton->setStyleSheet(buttonStyle + "QPushButton { background-color: #ecf0f1; color: #2c3e50; } QPushButton:hover { background-color: #bdc3c7; } QPushButton:pressed { background-color: #95a5a6; }");
     
     buttonLayout->addStretch();
     buttonLayout->addWidget(okButton);
@@ -1552,7 +1622,8 @@ void GXTStudio::importTxtFile(const QString& filePath)
         for (const QString& ln : lines) {
             QString s = ln.trimmed();
             if (s.isEmpty()) continue;
-            for (int i = 0; i < s.size(); ++i) {
+            const int sSize = s.size();
+            for (int i = 0; i < sSize; ++i) {
                 data.cells.append((uint16_t)s.at(i).unicode());
             }
         }
@@ -1795,10 +1866,16 @@ void GXTStudio::importTxtFile(const QString& filePath)
         if (!ok3) return;
         CharTableData data; data.type = (choice2 == "GTA_VC") ? CharTableData::GTA_VC : CharTableData::GTA_IV; data.cols = 64;
         data.rows = lines.size(); data.cells.clear();
+        int totalChars = 0;
+        for (const QString& ln : lines) {
+            totalChars += ln.trimmed().size();
+        }
+        data.cells.reserve(totalChars);
         for (const QString& ln : lines) {
             QString s = ln.trimmed();
             if (s.isEmpty()) continue;
-            for (int i = 0; i < s.size(); ++i) data.cells.append((uint16_t)s.at(i).unicode());
+            const int sSize = s.size();
+            for (int i = 0; i < sSize; ++i) data.cells.append((uint16_t)s.at(i).unicode());
         }
         data.sourceFile = filePath;
         CharTableWidget* widget = createCharTableTab(QFileInfo(filePath).fileName(), data);
@@ -4252,12 +4329,11 @@ void GXTStudio::showSaveSuccessDialog(const SaveResult& result)
     buttonRowLayout->setSpacing(3);
     buttonRowLayout->addStretch();
 
-    // 快捷按钮组
     QPushButton* copyPathBtn = new QPushButton();
     copyPathBtn->setObjectName("actionButton");
     copyPathBtn->setFixedSize(55, 22);
     copyPathBtn->setToolTip("复制路径");
-    copyPathBtn->setText(QString("%1").arg(FA::QClipboardList));
+    copyPathBtn->setText(FA::QClipboardList);
     copyPathBtn->setFont(FA::solidFont(9));
     connect(copyPathBtn, &QPushButton::clicked, [result]() {
         QApplication::clipboard()->setText(result.filePath);
@@ -4268,7 +4344,7 @@ void GXTStudio::showSaveSuccessDialog(const SaveResult& result)
     openFolderBtn->setObjectName("actionButton");
     openFolderBtn->setFixedSize(65, 22);
     openFolderBtn->setToolTip("打开文件夹");
-    openFolderBtn->setText(QString("%1").arg(FA::QFolder));
+    openFolderBtn->setText(FA::QFolder);
     openFolderBtn->setFont(FA::solidFont(9));
     connect(openFolderBtn, &QPushButton::clicked, [result]() {
         QFileInfo fi(result.filePath);
@@ -4280,7 +4356,7 @@ void GXTStudio::showSaveSuccessDialog(const SaveResult& result)
     copyNameBtn->setObjectName("actionButton");
     copyNameBtn->setFixedSize(65, 22);
     copyNameBtn->setToolTip("复制文件名");
-    copyNameBtn->setText(QString("%1").arg(FA::QFileAlt));
+    copyNameBtn->setText(FA::QFileAlt);
     copyNameBtn->setFont(FA::solidFont(9));
     connect(copyNameBtn, &QPushButton::clicked, [result]() {
         QFileInfo fi(result.filePath);
@@ -4610,16 +4686,12 @@ void GXTStudio::performSearch(const QString& searchText)
     FileTab* tab = getCurrentTab();
     if (!tab) return;
 
-    // 获取搜索选项
     bool caseSensitive = tab->caseSensitiveButton ? tab->caseSensitiveButton->isChecked() : false;
     bool useRegex = tab->regexButton ? tab->regexButton->isChecked() : false;
     bool filterMode = tab->filterButton ? tab->filterButton->isChecked() : false;
 
-    // 清除之前的高亮
     clearSearchHighlight();
 
-    // 如果之前有过滤模式但没有缓存，清除过滤UI
-    // 如果有缓存，稍后会在 applyFilterMode 中重新应用
     if (m_searchState.filterMode && !filterMode) {
         clearFilterMode();
     }
@@ -4628,6 +4700,48 @@ void GXTStudio::performSearch(const QString& searchText)
         m_searchState.clear();
         showLogMessage("搜索已清空");
         return;
+    }
+
+    if (m_useIndexSearch && !useRegex && !caseSensitive) {
+        auto& index = InvertedIndex::instance();
+        if (index.isValid() && !m_indexBuilding) {
+            auto results = index.search(searchText, false);
+            if (!results.empty()) {
+                m_searchState.searchText = searchText;
+                m_searchState.currentTableIndex = tab->currentTableIndex;
+                m_searchState.currentEntryIndex = -1;
+                m_searchState.currentMatchPosition = -1;
+                m_searchState.allMatches.clear();
+                m_searchState.allMatches.reserve(results.size());
+                
+                for (const auto& loc : results) {
+                    m_searchState.allMatches.emplace_back(loc.tableIndex, loc.entryIndex, loc.position);
+                }
+                
+                m_searchState.caseSensitive = false;
+                m_searchState.useRegex = false;
+                m_searchState.isValid = !m_searchState.allMatches.empty();
+                m_searchState.filterMode = filterMode;
+                
+                if (m_searchState.isValid) {
+                    QString modeText = " (索引加速)";
+                    if (filterMode) {
+                        applyFilterMode();
+                        showLogMessage(QString("过滤模式: 显示 %1 个匹配行%2").arg(m_searchState.allMatches.size()).arg(modeText));
+                    } else {
+                        showLogMessage(QString("找到 %1 个匹配项%2").arg(m_searchState.allMatches.size()).arg(modeText));
+                        if (!m_suppressSearchJump) {
+                            jumpToMatch(0);
+                        } else {
+                            m_suppressSearchJump = false;
+                        }
+                    }
+                } else {
+                    showLogMessage("未找到匹配项");
+                }
+                return;
+            }
+        }
     }
 
     // 如果是过滤模式且有缓存，不需要重新搜索
@@ -4657,18 +4771,30 @@ void GXTStudio::performSearch(const QString& searchText)
     }
 
     // 【优化2】编译正则表达式（如果需要）
+    static QRegularExpression cachedRegex;
+    static QString cachedPattern;
+    static bool cachedCaseSensitive = false;
+    
     QRegularExpression regex;
     if (useRegex) {
-        QRegularExpression::PatternOptions options = caseSensitive 
-            ? QRegularExpression::NoPatternOption 
-            : QRegularExpression::CaseInsensitiveOption;
-        regex.setPattern(searchText);
-        regex.setPatternOptions(options);
-
-        if (!regex.isValid()) {
-            showLogMessage(QString("正则表达式错误: %1").arg(regex.errorString()));
-            m_searchState.clear();
-            return;
+        if (cachedPattern == searchText && cachedCaseSensitive == caseSensitive) {
+            regex = cachedRegex;
+        } else {
+            QRegularExpression::PatternOptions options = caseSensitive 
+                ? QRegularExpression::NoPatternOption 
+                : QRegularExpression::CaseInsensitiveOption;
+            regex.setPattern(searchText);
+            regex.setPatternOptions(options);
+            
+            if (!regex.isValid()) {
+                showLogMessage(QString("正则表达式错误: %1").arg(regex.errorString()));
+                m_searchState.clear();
+                return;
+            }
+            
+            cachedRegex = regex;
+            cachedPattern = searchText;
+            cachedCaseSensitive = caseSensitive;
         }
     }
 
@@ -4707,6 +4833,9 @@ void GXTStudio::performSearch(const QString& searchText)
     // 返回所有匹配位置的列表
     auto findAllMatches = [&](const QString& text) -> std::vector<int> {
         std::vector<int> positions;
+        if (searchTextLen > 0) {
+            positions.reserve(text.length() / searchTextLen + 1);
+        }
         if (useRegex) {
             QRegularExpressionMatchIterator matchIterator = regex.globalMatch(text);
             while (matchIterator.hasNext()) {
@@ -4714,11 +4843,45 @@ void GXTStudio::performSearch(const QString& searchText)
                 positions.push_back(match.capturedStart());
             }
         } else {
-            // 普通字符串搜索，找出所有匹配位置
             int pos = 0;
             while ((pos = text.indexOf(searchText, pos, cs)) != -1) {
                 positions.push_back(pos);
-                pos += searchTextLen; // 移动到匹配项之后继续搜索
+                pos += searchTextLen;
+            }
+        }
+        return positions;
+    };
+    
+    // 【优化6.1】用于std::string的快速搜索（ASCII情况避免QString转换）
+    auto findAllMatchesStdString = [&](const std::string& text) -> std::vector<int> {
+        std::vector<int> positions;
+        if (searchBytes.size() > 0) {
+            positions.reserve(text.size() / searchBytes.size() + 1);
+        } else {
+            positions.reserve(text.size() / std::max(1, searchTextLen) + 1);
+        }
+        if (useRegex) {
+            QString textStr = QString::fromStdString(text);
+            QRegularExpressionMatchIterator matchIterator = regex.globalMatch(textStr);
+            while (matchIterator.hasNext()) {
+                QRegularExpressionMatch match = matchIterator.next();
+                positions.push_back(match.capturedStart());
+            }
+        } else if (isAsciiSearch && searchBytes.size() > 0) {
+            size_t pos = 0;
+            while (pos <= text.size() - searchBytes.size()) {
+                auto it = std::search(text.begin() + pos, text.end(),
+                    searchBytes.constBegin(), searchBytes.constEnd());
+                if (it == text.end()) break;
+                positions.push_back(static_cast<int>(it - text.begin()));
+                pos = (it - text.begin()) + searchBytes.size();
+            }
+        } else {
+            QString textStr = QString::fromStdString(text);
+            int pos = 0;
+            while ((pos = textStr.indexOf(searchText, pos, cs)) != -1) {
+                positions.push_back(pos);
+                pos += searchTextLen;
             }
         }
         return positions;
@@ -4764,17 +4927,10 @@ void GXTStudio::performSearch(const QString& searchText)
 
     // 在所有表中搜索匹配项
     if (tab->isWHM) {
-        // WHM文件搜索
         const size_t whmSize = tab->whmEntries.size();
         for (size_t i = 0; i < whmSize; ++i) {
             const auto& entry = tab->whmEntries[i];
-            // 获取文本内容
-            QString textStr = QString::fromStdString(entry.text);
-            
-            // 查找所有匹配位置
-            std::vector<int> positions = findAllMatches(textStr);
-            
-            // 为每个匹配位置添加一条记录
+            std::vector<int> positions = findAllMatchesStdString(entry.text);
             for (int pos : positions) {
                 m_searchState.allMatches.emplace_back(0, static_cast<int>(i), pos);
             }
@@ -4784,13 +4940,7 @@ void GXTStudio::performSearch(const QString& searchText)
         const size_t datSize = tab->datEntries.size();
         for (size_t i = 0; i < datSize; ++i) {
             const auto& entry = tab->datEntries[i];
-            // 获取文本内容
-            QString textStr = QString::fromStdString(entry.text);
-            
-            // 查找所有匹配位置
-            std::vector<int> positions = findAllMatches(textStr);
-            
-            // 为每个匹配位置添加一条记录
+            std::vector<int> positions = findAllMatchesStdString(entry.text);
             for (int pos : positions) {
                 m_searchState.allMatches.emplace_back(0, static_cast<int>(i), pos);
             }
@@ -4828,33 +4978,22 @@ void GXTStudio::performSearch(const QString& searchText)
             }
         }
     } else if (!tab->originalHasTABL && tab->tables.empty() && !tab->noTablEntries.empty()) {
-        // 无表文件搜索（GTA III / GTA IV 无表格式）
         const size_t entryCount = tab->noTablEntries.size();
         for (size_t i = 0; i < entryCount; ++i) {
             const auto& entry = tab->noTablEntries[i];
-            QString textStr = QString::fromStdString(entry.value);
-            
-            std::vector<int> positions = findAllMatches(textStr);
-            
+            std::vector<int> positions = findAllMatchesStdString(entry.value);
             for (int pos : positions) {
                 m_searchState.allMatches.emplace_back(0, static_cast<int>(i), pos);
             }
         }
     } else {
-        // GXT文件搜索
         const size_t tableCount = tab->tables.size();
         for (size_t tableIdx = 0; tableIdx < tableCount; ++tableIdx) {
             const auto& table = tab->tables[tableIdx];
             const size_t entryCount = table.entries.size();
             for (size_t entryIdx = 0; entryIdx < entryCount; ++entryIdx) {
                 const auto& entry = table.entries[entryIdx];
-                // 获取文本内容（只在value中搜索）
-                QString textStr = QString::fromStdString(entry.value);
-                
-                // 查找所有匹配位置
-                std::vector<int> positions = findAllMatches(textStr);
-                
-                // 为每个匹配位置添加一条记录
+                std::vector<int> positions = findAllMatchesStdString(entry.value);
                 for (int pos : positions) {
                     m_searchState.allMatches.emplace_back(static_cast<int>(tableIdx), static_cast<int>(entryIdx), pos);
                 }
@@ -4863,19 +5002,19 @@ void GXTStudio::performSearch(const QString& searchText)
     }
     
     // 【关键修复】确保搜索结果按表索引和条目索引排序，避免跨表跳转混乱
-    std::sort(m_searchState.allMatches.begin(), m_searchState.allMatches.end(),
+    if (!std::is_sorted(m_searchState.allMatches.begin(), m_searchState.allMatches.end(),
               [](const std::tuple<int, int, int>& a, const std::tuple<int, int, int>& b) {
-                  // 首先按表索引排序
-                  if (std::get<0>(a) != std::get<0>(b)) {
-                      return std::get<0>(a) < std::get<0>(b);
-                  }
-                  // 然后按条目索引排序
-                  if (std::get<1>(a) != std::get<1>(b)) {
-                      return std::get<1>(a) < std::get<1>(b);
-                  }
-                  // 最后按位置排序
+                  if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
+                  if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
                   return std::get<2>(a) < std::get<2>(b);
-              });
+              })) {
+        std::sort(m_searchState.allMatches.begin(), m_searchState.allMatches.end(),
+                  [](const std::tuple<int, int, int>& a, const std::tuple<int, int, int>& b) {
+                      if (std::get<0>(a) != std::get<0>(b)) return std::get<0>(a) < std::get<0>(b);
+                      if (std::get<1>(a) != std::get<1>(b)) return std::get<1>(a) < std::get<1>(b);
+                      return std::get<2>(a) < std::get<2>(b);
+                  });
+    }
 
     m_searchState.isValid = !m_searchState.allMatches.empty();
 
@@ -5538,7 +5677,9 @@ void GXTStudio::onGenerateCharTable()
     
     // 按Unicode排序
     QList<uint16_t> sortedChars = nonAsciiChars.values();
-    std::sort(sortedChars.begin(), sortedChars.end());
+    if (!std::is_sorted(sortedChars.begin(), sortedChars.end())) {
+        std::sort(sortedChars.begin(), sortedChars.end());
+    }
     
     // 显示收集到的字符数量
     int charCount = sortedChars.size();
@@ -5802,7 +5943,9 @@ void GXTStudio::deleteSelectedRows()
     
     // 按行号从大到小排序，以便从后往前删除
     QList<int> selectedRows = selectedRowsSet.values();
-    std::sort(selectedRows.begin(), selectedRows.end(), std::greater<int>());
+    if (!std::is_sorted(selectedRows.begin(), selectedRows.end(), std::greater<int>())) {
+        std::sort(selectedRows.begin(), selectedRows.end(), std::greater<int>());
+    }
     
     // 确认删除
     int count = selectedRows.size();
@@ -5819,7 +5962,9 @@ void GXTStudio::deleteSelectedRows()
                 MultipleEntriesData entriesData;
                 // 按行号从小到大排序以便保存
                 QList<int> sortedRows = selectedRowsSet.values();
-                std::sort(sortedRows.begin(), sortedRows.end());
+                if (!std::is_sorted(sortedRows.begin(), sortedRows.end())) {
+                    std::sort(sortedRows.begin(), sortedRows.end());
+                }
                 
                 for (int row : sortedRows) {
                     if (row < static_cast<int>(table.entries.size())) {
@@ -6338,8 +6483,7 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
             keyEdit->setFocus();
             return;
         }
-        // 检查字符范围
-        QRegularExpression validKeyRegex("^[0-9A-Z_]+$");
+        static const QRegularExpression validKeyRegex("^[0-9A-Z_]+$");
         if (!validKeyRegex.match(keyText).hasMatch()) {
             QMessageBox::warning(this, "输入错误", "GTA III/VC 的键名只能包含大写字母(A-Z)、数字(0-9)和下划线(_)！\n有效格式：[0-9A-Z_]{1,7}");
             keyEdit->setFocus();
@@ -6359,40 +6503,33 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
     // 如果输入的不是hash格式，需要计算hash进行比较
     std::string compareKey = normalizedInputKey;
     if (!isHashFormat) {
-        // 只有GTA_SA和GTA_IV版本才进行hash转换，其他版本使用明文
         if (currentTab->version == GXTVersion::GTA_IV || currentTab->version == GXTVersion::GTA_SA) {
             uint32_t inputHash;
-            // 尝试在IVTKEY映射中反向查找（GTA IV）
             if (currentTab->version == GXTVersion::GTA_IV && GXTTableModel::findIVTHash(keyText, inputHash)) {
-                compareKey = ("0x" + QString("%1").arg(inputHash, 8, 16, QChar('0')).toUpper()).toStdString();
+                compareKey = formatHashHex(inputHash).toStdString();
                 qInfo() << "从IVTKEY映射中找到: " << keyText << " -> " << QString::fromStdString(compareKey);
             }
-            // 尝试在SATKEY映射中反向查找（GTA SA）
             else if (currentTab->version == GXTVersion::GTA_SA && GXTTableModel::findSATHash(keyText, inputHash)) {
-                compareKey = ("0x" + QString("%1").arg(inputHash, 8, 16, QChar('0')).toUpper()).toStdString();
+                compareKey = formatHashHex(inputHash).toStdString();
                 qInfo() << "从SATKEY映射中找到: " << keyText << " -> " << QString::fromStdString(compareKey);
             }
-            // 否则计算对应的哈希值
             else {
                 qWarning() << "lst映射中未找到: " << keyText << "，准备计算hash";
                 if (currentTab->version == GXTVersion::GTA_IV) {
-                    // 确保先转换为小写再计算
                     std::string lowerKey = keyText.toLower().toStdString();
                     qInfo() << "转换为小写: " << QString::fromStdString(lowerKey);
                     inputHash = GXTEditor::calculateGTA4Hash(lowerKey);
                     qWarning() << "计算GTA4 hash: " << keyText << " (小写: " << QString::fromStdString(lowerKey) << ") -> 0x" << QString::number(inputHash, 16);
                 } else if (currentTab->version == GXTVersion::GTA_SA) {
-                    // GTA SA使用CKeyGen计算hash（内部会转为大写）
                     std::string upperKey = keyText.toUpper().toStdString();
                     qInfo() << "转换为大写: " << QString::fromStdString(upperKey);
                     inputHash = CKeyGen::GetUppercaseKey(upperKey.c_str());
                     qWarning() << "计算SA hash: " << keyText << " (大写: " << QString::fromStdString(upperKey) << ") -> 0x" << QString::number(inputHash, 16);
                 }
-                compareKey = ("0x" + QString("%1").arg(inputHash, 8, 16, QChar('0')).toUpper()).toStdString();
+                compareKey = formatHashHex(inputHash).toStdString();
                 qWarning() << "最终使用compareKey: " << QString::fromStdString(compareKey);
             }
         } else {
-            // GTA_III、GTA_VC、GXT2等版本使用明文
             compareKey = normalizedInputKey;
         }
     }
@@ -6403,10 +6540,13 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
     newEntry.value = valueText.toStdString();
     newEntry.originalKey = keyText.toStdString();  // 保存原始输入（用于显示）
 
+    QString compareKeyLower = QString::fromStdString(compareKey).toLower();
+    QByteArray compareKeyLowerUtf8 = compareKeyLower.toUtf8();
+
     if (isNoTableFile) {
-        // 无表文件：检查键是否已存在
         for (const auto& entry : currentTab->noTablEntries) {
-            if (QString::fromStdString(entry.key).toLower() == QString::fromStdString(compareKey).toLower()) {
+            QByteArray entryKeyLower = QString::fromStdString(entry.key).toLower().toUtf8();
+            if (entryKeyLower == compareKeyLowerUtf8) {
                 QMessageBox::warning(this, "输入错误", QString("键 '%1' 已存在，请使用不同的键！").arg(keyText));
                 keyEdit->selectAll();
                 keyEdit->setFocus();
@@ -6415,10 +6555,10 @@ void GXTStudio::addEntryFromInputs(QLineEdit* keyEdit, QLineEdit* valueEdit)
         }
         currentTab->noTablEntries.push_back(newEntry);
     } else {
-        // 普通GXT文件：检查键是否已存在
         GXTTabl& currentTable = currentTab->tables[currentTab->currentTableIndex];
         for (const auto& entry : currentTable.entries) {
-            if (QString::fromStdString(entry.key).toLower() == QString::fromStdString(compareKey).toLower()) {
+            QByteArray entryKeyLower = QString::fromStdString(entry.key).toLower().toUtf8();
+            if (entryKeyLower == compareKeyLowerUtf8) {
                 QMessageBox::warning(this, "输入错误", QString("键 '%1' 已存在，请使用不同的键！").arg(keyText));
                 keyEdit->selectAll();
                 keyEdit->setFocus();
@@ -7582,25 +7722,25 @@ void GXTStudio::updateTableList()
         tab->listCache.cachedTableNames.clear();
         tab->listCache.cachedCounts.clear();
         tab->listCache.cachedMainFlags.clear();
+        tab->listCache.mainTableIndex = -1;
         
         tab->listCache.cachedDisplayTexts.reserve(currentTableCount);
         tab->listCache.cachedTableNames.reserve(currentTableCount);
         tab->listCache.cachedCounts.reserve(currentTableCount);
         tab->listCache.cachedMainFlags.reserve(currentTableCount);
         
-        // 批量计算所有数据
         if (tab->isWHM) {
             tab->listCache.cachedTableNames.push_back("WHM Entries");
             tab->listCache.cachedCounts.push_back(QString::number(tab->whmEntries.size()));
-            // 只显示表名，隐藏条目数
             tab->listCache.cachedDisplayTexts.push_back("WHM Entries");
             tab->listCache.cachedMainFlags.push_back(true);
+            tab->listCache.mainTableIndex = 0;
         } else if (tab->isDAT) {
             tab->listCache.cachedTableNames.push_back("DAT Entries");
             tab->listCache.cachedCounts.push_back(QString::number(tab->datEntries.size()));
-            // 只显示表名，隐藏条目数
             tab->listCache.cachedDisplayTexts.push_back("DAT Entries");
             tab->listCache.cachedMainFlags.push_back(true);
+            tab->listCache.mainTableIndex = 0;
         } else if (!isNoTablFile) {
             for (size_t i = 0; i < tab->tables.size(); ++i) {
                 const auto& table = tab->tables[i];
@@ -7609,9 +7749,12 @@ void GXTStudio::updateTableList()
 
                 tab->listCache.cachedTableNames.push_back(tableName);
                 tab->listCache.cachedCounts.push_back(countText);
-                // 只显示表名，隐藏条目数
                 tab->listCache.cachedDisplayTexts.push_back(tableName);
-                tab->listCache.cachedMainFlags.push_back(table.name == "MAIN");
+                bool isMain = (table.name == "MAIN");
+                tab->listCache.cachedMainFlags.push_back(isMain);
+                if (isMain && tab->listCache.mainTableIndex == -1) {
+                    tab->listCache.mainTableIndex = static_cast<int>(i);
+                }
             }
         }
         
@@ -7724,10 +7867,8 @@ void GXTStudio::updateTableList()
         // 智能选择逻辑（使用缓存数据）
         int targetIndex = 0;
         if (!tab->isWHM) {
-            auto mainIt = std::find(tab->listCache.cachedMainFlags.begin(), 
-                                  tab->listCache.cachedMainFlags.end(), true);
-            if (mainIt != tab->listCache.cachedMainFlags.end()) {
-                targetIndex = std::distance(tab->listCache.cachedMainFlags.begin(), mainIt);
+            if (tab->listCache.mainTableIndex >= 0) {
+                targetIndex = tab->listCache.mainTableIndex;
             } else if (tab->currentTableIndex >= 0 && tab->currentTableIndex < tab->tableList->count()) {
                 targetIndex = tab->currentTableIndex;
             }
@@ -8614,6 +8755,22 @@ void GXTStudio::onParseCompleted(const ParseResult& result)
         if (fileTab.isWHMReadOnlyLocked && !m_isReadOnly) {
             m_readOnlyAction->setChecked(true);
         }
+        
+        if (m_useIndexSearch && !m_indexBuilding) {
+            m_indexBuilding = true;
+            QTimer::singleShot(100, [this, result]() {
+                auto& index = InvertedIndex::instance();
+                if (result.isWHM) {
+                    index.buildIndexForWHM(result.whmEntries);
+                } else if (result.isDAT) {
+                    index.buildIndexForDAT(result.datEntries);
+                } else {
+                    index.buildIndex(result.tables);
+                }
+                m_indexBuilding = false;
+                showLogMessage(QString("索引构建完成 - 条目数: %1").arg(index.totalEntries()));
+            });
+        }
 
     } catch (const std::exception& e) {
         qCritical() << "处理解析结果时发生错误:" << e.what();
@@ -8781,7 +8938,7 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     QSplitter* splitter = new QSplitter(Qt::Horizontal);
     splitter->setHandleWidth(6);
     splitter->setChildrenCollapsible(false);
-    splitter->setOpaqueResize(true);
+    splitter->setOpaqueResize(false);
     splitter->setStyleSheet(GXTStyleManager::instance().getSplitterStyle());
     
     // 创建左侧面板容器
@@ -8967,7 +9124,6 @@ void GXTStudio::createTabContent(FileTab& tab, int tabIndex)
     entryTableView->setContextMenuPolicy(Qt::CustomContextMenu);
     
     entryTableView->setStyleSheet(GXTStyleManager::instance().getTableViewStyle());
-    entryTableView->viewport()->setAttribute(Qt::WA_OpaquePaintEvent, true);
     
     QFont tableFont("Microsoft YaHei", m_fontSize);
     tableFont.setHintingPreference(QFont::PreferFullHinting);
@@ -9792,20 +9948,15 @@ void GXTStudio::drawBackground(QPainter* painter)
     painter->setClipRect(targetRect);
 
     QSize currentSize = targetRect.size();
-    if (m_cachedBackgroundPixmap.isNull() || m_cachedBackgroundSize != currentSize) {
-        Qt::TransformationMode mode = m_isResizing ? Qt::FastTransformation : Qt::SmoothTransformation;
-        m_cachedBackgroundPixmap = m_scaledBackgroundPixmap.scaled(
-            currentSize,
-            m_backgroundAspectRatioMode,
-            mode
-        );
-        m_cachedBackgroundSize = currentSize;
-    }
+    Qt::TransformationMode mode = m_isResizing ? Qt::FastTransformation : Qt::SmoothTransformation;
+    
+    m_backgroundCache.setOriginalPixmap(m_scaledBackgroundPixmap);
+    QPixmap cachedPixmap = m_backgroundCache.getScaledPixmap(currentSize, m_backgroundAspectRatioMode, mode);
 
-    int x = targetRect.x() + (targetRect.width() - m_cachedBackgroundPixmap.width()) / 2;
-    int y = targetRect.y() + (targetRect.height() - m_cachedBackgroundPixmap.height()) / 2;
+    int x = targetRect.x() + (targetRect.width() - cachedPixmap.width()) / 2;
+    int y = targetRect.y() + (targetRect.height() - cachedPixmap.height()) / 2;
 
-    painter->drawPixmap(x, y, m_cachedBackgroundPixmap);
+    painter->drawPixmap(x, y, cachedPixmap);
 
     painter->restore();
 }
@@ -9821,9 +9972,8 @@ static void applyLabelStyle(QLabel* label, const QColor& textColor)
 {
     if (!label) return;
     
-    static const QString styleTemplate = "QLabel{font-weight:bold;font-size:14px;color:%1;padding:6px 8px;background-color:transparent;border-radius:6px;border:none;}";
-    
-    label->setStyleSheet(styleTemplate.arg(textColor.name()));
+    QString style = StyleSheetCache::getStyle("label", textColor.name());
+    label->setStyleSheet(style);
 }
 
 void GXTStudio::updateLabelColors()
@@ -9896,7 +10046,7 @@ void GXTStudio::updateCharTableColors(FileTab& tab)
         
         if (entryFontFamily.isEmpty()) {
             tab.charTableNameLabel->setText(QString("<b>%1</b> (%2 x %3)").arg(fileName).arg(cols).arg(rows));
-            tab.charTableNameLabel->setStyleSheet(QString("margin-left:6px; color: %1;").arg(textColorName));
+            tab.charTableNameLabel->setStyleSheet(StyleSheetCache::getStyle("labelWithMargin", textColorName));
         } else {
             tab.charTableNameLabel->setText(QString("<span style=\"font-family:'%1'; font-size:14px; color: %2;\">%3</span> <span style=\"font-size:14px; font-weight: bold; color: %4;\">%5</span> <span style=\"font-size:14px; color: %4;\">(%6 x %7)</span>")
                 .arg(entryFontFamily).arg(textColorName).arg(QString(FA::QTable))
@@ -9904,43 +10054,13 @@ void GXTStudio::updateCharTableColors(FileTab& tab)
         }
     }
     
-    QString searchEditStyle = QString(R"(
-        QLineEdit {
-            border: 2px solid rgba(200, 200, 200, 0.5);
-            border-radius: 6px;
-            padding: 6px 12px;
-            padding-left: 14px;
-            background-color: rgba(255, 255, 255, 0.5);
-            font-size: 12px;
-            color: %1;
-        }
-        QLineEdit:focus {
-            border-color: rgba(33, 150, 243, 0.6);
-            outline: none;
-        }
-    )").arg(textColorName);
+    QString searchEditStyle = StyleSheetCache::getStyle("searchEdit", textColorName);
     
     if (tab.charTableSearchEdit) {
         tab.charTableSearchEdit->setStyleSheet(searchEditStyle);
     }
     
-    QString innerButtonStyle = QString(
-        "QToolButton {"
-        "  background: transparent;"
-        "  border: none;"
-        "  border-radius: 4px;"
-        "  color: %1;"
-        "  padding: 0px;"
-        "  margin: 0px;"
-        "}"
-        "QToolButton:hover {"
-        "  background: rgba(0, 0, 0, 0.08);"
-        "}"
-        "QToolButton:checked {"
-        "  background: rgba(33, 150, 243, 0.15);"
-        "  color: #2196f3;"
-        "}"
-    ).arg(textColorName);
+    QString innerButtonStyle = StyleSheetCache::getStyle("toolButton", textColorName);
     
     if (tab.charTableCaseButton) {
         tab.charTableCaseButton->setStyleSheet(innerButtonStyle);
@@ -9974,10 +10094,10 @@ void GXTStudio::updateCharTableColors(FileTab& tab)
     }
     
     if (tab.charTablePosLabel) {
-        tab.charTablePosLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(textColorName));
+        tab.charTablePosLabel->setStyleSheet(StyleSheetCache::getStyle("labelSmall", textColorName));
     }
     if (tab.charTableHintLabel) {
-        tab.charTableHintLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(textColorName));
+        tab.charTableHintLabel->setStyleSheet(StyleSheetCache::getStyle("labelSmall", textColorName));
     }
 }
 
@@ -10277,19 +10397,25 @@ void GXTStudio::applyBackgroundEffects()
         const QRgb* srcBits = reinterpret_cast<const QRgb*>(resultImage.constBits());
         QRgb* dstBits = reinterpret_cast<QRgb*>(intermediate.bits());
         
+        const int wMinus1 = w - 1;
         for (int y = 0; y < h; ++y) {
+            const QRgb* srcRow = srcBits + y * w;
+            QRgb* dstRow = dstBits + y * w;
+            
             for (int x = 0; x < w; ++x) {
                 float r = 0, g = 0, b = 0, a = 0;
+                
                 for (int k = 0; k < kernelSize; ++k) {
-                    int px = qBound(0, x + k - radius, w - 1);
-                    QRgb pixel = srcBits[y * w + px];
+                    int px = x + k - radius;
+                    px = (px < 0) ? 0 : (px > wMinus1 ? wMinus1 : px);
+                    QRgb pixel = srcRow[px];
                     float weight = kernel[k];
                     r += qRed(pixel) * weight;
                     g += qGreen(pixel) * weight;
                     b += qBlue(pixel) * weight;
                     a += qAlpha(pixel) * weight;
                 }
-                dstBits[y * w + x] = qRgba(
+                dstRow[x] = qRgba(
                     static_cast<int>(r + 0.5f),
                     static_cast<int>(g + 0.5f),
                     static_cast<int>(b + 0.5f),
@@ -10301,11 +10427,16 @@ void GXTStudio::applyBackgroundEffects()
         srcBits = reinterpret_cast<const QRgb*>(intermediate.constBits());
         dstBits = reinterpret_cast<QRgb*>(resultImage.bits());
         
+        const int hMinus1 = h - 1;
         for (int y = 0; y < h; ++y) {
+            QRgb* dstRow = dstBits + y * w;
+            
             for (int x = 0; x < w; ++x) {
                 float r = 0, g = 0, b = 0, a = 0;
+                
                 for (int k = 0; k < kernelSize; ++k) {
-                    int py = qBound(0, y + k - radius, h - 1);
+                    int py = y + k - radius;
+                    py = (py < 0) ? 0 : (py > hMinus1 ? hMinus1 : py);
                     QRgb pixel = srcBits[py * w + x];
                     float weight = kernel[k];
                     r += qRed(pixel) * weight;
@@ -10313,7 +10444,7 @@ void GXTStudio::applyBackgroundEffects()
                     b += qBlue(pixel) * weight;
                     a += qAlpha(pixel) * weight;
                 }
-                dstBits[y * w + x] = qRgba(
+                dstRow[x] = qRgba(
                     static_cast<int>(r + 0.5f),
                     static_cast<int>(g + 0.5f),
                     static_cast<int>(b + 0.5f),
@@ -10911,30 +11042,25 @@ void GXTStudio::prepareEditorForSave(FileTab* tab, GXTEditor& editor)
                 // 检查是否是hex格式（只检查是否有0x前缀）
                 bool isHexFormat = keyToCheck.startsWith("0x", Qt::CaseInsensitive);
 
-                // 如果不是hex格式，则需要反向转换（重新计算hash）
                 if (!isHexFormat) {
                 uint32_t hash;
                 if (tab->version == GXTVersion::GTA_SA) {
-                    // 尝试在SATKEY映射中反向查找
                     if (GXTTableModel::findSATHash(keyToCheck, hash)) {
-                        saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
+                        saveKey = formatHashHex(hash).mid(2).toStdString();
                     } else {
-                        // 使用CKeyGen计算hash
                         std::string upperKey = keyToCheck.toUpper().toStdString();
                         hash = CKeyGen::GetUppercaseKey(upperKey.c_str());
-                        saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
+                        saveKey = formatHashHex(hash).mid(2).toStdString();
                     }
                 } else if (tab->version == GXTVersion::GTA_IV) {
-                    // 尝试在IVTKEY映射中反向查找
                     if (GXTTableModel::findIVTHash(keyToCheck, hash)) {
-                        saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
+                        saveKey = formatHashHex(hash).mid(2).toStdString();
                         if (keyToCheck.contains("FF_WARN", Qt::CaseInsensitive)) {
                             showLogMessage(QString("[DEBUG] IVTKEY查找成功: %1 -> 0x%2").arg(keyToCheck).arg(QString::number(hash, 16)));
                         }
                     } else {
-                        // 计算GTA4哈希
                         hash = GXTEditor::calculateGTA4Hash(keyToCheck.toStdString());
-                        saveKey = QString("%1").arg(hash, 8, 16, QChar('0')).toStdString();
+                        saveKey = formatHashHex(hash).mid(2).toStdString();
                         if (keyToCheck.contains("FF_WARN", Qt::CaseInsensitive)) {
                             showLogMessage(QString("[DEBUG] GTA4 hash计算: %1 -> 0x%2").arg(keyToCheck).arg(QString::number(hash, 16)));
                         }
@@ -12241,24 +12367,23 @@ void GXTStudio::onTranslationProgress(int completed, int total, const QString& m
         int requestId = 0; // 默认请求ID
         QString cleanMessage = message;
 
-        // 从消息中提取更多信息来生成唯一的请求ID
         static int requestCounter = 0;
-        requestId = (++requestCounter % 50); // 限制在0-49范围内，对应最大50个并发请求
+        requestId = (++requestCounter % 50);
 
-        // 尝试从消息中提取更具体的标识信息
+        static const QRegularExpression batchRe("批次(\\d+)");
+        static const QRegularExpression activeRe("活动请求:(\\d+)");
+        static const QRegularExpression successRe("成功(\\d+)条");
+        static const QRegularExpression failedRe("失败(\\d+)条");
+
         if (message.contains("批次")) {
-            QRegularExpression re("批次(\\d+)");
-            QRegularExpressionMatch match = re.match(message);
+            QRegularExpressionMatch match = batchRe.match(message);
             if (match.hasMatch()) {
-                // 使用批次ID的一部分来创建更稳定的请求ID
                 int batchId = match.captured(1).toInt();
-                requestId = (batchId - 1) % 50; // 批次从1开始，转换为0-49
+                requestId = (batchId - 1) % 50;
             }
         } else if (message.contains("活动请求:")) {
-            QRegularExpression re("活动请求:(\\d+)");
-            QRegularExpressionMatch match = re.match(message);
+            QRegularExpressionMatch match = activeRe.match(message);
             if (match.hasMatch()) {
-                // 如果能提取到活动请求数，使用它的一部分
                 int activeRequests = match.captured(1).toInt();
                 if (activeRequests > 0 && activeRequests <= 50) {
                     requestId = activeRequests - 1;
@@ -12266,18 +12391,12 @@ void GXTStudio::onTranslationProgress(int completed, int total, const QString& m
             }
         }
 
-        // 清理消息，移除过长的技术细节
         if (cleanMessage.length() > 200) {
             cleanMessage = cleanMessage.left(200) + "...";
         }
 
         try {
-            // 更新请求进度，内部会处理总体进度
             progressDialog->updateThreadProgress(requestId, completed, total, cleanMessage);
-
-            // 解析成功/失败数量更新统计
-            QRegularExpression successRe("成功(\\d+)条");
-            QRegularExpression failedRe("失败(\\d+)条");
 
             QRegularExpressionMatch successMatch = successRe.match(message);
             QRegularExpressionMatch failedMatch = failedRe.match(message);
@@ -12286,7 +12405,6 @@ void GXTStudio::onTranslationProgress(int completed, int total, const QString& m
                 int successCount = successMatch.hasMatch() ? successMatch.captured(1).toInt() : 0;
                 int failedCount = failedMatch.hasMatch() ? failedMatch.captured(1).toInt() : 0;
 
-                // 更新对话框的统计信息（通过公有接口）
                 progressDialog->updateSuccessCount(successCount);
                 progressDialog->updateFailedCount(failedCount);
             }
@@ -12295,7 +12413,6 @@ void GXTStudio::onTranslationProgress(int completed, int total, const QString& m
             qWarning() << "更新多线程进度对话框时发生异常";
         }
 
-        // 确保对话框可见
         if (!progressDialog->isVisible()) {
             try {
                 progressDialog->show();
@@ -12522,10 +12639,10 @@ void GXTStudio::onTranslationCompleted(const QList<TranslateResult>& results)
     }
 
     if (!iconFontFamily.isEmpty()) {
-        iconLabel->setStyleSheet(QString("font-family:'%1'; font-size: 32px; color: %2;").arg(iconFontFamily, iconColor));
+        iconLabel->setStyleSheet(StyleSheetCache::getStyle("iconLabel", iconFontFamily, iconColor));
     } else {
         iconLabel->setFont(FA::solidFont(32));
-        iconLabel->setStyleSheet(QString("font-size: 32px; color: %1;").arg(iconColor));
+        iconLabel->setStyleSheet(StyleSheetCache::getStyle("iconLabelSimple", iconColor));
     }
     iconLabel->setText(iconStr);
 
@@ -12576,7 +12693,7 @@ void GXTStudio::onTranslationCompleted(const QList<TranslateResult>& results)
             item->setSpacing(2);
             
             QLabel* val = new QLabel(value);
-            val->setStyleSheet(QString("font-size: 22px; font-weight: 800; color: %1;").arg(color));
+            val->setStyleSheet(StyleSheetCache::getStyle("valueLabel", color));
             item->addWidget(val);
             
             QLabel* lbl = new QLabel(label);
@@ -12746,7 +12863,7 @@ void GXTStudio::applyPartialTranslationResults(const QList<TranslateResult>& res
     // 设置样式表，显式指定 FontAwesome 字体族
     QString iconFontFamily = FA::solidFontFamily();
     if (!iconFontFamily.isEmpty()) {
-        iconLabel->setStyleSheet(QString("font-family: '%1'; font-size: 32px; color: #17a2b8;").arg(iconFontFamily));
+        iconLabel->setStyleSheet(StyleSheetCache::getStyle("iconLabelBlue", iconFontFamily));
     } else {
         iconLabel->setStyleSheet("font-size: 32px; color: #17a2b8;");
         iconLabel->setFont(FA::solidFont(32));
@@ -12942,7 +13059,7 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     QString entryFontFamily = FA::solidFontFamily();
     if (entryFontFamily.isEmpty()) {
         nameLabel->setText(QString("<b>%1</b> (%2 x %3)").arg(fileName).arg(data.cols).arg(data.rows));
-        nameLabel->setStyleSheet(QString("margin-left:6px; color: %1;").arg(textColorName));
+        nameLabel->setStyleSheet(StyleSheetCache::getStyle("labelWithMargin", textColorName));
     } else {
         nameLabel->setText(QString("<span style=\"font-family:'%1'; font-size:14px; color: %2;\">%3</span> <span style=\"font-size:14px; font-weight: bold; color: %4;\">%5</span> <span style=\"font-size:14px; color: %4;\">(%6 x %7)</span>")
             .arg(entryFontFamily).arg(textColorName).arg(QString(FA::QTable))
@@ -13085,11 +13202,11 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
     bottomRow->setContentsMargins(4, 0, 4, 0);
     
     QLabel* posLabel = new QLabel("第 1 行, 第 1 列", page);
-    posLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(textColorName));
+    posLabel->setStyleSheet(StyleSheetCache::getStyle("labelSmall", textColorName));
     posLabel->setMinimumWidth(120);
     
     QLabel* hintLabel = new QLabel(page);
-    hintLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(textColorName));
+    hintLabel->setStyleSheet(StyleSheetCache::getStyle("labelSmall", textColorName));
     hintLabel->setMinimumWidth(200);
     
     bottomRow->addWidget(posLabel);
@@ -13113,7 +13230,7 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
             hintLabel->setText(QString("字符 '%1' 已存在，不允许重复").arg(ch));
             hintLabel->setStyleSheet("color: red; font-size: 12px;");
             QTimer::singleShot(2000, [hintLabel, textColorName]() {
-                hintLabel->setStyleSheet(QString("color: %1; font-size: 12px;").arg(textColorName));
+                hintLabel->setStyleSheet(StyleSheetCache::getStyle("labelSmall", textColorName));
             });
         });
     });
@@ -13757,16 +13874,36 @@ void GXTStudio::undo()
             if (action.tableIndex >= 0 && action.tableIndex < static_cast<int>(tab->tables.size())) {
                 auto& table = tab->tables[action.tableIndex];
                 
-                std::sort(entriesData.entries.begin(), entriesData.entries.end(), 
-                    [](const EntryData& a, const EntryData& b) { return a.row < b.row; });
+                if (!std::is_sorted(entriesData.entries.begin(), entriesData.entries.end(),
+                    [](const EntryData& a, const EntryData& b) { return a.row < b.row; })) {
+                    std::sort(entriesData.entries.begin(), entriesData.entries.end(), 
+                        [](const EntryData& a, const EntryData& b) { return a.row < b.row; });
+                }
+                
+                size_t insertCount = entriesData.entries.size();
+                size_t originalSize = table.entries.size();
+                table.entries.resize(originalSize + insertCount);
+                
+                for (int i = static_cast<int>(originalSize) - 1; i >= 0; --i) {
+                    size_t newPos = i;
+                    for (const auto& entryData : entriesData.entries) {
+                        if (i >= entryData.row) {
+                            newPos = i + insertCount;
+                            break;
+                        }
+                    }
+                    if (newPos != i) {
+                        table.entries[newPos] = std::move(table.entries[i]);
+                    }
+                }
                 
                 for (const auto& entryData : entriesData.entries) {
-                    if (entryData.row >= 0 && entryData.row <= static_cast<int>(table.entries.size())) {
+                    if (entryData.row >= 0 && entryData.row <= static_cast<int>(originalSize + insertCount)) {
                         GXTEntry entry;
                         entry.key = entryData.key.toStdString();
                         entry.originalKey = entryData.key.toStdString();
                         entry.value = entryData.value.toStdString();
-                        table.entries.insert(table.entries.begin() + entryData.row, entry);
+                        table.entries[entryData.row] = std::move(entry);
                     }
                 }
             }
@@ -13941,8 +14078,11 @@ void GXTStudio::redo()
             if (action.tableIndex >= 0 && action.tableIndex < static_cast<int>(tab->tables.size())) {
                 auto& table = tab->tables[action.tableIndex];
                 
-                std::sort(entriesData.entries.begin(), entriesData.entries.end(), 
-                    [](const EntryData& a, const EntryData& b) { return a.row > b.row; });
+                if (!std::is_sorted(entriesData.entries.begin(), entriesData.entries.end(),
+                    [](const EntryData& a, const EntryData& b) { return a.row > b.row; })) {
+                    std::sort(entriesData.entries.begin(), entriesData.entries.end(), 
+                        [](const EntryData& a, const EntryData& b) { return a.row > b.row; });
+                }
                 
                 for (const auto& entryData : entriesData.entries) {
                     if (entryData.row >= 0 && entryData.row < static_cast<int>(table.entries.size())) {

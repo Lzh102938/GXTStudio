@@ -78,6 +78,12 @@ private:
 
     // 【性能优化】解析文本片段
     void parseTextFragments(const QString& text);
+    
+    // 【性能优化】增量解析文本片段
+    void parseTextFragmentsIncremental(const QString& newText, int modifiedLine);
+    
+    // 【性能优化】查找文本变化位置
+    int findModifiedLine(const QString& oldText, const QString& newText);
 
     // 【性能优化】触发延迟PNG缓存更新
     void schedulePNGCacheUpdate();
@@ -135,6 +141,11 @@ private:
     int m_cachedLineHeight;                       // 缓存的行高度
     double m_cachedFontScale;                    // 缓存的字体缩放比例
     bool m_parseCacheValid;                      // 解析缓存是否有效
+    
+    // 【性能优化】增量解析支持
+    QString m_lastParsedText;                    // 上一次解析的文本
+    int m_lastModifiedLine;                      // 上一次修改的行号（-1表示未知）
+    bool m_enableIncrementalParse;               // 是否启用增量解析
 
     static bool s_fallbackLogged;
 

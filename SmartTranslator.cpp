@@ -170,8 +170,8 @@ void SmartTranslator::translateTexts(const QList<TranslateTask>& tasks)
         return;
     }
     
-    // 验证每个任务
-    for (int i = 0; i < tasks.size(); ++i) {
+    const int tasksSize = tasks.size();
+    for (int i = 0; i < tasksSize; ++i) {
         const auto& task = tasks[i];
         if (task.value.length() > 10000 || task.key.length() > 1000) {
             emit translationError(QString("任务 %1 数据过长").arg(i));
@@ -188,24 +188,22 @@ void SmartTranslator::translateTexts(const QList<TranslateTask>& tasks)
             return;
         }
 
-        // 重置状态
         m_cancelled = false;
         m_consecutiveErrors = 0;
 
-        // 安全地复制任务列表
         m_pendingTasks.clear();
         m_results.clear();
 
         try {
             m_pendingTasks = tasks;
-            m_results.reserve(tasks.size());
+            m_results.reserve(tasksSize);
         } catch (...) {
             emit translationError("内存不足，无法复制任务列表");
             return;
         }
 
         m_completedCount = 0;
-        m_totalCount = tasks.size();
+        m_totalCount = tasksSize;
         m_currentBatchId = 0;
 
         // 清理之前的请求
@@ -612,34 +610,28 @@ QString SmartTranslator::buildBatchContent(const QList<TranslateTask>& tasks)
     // 调试日志：记录批次内信息
     qWarning() << "buildBatchContent: 批次任务数:" << tasks.size();
 
-    for (int i = 0; i < tasks.size(); ++i) {
+    const int tasksSize = tasks.size();
+    for (int i = 0; i < tasksSize; ++i) {
         const auto& task = tasks[i];
 
-        // 预处理文本：保留游戏颜色代码，但移除其他控制字符
         QString cleanValue = task.value;
 
-        // 移除其他控制字符，但保留基本标点和颜色代码
         cleanValue.replace(QRegularExpression("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]"), "");
 
-        // 清理多余的空白字符，但保留颜色代码的位置
         cleanValue = cleanValue.simplified();
 
-        // 检查清理后的文本是否为空
         if (cleanValue.trimmed().isEmpty()) {
             continue;
         }
 
-            // 检查总文本长度，防止请求数据过大 - 优化限制
             totalTextLength += cleanValue.length();
-            if (totalTextLength > 16000) { // 16KB限制，支持更大批次
+            if (totalTextLength > 16000) {
                 break;
             }
 
-        // 参考Python版本的简洁格式：编号. 文本内容
-        contents.append(QString("%1. %2").arg(contents.size() + 1).arg(cleanValue));
+        contents.append(QString::number(contents.size() + 1) + ". " + cleanValue);
 
-        // 调试日志：记录每个任务
-        if (i < 3) { // 只记录前3个，避免日志过多
+        if (i < 3) {
         }
     }
 
@@ -846,14 +838,12 @@ bool SmartTranslator::isConfirmationPhrase(const QString& text) {
 
     QString trimmed = text.trimmed();
 
-    // 规则1：基于长度的智能过滤 - 确认短语通常很短（4-20字）
     int length = trimmed.length();
     if (length < 4 || length > 20) {
-        return false; // 太长或太短，不是确认短语
+        return false;
     }
 
-    // 规则2：完全匹配确认短语（使用精确匹配，而非contains）
-    QStringList confirmationPhrases = {
+    static const QStringList confirmationPhrases = {
         "好的",
         "明白",
         "没问题",
@@ -871,7 +861,6 @@ bool SmartTranslator::isConfirmationPhrase(const QString& text) {
         return true;
     }
 
-    // 规则3：匹配以特定模式开头的确认语句
     if (trimmed.startsWith("好的，这是") ||
         trimmed.startsWith("明白，这是") ||
         trimmed.startsWith("没问题，这是") ||
@@ -886,15 +875,13 @@ bool SmartTranslator::isConfirmationPhrase(const QString& text) {
         return true;
     }
 
-    // 规则4：以标点结尾的简短确认短语（4-10字）
-    QRegularExpression shortConfirmPattern(R"(^(好的|明白|收到|OK|没问题)[，。！,.!]{0,2}$)");
+    static const QRegularExpression shortConfirmPattern(R"(^(好的|明白|收到|OK|没问题)[，。！,.!]{0,2}$)");
     if (shortConfirmPattern.match(trimmed).hasMatch()) {
         return true;
     }
 
-    // 规则5：包含特定元关键词的长句子（AI生成的开场白/结束语）
     if (trimmed.length() > 10) {
-        QStringList metaKeywords = {
+        static const QStringList metaKeywords = {
             "严格遵循",
             "格式要求",
             "风格要求",
@@ -945,9 +932,9 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
 {
     QList<TranslateResult> results;
 
+    const int originalTasksSize = originalTasks.size();
     if (result.isEmpty()) {
-        // 如果结果为空，返回失败结果
-        for (int i = 0; i < originalTasks.size() && i < MAX_SAFE_TASKS; ++i) {
+        for (int i = 0; i < originalTasksSize && i < MAX_SAFE_TASKS; ++i) {
             const auto& task = originalTasks[i];
             TranslateResult translateResult(task.key, task.value, task.row);
             translateResult.success = false;
@@ -957,7 +944,6 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
         return results;
     }
 
-    // 【关键修复】优先尝试解析带index的JSON格式: {"result": [{"index": 0, "text": "..."}, ...]}
     QString cleanResult = result.trimmed();
     if (cleanResult.startsWith("```json")) {
         cleanResult = cleanResult.mid(7);
@@ -969,20 +955,17 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
 
 
     try {
-        if (cleanResult.length() <= 500000) { // 50万字符限制
+        if (cleanResult.length() <= 500000) {
             QJsonDocument doc = QJsonDocument::fromJson(cleanResult.toUtf8());
 
             if (!doc.isNull() && doc.isObject()) {
                 QJsonObject obj = doc.object();
-                // 检查是否有result字段
                 if (obj.contains("result") && obj["result"].isArray()) {
                     QJsonArray resultArray = obj["result"].toArray();
 
-                    // 【修复】按顺序直接使用翻译，不依赖index
-                    // 避免index重复导致的问题
-                    if (resultArray.size() >= originalTasks.size()) {
+                    if (resultArray.size() >= originalTasksSize) {
 
-                        for (int i = 0; i < originalTasks.size() && i < MAX_SAFE_TASKS; ++i) {
+                        for (int i = 0; i < originalTasksSize && i < MAX_SAFE_TASKS; ++i) {
                             const auto& task = originalTasks[i];
                             TranslateResult translateResult(task.key, task.value, task.row);
 
@@ -1046,9 +1029,8 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
     if (cleanResult.contains("result") && cleanResult.contains("index") && cleanResult.contains("text")) {
         QString repairedJson;
 
-        // 尝试手动解析并重建正确的JSON
-        QRegularExpression indexRe(R"(\"index\"\s*:\s*(\d+))");
-        QRegularExpression textRe(R"(\"text\"\s*:\s*\"([^\"]*)\")");
+        static const QRegularExpression indexRe(R"(\"index\"\s*:\s*(\d+))");
+        static const QRegularExpression textRe(R"(\"text\"\s*:\s*\"([^\"]*)\")");
 
         QStringList indexMatches;
         QStringList textMatches;
@@ -1066,12 +1048,10 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
         }
 
 
-        // 使用最小值作为实际条目数
         int count = qMin(indexMatches.size(), textMatches.size());
-        if (count > 0 && count >= originalTasks.size() / 2) {
-            // 重建正确的JSON
+        if (count > 0 && count >= originalTasksSize / 2) {
             repairedJson = "{\"result\": [";
-            for (int i = 0; i < count && i < originalTasks.size(); ++i) {
+            for (int i = 0; i < count && i < originalTasksSize; ++i) {
                 repairedJson += QString("{\"index\": %1, \"text\": \"%2\"}").arg(indexMatches[i]).arg(textMatches[i].replace("\"", "\\\""));
                 if (i < count - 1) {
                     repairedJson += ", ";
@@ -1080,14 +1060,13 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
             repairedJson += "]}";
 
 
-            // 尝试解析重建的JSON
             QJsonDocument repairedDoc = QJsonDocument::fromJson(repairedJson.toUtf8());
             if (!repairedDoc.isNull() && repairedDoc.isObject()) {
                 QJsonObject repairedObj = repairedDoc.object();
                 if (repairedObj.contains("result") && repairedObj["result"].isArray()) {
                     QJsonArray repairedArray = repairedObj["result"].toArray();
 
-                    for (int i = 0; i < originalTasks.size() && i < MAX_SAFE_TASKS; ++i) {
+                    for (int i = 0; i < originalTasksSize && i < MAX_SAFE_TASKS; ++i) {
                         const auto& task = originalTasks[i];
                         TranslateResult translateResult(task.key, task.value, task.row);
 
@@ -1103,7 +1082,7 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
                             }
                         } else {
                             translateResult.success = false;
-                            translateResult.errorMessage = QString("模型仅返回%1条(需%2条)").arg(repairedArray.size()).arg(originalTasks.size());
+                            translateResult.errorMessage = QString("模型仅返回%1条(需%2条)").arg(repairedArray.size()).arg(originalTasksSize);
                         }
 
                         results.append(translateResult);
@@ -1122,12 +1101,11 @@ QList<TranslateResult> SmartTranslator::parseBatchResult(const QString& result, 
     qWarning() << "回退到按行解析";
     QStringList lines = result.split('\n', Qt::SkipEmptyParts);
     QStringList translations;
-    int totalLines = lines.size();
+    const int totalLines = lines.size();
 
-    // 正则模式：匹配数字序号开头的行
-    QRegularExpression re(R"(^(\d+)\.\s*(.*)$)");
+    static const QRegularExpression re(R"(^(\d+)\.\s*(.*)$)");
 
-    for (int lineIndex = 0; lineIndex < lines.size(); ++lineIndex) {
+    for (int lineIndex = 0; lineIndex < totalLines; ++lineIndex) {
         QString trimmedLine = lines[lineIndex].trimmed();
         if (trimmedLine.isEmpty()) continue;
 

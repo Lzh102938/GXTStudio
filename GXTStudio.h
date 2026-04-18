@@ -10,6 +10,7 @@
 #include "UndoSystem.h"
 #include "IconCache.h"
 #include "TextColorCalculator.h"
+#include "BackgroundCache.h"
 
 #include <QFont>
 #include <QFontDatabase>
@@ -184,6 +185,7 @@ struct FileTab {
         std::vector<QString> cachedTableNames;     // 缓存的表名
         std::vector<QString> cachedCounts;          // 缓存的计数
         std::vector<bool> cachedMainFlags;         // 缓存的主表标志
+        int mainTableIndex = -1;                   // 缓存的主表索引（-1表示无主表）
         size_t lastTableCount = 0;                 // 上次的表数量
         bool needsRebuild = true;                   // 是否需要重建缓存
         QTimer* cleanupTimer = nullptr;             // 缓存清理定时器
@@ -625,6 +627,7 @@ private:
     QTimer m_resizeTimer;
     bool m_isResizing;
     TextColorCalculator m_textColorCalculator;
+    BackgroundCache m_backgroundCache;
     void drawBackground(QPainter* painter);
     QColor getTextColorForPosition(const QPoint& pos);
     void updateLabelColors();
@@ -705,6 +708,9 @@ private:
     int m_currentTabIndex;
     bool m_isReadOnly;
     int m_fontSize;
+    
+    bool m_useIndexSearch;
+    bool m_indexBuilding;
 
     // 异步解析相关
     QThread* m_parseThread;

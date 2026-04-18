@@ -270,12 +270,19 @@ bool GXTEditor::saveAsGTA_VC(const std::string& path) {
 
         // 排序表 (MAIN优先，其他按字典序)
         auto sorted_tables = tables;
-        std::sort(sorted_tables.begin(), sorted_tables.end(),
+        if (!std::is_sorted(sorted_tables.begin(), sorted_tables.end(),
             [](const GXTTable& a, const GXTTable& b) {
                 if (a.name == "MAIN") return true;
                 if (b.name == "MAIN") return false;
                 return a.name < b.name;
-            });
+            })) {
+            std::sort(sorted_tables.begin(), sorted_tables.end(),
+                [](const GXTTable& a, const GXTTable& b) {
+                    if (a.name == "MAIN") return true;
+                    if (b.name == "MAIN") return false;
+                    return a.name < b.name;
+                });
+        }
 
         const int SizeOfTABL = 12;  // 8字节表名 + 4字节偏移
         const int SizeOfTKEY = 12;  // 4字节偏移 + 8字节键
@@ -399,14 +406,20 @@ bool GXTEditor::saveAsGTA_SA(const std::string& path) {
 
         // 排序表（MAIN优先，其他按字典序）
         auto sorted_tables = tables;
-        std::sort(sorted_tables.begin(), sorted_tables.end(),
+        if (!std::is_sorted(sorted_tables.begin(), sorted_tables.end(),
             [](const GXTTable& a, const GXTTable& b) {
                 if (a.name == "MAIN") return true;
                 if (b.name == "MAIN") return false;
                 return a.name < b.name;
-            });
+            })) {
+            std::sort(sorted_tables.begin(), sorted_tables.end(),
+                [](const GXTTable& a, const GXTTable& b) {
+                    if (a.name == "MAIN") return true;
+                    if (b.name == "MAIN") return false;
+                    return a.name < b.name;
+                });
+        }
 
-        // 写版本头
         fwrite("\x04\x00\x08\x00", 4, 1, outputFile);
 
         // 写TABL块头
@@ -1053,10 +1066,15 @@ bool GXTEditor::saveAsGTA_III(const std::string& path) {
             }
         }
 
-        std::sort(all_entries.begin(), all_entries.end(),
+        if (!std::is_sorted(all_entries.begin(), all_entries.end(),
             [](const auto& a, const auto& b) {
                 return a.first < b.first;
-            });
+            })) {
+            std::sort(all_entries.begin(), all_entries.end(),
+                [](const auto& a, const auto& b) {
+                    return a.first < b.first;
+                });
+        }
 
         if (all_entries.empty()) {
             fclose(outputFile);
@@ -1142,10 +1160,15 @@ bool GXTEditor::saveAsNoTable(const std::string& path, const std::vector<GXTEntr
             all_entries.push_back({entry.key, entry.value});
         }
 
-        std::sort(all_entries.begin(), all_entries.end(),
+        if (!std::is_sorted(all_entries.begin(), all_entries.end(),
             [](const auto& a, const auto& b) {
                 return a.first < b.first;
-            });
+            })) {
+            std::sort(all_entries.begin(), all_entries.end(),
+                [](const auto& a, const auto& b) {
+                    return a.first < b.first;
+                });
+        }
 
         if (all_entries.empty()) {
             fclose(outputFile);
@@ -1244,10 +1267,15 @@ bool GXTEditor::saveAsNoTableIV(const std::string& path, const std::vector<GXTEn
             all_entries.push_back({hash, entry.value});
         }
 
-        std::sort(all_entries.begin(), all_entries.end(),
+        if (!std::is_sorted(all_entries.begin(), all_entries.end(),
             [](const auto& a, const auto& b) {
                 return a.first < b.first;
-            });
+            })) {
+            std::sort(all_entries.begin(), all_entries.end(),
+                [](const auto& a, const auto& b) {
+                    return a.first < b.first;
+                });
+        }
 
         // 计算块大小
         uint32_t keyBlockSize = static_cast<uint32_t>(all_entries.size() * 8);  // 每条目8字节

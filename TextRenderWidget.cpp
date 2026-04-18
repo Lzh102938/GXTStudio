@@ -140,6 +140,9 @@ TextRenderWidget::TextRenderWidget(QWidget* parent)
     , m_cachedLineHeight(0)
     , m_cachedFontScale(1.0)
     , m_parseCacheValid(false)
+    , m_lastParsedText("")
+    , m_lastModifiedLine(-1)
+    , m_enableIncrementalParse(true)
 {
     // 启用硬件加速和优化渲染
     setAttribute(Qt::WA_TranslucentBackground); // 启用透明背景
@@ -457,11 +460,26 @@ void TextRenderWidget::setText(const QString& text)
         return;
     }
 
+    QString oldText = m_text;
     m_text = text;
+
+    // 【性能优化】尝试增量解析
+    if (m_enableIncrementalParse && m_parseCacheValid && !oldText.isEmpty()) {
+        int modifiedLine = findModifiedLine(oldText, text);
+        if (modifiedLine >= 0) {
+            parseTextFragmentsIncremental(text, modifiedLine);
+            m_lastParsedText = text;
+            m_pngCacheValid = false;
+            schedulePNGCacheUpdate();
+            update();
+            return;
+        }
+    }
 
     // 【性能优化】标记缓存无效
     m_parseCacheValid = false;
     m_pngCacheValid = false;
+    m_lastParsedText = text;
 
     // 【性能优化】使用延迟PNG更新，避免频繁生成PNG
     schedulePNGCacheUpdate();
@@ -540,11 +558,10 @@ void TextRenderWidget::drawGradientBackground(QPainter* painter)
 
 // 判断是否为隐藏标记（不显示在文本中）
 bool TextRenderWidget::isHiddenToken(const QString& token) {
-    // 根据用户提供的表，这些标记不会显示在文本中
-    static const QStringList hiddenTokens = {
+    static const QSet<QString> hiddenTokens = {
         "~1~", "~k~", "~n~", "~z~", "~<~", "~>~", "~f~", 
         "~d~", "~u~", "~c~", "~j~", "~m~", "~v~", 
-        "~a~", "~l~"  // ~a~ area text, ~l~ black text
+        "~a~", "~l~"
     };
     
     return hiddenTokens.contains(token.toLower());
@@ -595,6 +612,13 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
             } else {
                 QString textToDraw = fragment.text;
                 
+                struct FontSegment {
+                    QString text;
+                    QFont font;
+                    int start;
+                };
+                QVector<FontSegment> segments;
+                
                 int charPos = 0;
                 while (charPos < textToDraw.length()) {
                     QFont charFont = currentFont;
@@ -615,18 +639,25 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
                     }
                     
                     QString segment = textToDraw.mid(start, charPos - start);
+                    segments.append({segment, charFont, xPos});
+                    
                     QFontMetrics fmChar(charFont);
+                    xPos += fmChar.horizontalAdvance(segment);
+                }
+                
+                for (const auto& seg : segments) {
+                    QFontMetrics fmChar(seg.font);
                     
                     if (m_shadowEnabled) {
                         QColor shadowColor(0, 0, 0, 120);
-                        painter->setFont(charFont);
+                        painter->setFont(seg.font);
                         painter->setPen(shadowColor);
-                        painter->drawText(xPos + 2, baseline, segment);
+                        painter->drawText(seg.start + 2, baseline, seg.text);
                     }
                     
                     if (m_outlineEnabled) {
                         QPainterPath path;
-                        path.addText(xPos, baseline, charFont, segment);
+                        path.addText(seg.start, baseline, seg.font, seg.text);
                         
                         QPen outlinePen(QColor(0, 0, 0, 255), 2.5);
                         outlinePen.setJoinStyle(Qt::RoundJoin);
@@ -635,34 +666,27 @@ void TextRenderWidget::drawColoredText(QPainter* painter)
                         painter->strokePath(path, outlinePen);
                         painter->fillPath(path, currentColor);
                     } else {
-                        painter->setFont(charFont);
+                        painter->setFont(seg.font);
                         painter->setPen(currentColor);
-                        painter->drawText(xPos, baseline, segment);
+                        painter->drawText(seg.start, baseline, seg.text);
                     }
-                    
-                    xPos += fmChar.horizontalAdvance(segment);
                 }
             }
         }
     }
 }
 
-// 移除隐藏标记，保留可见文本
 QString TextRenderWidget::removeHiddenTokens(const QString& input) {
     QString result = input;
-    QRegularExpression colorRegex("~[a-zA-Z0-9]~");
+    static const QRegularExpression colorRegex("~[a-zA-Z0-9]~");
     
     int pos = 0;
     QRegularExpressionMatch match;
     while ((match = colorRegex.match(result, pos)).hasMatch()) {
         QString token = match.captured(0).toLower();
-        // 检查是否是隐藏标记
         if (isHiddenToken(token)) {
-            // 移除隐藏标记
             result.remove(match.capturedStart(0), match.capturedLength(0));
-            // 不增加pos，因为字符串长度已改变
             } else {
-            // 非隐藏标记，继续移动位置
             pos = match.capturedEnd(0);
         }
     }
@@ -670,26 +694,22 @@ QString TextRenderWidget::removeHiddenTokens(const QString& input) {
     return result;
 }
 
-// 分割文本和标记
 QStringList TextRenderWidget::splitTextAndTokens(const QString& input) {
     QStringList parts;
-    QRegularExpression colorRegex("~[a-zA-Z0-9]~");
+    static const QRegularExpression colorRegex("~[a-zA-Z0-9]~");
     
     int lastPos = 0;
     int pos = 0;
     QRegularExpressionMatch match;
     while ((match = colorRegex.match(input, pos)).hasMatch()) {
-        // 添加颜色标记前的文本
         if (match.capturedStart(0) > lastPos) {
             parts << input.mid(lastPos, match.capturedStart(0) - lastPos);
         }
-        // 添加颜色标记
         parts << match.captured(0);
         pos = match.capturedEnd(0);
         lastPos = pos;
     }
     
-    // 添加最后剩余的文本
     if (lastPos < input.length()) {
         parts << input.mid(lastPos);
     }
@@ -1049,6 +1069,96 @@ void TextRenderWidget::parseTextFragments(const QString& text)
         m_parsedLinesCache.append(lineFrags);
     }
 
+    m_parseCacheValid = true;
+}
+
+// 【性能优化】查找文本变化位置
+int TextRenderWidget::findModifiedLine(const QString& oldText, const QString& newText)
+{
+    QStringList oldLines = oldText.split('\n');
+    QStringList newLines = newText.split('\n');
+    
+    int minLines = qMin(oldLines.size(), newLines.size());
+    
+    for (int i = 0; i < minLines; ++i) {
+        if (oldLines[i] != newLines[i]) {
+            return i;
+        }
+    }
+    
+    if (oldLines.size() != newLines.size()) {
+        return minLines;
+    }
+    
+    return -1;
+}
+
+// 【性能优化】增量解析文本片段
+void TextRenderWidget::parseTextFragmentsIncremental(const QString& text, int modifiedLine)
+{
+    if (modifiedLine < 0) {
+        parseTextFragments(text);
+        return;
+    }
+    
+    QFont currentFont = m_mainFontLoaded ? m_mainFont : m_fallbackFont;
+    QFontMetrics fm(currentFont);
+    QFontMetrics fm_fallback(m_fallbackFont);
+    
+    m_cachedLineHeight = qMax(fm.height(), fm_fallback.height());
+    if (m_mainFontLoaded) {
+        m_cachedFontScale = static_cast<double>(fm.height()) / static_cast<double>(fm_fallback.height());
+    } else {
+        m_cachedFontScale = 1.0;
+    }
+    
+    QStringList lines = text.split('\n');
+    
+    if (lines.size() != m_parsedLinesCache.size()) {
+        parseTextFragments(text);
+        return;
+    }
+    
+    if (modifiedLine >= lines.size()) {
+        parseTextFragments(text);
+        return;
+    }
+    
+    const QString& lineStr = lines[modifiedLine];
+    LineFragments lineFrags;
+    lineFrags.width = 0;
+    lineFrags.fragments.reserve(10);
+    
+    QStringList parts = splitTextAndTokensFast(lineStr);
+    
+    for (const QString& part : parts) {
+        TextFragment fragment;
+        
+        if (part.startsWith("~") && part.endsWith("~") && part.length() == 3) {
+            QString token = part.toLower();
+            fragment.isColorToken = true;
+            fragment.isHiddenToken = isHiddenToken(token);
+            fragment.color = getColorForToken(token, m_gtaVersion);
+            fragment.text = part;
+        } else {
+            fragment.isColorToken = false;
+            fragment.isHiddenToken = false;
+            fragment.color = QColor(230, 230, 230, 255);
+            fragment.text = part;
+            
+            int textWidth = 0;
+            for (const QChar& ch : part) {
+                QFont charFont = needsFallbackFont(ch) ? m_fallbackFont : currentFont;
+                QFontMetrics fm_char(charFont);
+                textWidth += fm_char.horizontalAdvance(ch);
+            }
+            lineFrags.width += textWidth;
+        }
+        
+        lineFrags.fragments.append(fragment);
+    }
+    
+    m_parsedLinesCache[modifiedLine] = lineFrags;
     m_parseCacheValid = true;
 }
 

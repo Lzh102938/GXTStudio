@@ -81,8 +81,12 @@ set(PROJECT_SOURCES
     GXTStudio.ui
     GXTStudio.h
     GXTStudio.cpp
+    resources.qrc
     IconCache.h
     TextColorCalculator.h
+    StyleSheetCache.h
+    StyleSheetCache.cpp
+    BackgroundCache.h
     FilterProxyModel.h
     GXTStyleManager.h
     GXTStyleManager.cpp
@@ -121,6 +125,8 @@ set(PROJECT_SOURCES
     CharTableWidget.cpp
     CharTableExportWorker.h
     CharTableExportWorker.cpp
+    InvertedIndex.h
+    InvertedIndex.cpp
     ReplaceDialog.h
     ReplaceDialog.cpp
     ReplaceWorker.h
@@ -192,6 +198,21 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon/"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/icon/favicon.png"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/icon/III.ico"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/icon/IV.ico"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/icon/SA.ico"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/icon/VC.ico"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/icon/V.ico"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/icon/"
     COMMENT "Copying icon files to build directory"
 )
