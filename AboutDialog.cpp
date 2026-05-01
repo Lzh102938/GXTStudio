@@ -317,7 +317,7 @@ void AboutDialog::createInfoAndFileTypeSection()
     QLabel* dateIcon = new QLabel(QString(FA::QCalendar), infoFrame);
     dateIcon->setFont(FA::solidFont(15));
     dateIcon->setStyleSheet("QLabel { color: #4a90e2; }");
-    QLabel* dateLabel = new QLabel("2026年3月？？日", infoFrame);
+    QLabel* dateLabel = new QLabel("2026年5月2日", infoFrame);
     dateLabel->setStyleSheet(s_labelStyle);
     dateLayout->addWidget(dateIcon);
     dateLayout->addWidget(dateLabel);

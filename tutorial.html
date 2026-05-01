@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>使用教程 - GXTStudio</title>
+    <link rel="icon" href="icon/favicon.png" type="image/png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        primary: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            200: '#bfdbfe',
+                            300: '#93c5fd',
+                            400: '#60a5fa',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                        },
+                        accent: {
+                            400: '#22d3ee',
+                            500: '#06b6d4',
+                        }
+                    }
+                },
+            },
+        }
+    </script>
+    <style>
+        html { scroll-behavior: smooth; min-height: 100vh; }
+        body {
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background-image: url('image/Background.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.35);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .dark body::before,
+        html.dark body::before {
+            background: rgba(15, 23, 42, 0.55);
+        }
+
+        #root {
+            position: relative;
+            z-index: 1;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #f97316, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .gradient-bg {
+            background: linear-gradient(135deg, #f97316, #ec4899);
+        }
+
+        .glass {
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            transform: translateZ(0);
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(24px) saturate(200%);
+            -webkit-backdrop-filter: blur(24px) saturate(200%);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            transform: translateZ(0);
+        }
+
+        .dark .glass-card {
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .glass-button {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transform: translateZ(0);
+        }
+
+        .dark .glass-button {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.4);
+            backdrop-filter: blur(32px) saturate(180%);
+            -webkit-backdrop-filter: blur(32px) saturate(180%);
+            transform: translateZ(0);
+        }
+
+        .dark .glass-panel {
+            background: rgba(15, 23, 42, 0.6);
+        }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .dark ::-webkit-scrollbar-thumb { background: #475569; }
+        .dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+        .sidebar-link {
+            transition: all 0.25s ease;
+            position: relative;
+        }
+
+        .sidebar-link:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .dark .sidebar-link:hover {
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .sidebar-link.active {
+            background: rgba(59, 130, 246, 0.12);
+            color: #3b82f6;
+            font-weight: 600;
+        }
+
+        .dark .sidebar-link.active {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+        }
+
+        .sidebar-link.active::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 25%;
+            bottom: 25%;
+            width: 3px;
+            background: linear-gradient(180deg, #f97316, #ec4899);
+            border-radius: 0 2px 2px 0;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-fade-in-up {
+            animation: fadeInUp 0.4s ease forwards;
+        }
+
+        @keyframes highlight-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.3); }
+            50% { box-shadow: 0 0 0 8px rgba(249, 115, 22, 0); }
+        }
+
+        .highlight-anim {
+            animation: highlight-pulse 1.5s ease 1;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar-container {
+                position: fixed;
+                top: 56px;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                z-index: 900;
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+            }
+
+            .sidebar-container.open {
+                transform: translateX(0);
+            }
+
+            .content-area {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors duration-300">
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel" data-presets="react">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        const ThemeContext = React.createContext();
+        const useTheme = () => React.useContext(ThemeContext);
+
+        const Navbar = () => {
+            const { isDark, toggleTheme } = useTheme();
+            const [scrolled, setScrolled] = useState(false);
+
+            useEffect(() => {
+                const handleScroll = () => setScrolled(window.scrollY > 50);
+                window.addEventListener('scroll', handleScroll, { passive: true });
+                return () => window.removeEventListener('scroll', handleScroll);
+            }, []);
+
+            return (
+                <nav className={`fixed top-0 left-0 right-0 z-[1000] transition-all duration-300 ${scrolled ? 'py-2 glass bg-white/70 dark:bg-slate-900/70 border-b border-white/20 dark:border-white/5' : 'py-3'}`}>
+                    <div className="max-w-screen-2xl mx-auto px-4 md:px-6 flex items-center justify-between">
+                        <a href="index.html" className="flex items-center gap-2 group">
+                            <img src="icon/favicon.png" alt="GXTStudio" className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl transition-transform group-hover:rotate-[-5deg] group-hover:scale-105" />
+                            <span className="font-bold text-lg sm:text-xl">GXT<span className="text-blue-500">Studio</span></span>
+                            <span className="hidden sm:inline-block ml-2 px-2 py-0.5 text-xs font-medium text-orange-500 bg-orange-50 dark:bg-orange-500/10 rounded-full">使用教程</span>
+                        </a>
+
+                        <div className="flex items-center gap-3">
+                            <button onClick={toggleTheme} className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl glass-button flex items-center justify-center hover:scale-110 transition-transform relative overflow-hidden group">
+                                <i className={`fas fa-sun text-amber-500 absolute transition-all duration-500 text-sm ${isDark ? 'opacity-0 rotate-180 scale-0' : 'opacity-100 rotate-0 scale-100'}`} />
+                                <i className={`fas fa-moon text-indigo-500 absolute transition-all duration-500 text-sm ${isDark ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-180 scale-0'}`} />
+                            </button>
+                            <a href="index.html" className="px-4 py-2 rounded-xl glass-button text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-blue-500 transition-colors">
+                                <i className="fas fa-arrow-left mr-1.5" />返回首页
+                            </a>
+                        </div>
+                    </div>
+                </nav>
+            );
+        };
+
+        const Sidebar = ({ sections, activeSection, onSectionClick, mobileOpen, onMobileClose }) => {
+            return (
+                <aside className={`sidebar-container ${mobileOpen ? 'open' : ''} w-full md:w-64 lg:w-72 flex-shrink-0 md:static overflow-y-auto`}>
+                    <nav className="glass-panel rounded-2xl p-3 md:p-4 h-full">
+                        <div className="flex items-center justify-between md:hidden mb-3 px-2">
+                            <span className="font-semibold text-sm text-slate-500 dark:text-slate-400">教程目录</span>
+                            <button onClick={onMobileClose} className="w-8 h-8 rounded-lg glass-button flex items-center justify-center">
+                                <i className="fas fa-times text-sm" />
+                            </button>
+                        </div>
+                        <h3 className="hidden md:block px-3 pb-3 text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">教程目录</h3>
+                        <ul className="space-y-1">
+                            {sections.map((section) => {
+                                const isActive = activeSection === section.id;
+                                return (
+                                    <li key={section.id}>
+                                        <a
+                                            href={`#${section.id}`}
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                onSectionClick(section.id);
+                                                onMobileClose();
+                                            }}
+                                            className={`sidebar-link flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all ${isActive ? 'active' : 'text-slate-600 dark:text-slate-400'}`}
+                                        >
+                                            <i className={`fas ${section.icon} w-4 text-center ${isActive ? 'text-orange-500' : 'text-slate-400 dark:text-slate-500'}`} />
+                                            <span>{section.label}</span>
+                                            {isActive && <span className="ml-auto w-1.5 h-1.5 rounded-full gradient-bg" />}
+                                        </a>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    </nav>
+                </aside>
+            );
+        };
+
+        const TutorialStep = ({ number, title, children }) => {
+            return (
+                <div className="mb-8">
+                    <div className="flex items-start gap-4 mb-3">
+                        <span className="flex-shrink-0 w-8 h-8 rounded-lg gradient-bg flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-orange-500/20">
+                            {number}
+                        </span>
+                        <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 pt-0.5">{title}</h3>
+                    </div>
+                    <div className="ml-12 text-slate-600 dark:text-slate-300 leading-relaxed space-y-3">
+                        {children}
+                    </div>
+                </div>
+            );
+        };
+
+        const TipBox = ({ type = 'info', children }) => {
+            const colors = {
+                info: 'border-blue-400/30 bg-blue-50/50 dark:bg-blue-500/5 text-blue-700 dark:text-blue-300',
+                warning: 'border-amber-400/30 bg-amber-50/50 dark:bg-amber-500/5 text-amber-700 dark:text-amber-300',
+                success: 'border-emerald-400/30 bg-emerald-50/50 dark:bg-emerald-500/5 text-emerald-700 dark:text-emerald-300',
+            };
+            const icons = {
+                info: 'fa-circle-info',
+                warning: 'fa-triangle-exclamation',
+                success: 'fa-circle-check',
+            };
+
+            return (
+                <div className={`flex items-start gap-3 p-4 rounded-xl border ${colors[type]} text-sm`}>
+                    <i className={`fas ${icons[type]} mt-0.5 flex-shrink-0`} />
+                    <div>{children}</div>
+                </div>
+            );
+        };
+
+        const CodeBlock = ({ code }) => {
+            return (
+                <div className="relative bg-slate-900 dark:bg-slate-800 rounded-xl p-4 overflow-x-auto border border-slate-700/50">
+                    <pre className="text-sm font-mono text-emerald-400 leading-relaxed"><code>{code}</code></pre>
+                    <div className="absolute top-2 right-3 flex gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-red-400/80" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400/80" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400/80" />
+                    </div>
+                </div>
+            );
+        };
+
+        const ImagePlaceholder = ({ label }) => {
+            return (
+                <div className="flex items-center justify-center h-48 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-100/50 dark:bg-slate-800/50">
+                    <div className="text-center text-slate-400 dark:text-slate-500">
+                        <i className="fas fa-image text-3xl mb-2 block" />
+                        <span className="text-sm">{label}</span>
+                    </div>
+                </div>
+            );
+        };
+
+        const ContentArea = ({ activeSection }) => {
+            const contentRef = useRef(null);
+
+            useEffect(() => {
+                if (contentRef.current) {
+                    contentRef.current.scrollTop = 0;
+                }
+            }, [activeSection]);
+
+            const renderContent = () => {
+                switch (activeSection) {
+                    case 'intro':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-rocket gradient-text mr-3" />软件简介
+                                </h2>
+                                <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
+                                    GXTStudio 是一款专业的 <strong className="text-orange-500">GTA 系列游戏文本资源编辑器</strong>，用于查看、编辑和管理
+                                    GXT 格式的游戏文本文件。支持 GTA III、Vice City、San Andreas、Liberty City Stories、Vice City Stories 以及 GTA IV 等多个版本的 GXT 文件格式。
+                                </p>
+                                <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+                                    无论你是游戏汉化者、MOD 开发者还是普通玩家，GXTStudio 都能帮助你高效地处理游戏中的各种文本资源，
+                                    包括菜单文本、任务描述、对话内容等。
+                                </p>
+
+                                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">主要功能</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                                    {[
+                                        { icon: 'fa-edit', title: '文本编辑', desc: '支持键值对的批量编辑与搜索' },
+                                        { icon: 'fa-file-code', title: '多格式支持', desc: '兼容 GTA 全系列 GXT 格式' },
+                                        { icon: 'fa-language', title: '编码转换', desc: '自动处理多种字符编码' },
+                                        { icon: 'fa-magnifying-glass', title: '快速搜索', desc: '多条件搜索与筛选功能' },
+                                        { icon: 'fa-file-export', title: '导入导出', desc: 'CSV 等格式的数据交换' },
+                                        { icon: 'fa-rotate-left', title: '撤销重做', desc: '完善的编辑历史支持' },
+                                    ].map((item, i) => (
+                                        <div key={i} className="flex items-start gap-3 p-3 rounded-xl glass-card">
+                                            <i className={`fas ${item.icon} text-orange-500 mt-0.5`} />
+                                            <div>
+                                                <div className="font-medium text-slate-800 dark:text-slate-100 text-sm">{item.title}</div>
+                                                <div className="text-xs text-slate-500 dark:text-slate-400">{item.desc}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">支持的游戏</h3>
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+                                    {['GTA III','GTA Vice City','GTA San Andreas','GTA LCS','GTA VCS','GTA IV'].map((game, i) => (
+                                        <div key={i} className="text-center py-3 px-2 rounded-xl glass-card text-sm font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
+                                            {game}
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <TipBox type="info">
+                                    GXTStudio 目前支持 Windows 平台，最低要求 Windows 7 及以上操作系统。
+                                </TipBox>
+                            </div>
+                        );
+
+                    case 'install':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-download gradient-text mr-3" />安装与启动
+                                </h2>
+
+                                <TutorialStep number={1} title="下载软件">
+                                    <p>前往 GXTStudio 的官方网站或 GitHub Releases 页面下载最新版本的安装包。</p>
+                                    <div className="flex gap-3 mt-2">
+                                        <a href="index.html#download" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl gradient-bg text-white text-sm font-medium shadow-lg shadow-orange-500/25 transition-transform hover:scale-105">
+                                            <i className="fas fa-download" />前往下载页面
+                                        </a>
+                                    </div>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="运行软件">
+                                    <p>下载完成后，解压文件到任意目录，双击 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm text-orange-500">GXTStudio.exe</code> 即可启动。</p>
+                                    <TipBox type="warning">
+                                        首次运行时，Windows 可能会弹出安全警告，请选择"仍要运行"以继续。
+                                    </TipBox>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="界面语言设置">
+                                    <p>软件启动后默认识别系统语言。如需切换界面语言，请通过菜单栏 <strong>Language</strong> / <strong>语言</strong> 进行选择。</p>
+                                </TutorialStep>
+                            </div>
+                        );
+
+                    case 'interface':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-window-maximize gradient-text mr-3" />界面概览
+                                </h2>
+                                <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+                                    GXTStudio 的主界面由以下几个主要区域组成，了解它们可以帮助你更快上手。
+                                </p>
+
+                                <div className="space-y-4 mb-6">
+                                    {[
+                                        { label: '① 菜单栏', desc: '包含文件、编辑、视图、工具等所有功能入口' },
+                                        { label: '② 工具栏', desc: '常用操作的快捷按钮集合' },
+                                        { label: '③ 文件列表', desc: '显示当前打开的所有 GXT 文件' },
+                                        { label: '④ 条目列表', desc: '显示当前文件中所有的键值对条目' },
+                                        { label: '⑤ 编辑区域', desc: '编辑选中条目的键名和文本内容' },
+                                        { label: '⑥ 状态栏', desc: '显示当前文件信息和操作状态' },
+                                    ].map((item, i) => (
+                                        <div key={i} className="flex items-start gap-3 p-3 rounded-xl glass-card">
+                                            <span className="flex-shrink-0 w-6 h-6 rounded-md bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-500 dark:text-slate-400">
+                                                {i + 1}
+                                            </span>
+                                            <div>
+                                                <div className="font-medium text-slate-800 dark:text-slate-100 text-sm">{item.label}</div>
+                                                <div className="text-xs text-slate-500 dark:text-slate-400">{item.desc}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <TipBox type="info">
+                                    所有面板均支持拖拽调整大小和位置，你可以根据自己的喜好自定义工作区布局。
+                                </TipBox>
+                            </div>
+                        );
+
+                    case 'open-file':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-folder-open gradient-text mr-3" />打开文件
+                                </h2>
+
+                                <TutorialStep number={1} title="打开单个文件">
+                                    <p>点击菜单栏 <strong>文件 → 打开</strong>，或直接按快捷键 <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs">Ctrl+O</kbd>，选择要打开的 .gxt 文件。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="打开文件夹">
+                                    <p>如果你的 GXT 文件分散在多个子目录，可以使用 <strong>文件 → 打开文件夹</strong> 功能，GXTStudio 会递归扫描文件夹内所有 .gxt 文件并批量导入。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="拖拽打开">
+                                    <p>直接将 .gxt 文件从文件资源管理器拖拽到软件窗口中，即可快速打开。</p>
+                                    <TipBox type="success">
+                                        拖拽支持批量操作——选中多个文件后一起拖入即可同时打开。
+                                    </TipBox>
+                                </TutorialStep>
+
+                                <TipBox type="warning">
+                                    打开文件时请确保文件未被其他程序占用，否则可能导致读取失败。
+                                </TipBox>
+                            </div>
+                        );
+
+                    case 'edit-text':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-pen-to-square gradient-text mr-3" />编辑文本
+                                </h2>
+
+                                <TutorialStep number={1} title="选择条目">
+                                    <p>在左侧的 <strong>条目列表</strong> 中点击任意条目，右侧编辑区域会显示该条目的键名和对应文本。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="修改文本">
+                                    <p>在编辑区域中直接修改文本内容，修改后该条目会被标记为已修改状态（条目名称变色提示）。</p>
+                                    <TipBox type="info">
+                                        支持多行文本编辑。对于包含换行符的文本（游戏中常见的多行显示），可直接在编辑框中换行输入。
+                                    </TipBox>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="快速搜索">
+                                    <p>按下 <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs">Ctrl+F</kbd> 打开搜索栏，输入关键词即可在所有条目中快速定位。</p>
+                                    <p className="mt-2">搜索支持以下模式：</p>
+                                    <ul className="list-disc list-inside space-y-1 text-sm">
+                                        <li><strong>普通搜索</strong> —— 模糊匹配键名和文本内容</li>
+                                        <li><strong>精确搜索</strong> —— 完全匹配指定字段</li>
+                                        <li><strong>正则搜索</strong> —— 使用正则表达式进行高级匹配</li>
+                                    </ul>
+                                </TutorialStep>
+
+                                <TutorialStep number={4} title="批量操作">
+                                    <p>选中多个条目后右键，可执行以下批量操作：</p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {['批量替换文本', '批量删除条目', '统一添加前缀/后缀', '大小写转换'].map((op, i) => (
+                                            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card text-sm">
+                                                <i className="fas fa-check-circle text-emerald-500 text-xs" />
+                                                {op}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </TutorialStep>
+                            </div>
+                        );
+
+                    case 'save-export':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-floppy-disk gradient-text mr-3" />保存与导出
+                                </h2>
+
+                                <TutorialStep number={1} title="保存文件">
+                                    <p>修改完成后，按 <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs">Ctrl+S</kbd> 或点击工具栏的保存按钮即可保存当前文件。</p>
+                                    <TipBox type="warning">
+                                        保存操作会覆盖原始文件。建议在修改前先备份原始 GXT 文件。
+                                    </TipBox>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="另存为">
+                                    <p>如需保留原始文件不变，可以使用 <strong>文件 → 另存为</strong> 将修改后的内容保存为新文件。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="导出为 CSV">
+                                    <p>使用 <strong>文件 → 导出 → CSV</strong> 可将当前条目的键值和文本导出为 CSV 格式，方便使用 Excel 等工具进行批量处理。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={4} title="从 CSV 导入">
+                                    <p>使用 <strong>文件 → 导入 → CSV</strong> 可将 CSV 格式的翻译数据导入到当前 GXT 文件中。</p>
+                                    <div className="p-4 rounded-xl bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                                        <p className="font-medium text-sm mb-2 text-slate-700 dark:text-slate-300">CSV 格式要求：</p>
+                                        <CodeBlock code={`EntryName,Text
+"FMAP_WAY","寻路点"
+"FMAP_N","北"
+"FMAP_S","南"
+"FMAP_E","东"
+"FMAP_W","西"`} />
+                                    </div>
+                                </TutorialStep>
+                            </div>
+                        );
+
+                    case 'encoding':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-font gradient-text mr-3" />编码设置
+                                </h2>
+                                <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+                                    不同版本的 GTA 游戏使用不同的字符编码方案，正确设置编码是确保文本不出现乱码的关键。
+                                </p>
+
+                                <div className="overflow-x-auto mb-6">
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">游戏</th>
+                                                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">编码</th>
+                                                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">文件格式</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                            {[
+                                                ['GTA III', 'Windows-1252', 'GXT (无TABL)'],
+                                                ['GTA Vice City', 'UTF-16', 'GXT'],
+                                                ['GTA San Andreas', 'Windows-1252', 'GXT'],
+                                                ['GTA LCS', 'UTF-16', 'GXT'],
+                                                ['GTA VCS', 'UTF-16', 'GXT'],
+                                                ['GTA IV', 'UTF-8', 'GXT2 (哈希键)'],
+                                            ].map((row, i) => (
+                                                <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                                    <td className="py-2.5 px-4 font-medium text-slate-800 dark:text-slate-200">{row[0]}</td>
+                                                    <td className="py-2.5 px-4 font-mono text-xs text-blue-500">{row[1]}</td>
+                                                    <td className="py-2.5 px-4 text-slate-500 dark:text-slate-400">{row[2]}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <TipBox type="info">
+                                    GXTStudio 在打开文件时会自动检测格式并选择合适的编码。如果自动检测不准确，
+                                    可以通过 <strong>文件 → 属性</strong> 手动指定编码。
+                                </TipBox>
+                            </div>
+                        );
+
+                    case 'faq':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-circle-question gradient-text mr-3" />常见问题
+                                </h2>
+
+                                <div className="space-y-4">
+                                    {[
+                                        {
+                                            q: 'Q1: 打开文件后显示乱码怎么办？',
+                                            a: '请先确认文件对应的游戏版本。在菜单栏 文件 → 属性 中可以手动切换字符编码。如果不确定编码，可依次尝试 UTF-16、Windows-1252 和 UTF-8。'
+                                        },
+                                        {
+                                            q: 'Q2: 为什么保存后游戏中文本没有变化？',
+                                            a: '请确认已将修改后的 GXT 文件放回游戏目录的正确位置。部分游戏需要新建存档才能看到文本修改效果。另外，请确保使用的是与游戏版本匹配的 GXT 格式。'
+                                        },
+                                        {
+                                            q: 'Q3: 如何批量翻译整个文件？',
+                                            a: '建议使用导出 → CSV 功能，将文本导出后在 Excel 中翻译，翻译完成后再导入回 GXT 文件。对于大型汉化项目，这种方式效率最高。'
+                                        },
+                                        {
+                                            q: 'Q4: 软件提示"无法识别的文件格式"？',
+                                            a: '这表示文件可能不是标准的 GXT 格式，或文件已损坏。请检查文件来源，确保是从游戏原始目录中提取的。'
+                                        },
+                                        {
+                                            q: 'Q5: 支持 GTA V 的 GXT2 格式吗？',
+                                            a: '目前的版本主要支持 GTA III ~ GTA IV 的格式。GTA V 使用了更复杂的格式，后续版本会考虑支持。'
+                                        },
+                                    ].map((item, i) => (
+                                        <div key={i} className="glass-card rounded-xl p-4">
+                                            <h4 className="font-semibold text-slate-800 dark:text-slate-100 mb-2">{item.q}</h4>
+                                            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{item.a}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+
+                    case 'shortcuts':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-keyboard gradient-text mr-3" />快捷键一览
+                                </h2>
+
+                                <div className="space-y-1 mb-6">
+                                    {[
+                                        ['Ctrl+O', '打开文件'],
+                                        ['Ctrl+S', '保存文件'],
+                                        ['Ctrl+Shift+S', '另存为...'],
+                                        ['Ctrl+F', '搜索条目'],
+                                        ['Ctrl+Z', '撤销'],
+                                        ['Ctrl+Y', '重做'],
+                                        ['Ctrl+A', '全选条目'],
+                                        ['Delete', '删除选中条目'],
+                                        ['F2', '重命名选中条目'],
+                                        ['F5', '刷新文件列表'],
+                                        ['Ctrl+Tab', '切换文件标签'],
+                                        ['Ctrl+W', '关闭当前文件'],
+                                    ].map(([key, desc], i) => (
+                                        <div key={i} className="flex items-center justify-between py-2.5 px-4 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                            <kbd className="px-2.5 py-1 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs text-slate-700 dark:text-slate-300 min-w-[80px] text-center">{key}</kbd>
+                                            <span className="text-sm text-slate-600 dark:text-slate-400">{desc}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        );
+
+                    default:
+                        return null;
+                }
+            };
+
+            return (
+                <main ref={contentRef} className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 py-6 min-h-0">
+                    <div className="glass-card rounded-2xl p-5 md:p-8 max-w-4xl mx-auto">
+                        {renderContent()}
+                    </div>
+                </main>
+            );
+        };
+
+        const MobileNavToggle = ({ onClick, section }) => {
+            const sections = {
+                intro: '软件简介',
+                install: '安装与启动',
+                interface: '界面概览',
+                'open-file': '打开文件',
+                'edit-text': '编辑文本',
+                'save-export': '保存与导出',
+                encoding: '编码设置',
+                faq: '常见问题',
+                shortcuts: '快捷键',
+            };
+
+            return (
+                <button
+                    onClick={onClick}
+                    className="md:hidden fixed bottom-6 right-6 z-[950] w-14 h-14 rounded-2xl gradient-bg text-white shadow-lg shadow-orange-500/30 flex flex-col items-center justify-center gap-0.5 text-xs font-medium active:scale-95 transition-transform"
+                >
+                    <i className="fas fa-list-ul text-base mb-0.5" />
+                    <span className="text-[10px]">{sections[section] || '目录'}</span>
+                </button>
+            );
+        };
+
+        const sections = [
+            { id: 'intro', label: '软件简介', icon: 'fa-rocket' },
+            { id: 'install', label: '安装与启动', icon: 'fa-download' },
+            { id: 'interface', label: '界面概览', icon: 'fa-window-maximize' },
+            { id: 'open-file', label: '打开文件', icon: 'fa-folder-open' },
+            { id: 'edit-text', label: '编辑文本', icon: 'fa-pen-to-square' },
+            { id: 'save-export', label: '保存与导出', icon: 'fa-floppy-disk' },
+            { id: 'encoding', label: '编码设置', icon: 'fa-font' },
+            { id: 'faq', label: '常见问题', icon: 'fa-circle-question' },
+            { id: 'shortcuts', label: '快捷键一览', icon: 'fa-keyboard' },
+        ];
+
+        const App = () => {
+            const [isDark, setIsDark] = useState(() => {
+                try {
+                    const saved = localStorage.getItem('gxtstudio-theme');
+                    if (saved) return JSON.parse(saved);
+                    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+                } catch {
+                    return false;
+                }
+            });
+            const [activeSection, setActiveSection] = useState('intro');
+            const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+            useEffect(() => {
+                document.documentElement.classList.toggle('dark', isDark);
+                try { localStorage.setItem('gxtstudio-theme', JSON.stringify(isDark)); } catch {}
+            }, [isDark]);
+
+            const toggleTheme = useCallback(() => setIsDark(prev => !prev), []);
+
+            const handleSectionClick = useCallback((sectionId) => {
+                setActiveSection(sectionId);
+            }, []);
+
+            const themeValue = React.useMemo(() => ({ isDark, toggleTheme }), [isDark, toggleTheme]);
+
+            return (
+                <ThemeContext.Provider value={themeValue}>
+                    <div className="min-h-screen flex flex-col">
+                        <Navbar />
+                        <div className="flex-1 flex pt-16 md:pt-20 gap-4 p-4 md:p-6 max-w-screen-2xl mx-auto w-full md:overflow-hidden">
+                            <Sidebar
+                                sections={sections}
+                                activeSection={activeSection}
+                                onSectionClick={handleSectionClick}
+                                mobileOpen={mobileMenuOpen}
+                                onMobileClose={() => setMobileMenuOpen(false)}
+                            />
+                            <ContentArea activeSection={activeSection} />
+                        </div>
+                        <MobileNavToggle
+                            onClick={() => setMobileMenuOpen(true)}
+                            section={activeSection}
+                        />
+                    </div>
+                </ThemeContext.Provider>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

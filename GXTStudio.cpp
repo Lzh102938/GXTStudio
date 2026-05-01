@@ -1006,6 +1006,19 @@ void GXTStudio::clearSearchCache()
     }
     
     m_searchState.clear();
+    
+    FileTab* currentTab = getCurrentTab();
+    if (currentTab) {
+        currentTab->filteredRows.clear();
+        if (currentTab->filterProxyModel) {
+            currentTab->filterProxyModel->clearFilter();
+        }
+        if (currentTab->filterButton) {
+            const bool wasBlocked = currentTab->filterButton->blockSignals(true);
+            currentTab->filterButton->setChecked(false);
+            currentTab->filterButton->blockSignals(wasBlocked);
+        }
+    }
 }
 
 // 延迟初始化非必要组件
@@ -10048,7 +10061,7 @@ void GXTStudio::updateCharTableColors(FileTab& tab)
             tab.charTableNameLabel->setText(QString("<b>%1</b> (%2 x %3)").arg(fileName).arg(cols).arg(rows));
             tab.charTableNameLabel->setStyleSheet(StyleSheetCache::getStyle("labelWithMargin", textColorName));
         } else {
-            tab.charTableNameLabel->setText(QString("<span style=\"font-family:'%1'; font-size:14px; color: %2;\">%3</span> <span style=\"font-size:14px; font-weight: bold; color: %4;\">%5</span> <span style=\"font-size:14px; color: %4;\">(%6 x %7)</span>")
+            tab.charTableNameLabel->setText(QString("<span style=\"font-family:'%1'; font-size:14px; font-weight: bold; color: %2;\">%3</span> <span style=\"font-size:14px; font-weight: bold; color: %4;\">%5</span> <span style=\"font-size:14px; color: %4;\">(%6 x %7)</span>")
                 .arg(entryFontFamily).arg(textColorName).arg(QString(FA::QTable))
                 .arg(textColorName).arg(fileName).arg(cols).arg(rows));
         }
@@ -13061,7 +13074,7 @@ CharTableWidget* GXTStudio::createCharTableTab(const QString& fileName, const Ch
         nameLabel->setText(QString("<b>%1</b> (%2 x %3)").arg(fileName).arg(data.cols).arg(data.rows));
         nameLabel->setStyleSheet(StyleSheetCache::getStyle("labelWithMargin", textColorName));
     } else {
-        nameLabel->setText(QString("<span style=\"font-family:'%1'; font-size:14px; color: %2;\">%3</span> <span style=\"font-size:14px; font-weight: bold; color: %4;\">%5</span> <span style=\"font-size:14px; color: %4;\">(%6 x %7)</span>")
+        nameLabel->setText(QString("<span style=\"font-family:'%1'; font-size:14px; font-weight: bold; color: %2;\">%3</span> <span style=\"font-size:14px; font-weight: bold; color: %4;\">%5</span> <span style=\"font-size:14px; color: %4;\">(%6 x %7)</span>")
             .arg(entryFontFamily).arg(textColorName).arg(QString(FA::QTable))
             .arg(textColorName).arg(fileName).arg(data.cols).arg(data.rows));
     }
