@@ -81,7 +81,7 @@ void SmartTranslator::setBatchPrompt(const QString& prompt)
 void SmartTranslator::setModel(const QString& model)
 {
     QMutexLocker locker(&m_mutex);
-    m_model = model.isEmpty() ? "mimo-v2-flash" : model;
+    m_model = model.isEmpty() ? "mimo-v2.5-pro" : model;
 }
 
 void SmartTranslator::setProvider(const QString& provider)
@@ -416,7 +416,7 @@ void SmartTranslator::translateBatchAsync(const QList<TranslateTask>& batch, int
 
             // 参考Python版本的请求格式
             QJsonObject requestObj;
-            QString modelToUse = m_model.isEmpty() ? "mimo-v2-flash" : m_model;
+            QString modelToUse = m_model.isEmpty() ? "mimo-v2.5-pro" : m_model;
             requestObj["model"] = modelToUse;
             requestObj["temperature"] = 0.3;
             requestObj["max_tokens"] = 4096;

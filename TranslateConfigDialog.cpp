@@ -46,7 +46,7 @@ const int TranslateConfigDialog::DEFAULT_BATCH_SIZE = 32;
 const int TranslateConfigDialog::DEFAULT_MAX_CONCURRENT = 12;
 const int TranslateConfigDialog::DEFAULT_MAX_RETRIES = 3;
 const int TranslateConfigDialog::DEFAULT_REQUEST_TIMEOUT = 180;
-const QString TranslateConfigDialog::DEFAULT_MODEL = "mimo-v2-flash";
+const QString TranslateConfigDialog::DEFAULT_MODEL = "mimo-v2.5-pro";
 const QString TranslateConfigDialog::DEFAULT_PROVIDER = "xiaomi";
 
 const QList<TranslateConfigDialog::ProviderInfo> TranslateConfigDialog::s_providers = {
@@ -59,16 +59,22 @@ const QList<TranslateConfigDialog::ProviderInfo> TranslateConfigDialog::s_provid
 };
 
 const QList<TranslateConfigDialog::ModelInfo> TranslateConfigDialog::s_models = {
-    { "mimo-v2-flash", "MiMo Flash (快速)", 
+    { "mimo-v2.5-pro", "MiMo 2.5 Pro (最新)", 
+      "最新版本，更强推理能力，翻译质量最高，推荐使用", 131072, 1.0, "xiaomi" },
+    { "mimo-v2-pro", "MiMo V2 Pro (专业)", 
+      "专业版本，较强的理解和推理能力，翻译质量高", 131072, 1.0, "xiaomi" },
+    { "mimo-v2-flash", "MiMo V2 Flash (快速)", 
       "快速响应，适合大批量翻译，性价比高", 65536, 0.3, "xiaomi" },
-    { "mimo-v2-pro", "MiMo Pro (专业)", 
-      "专业版本，更强的理解和推理能力，翻译质量更高", 131072, 1.0, "xiaomi" },
-    { "mimo-v2-omni", "MiMo Omni (全能)", 
+    { "mimo-v2-omni", "MiMo V2 Omni (全能)", 
       "全能版本，平衡速度与质量，支持多模态", 32768, 1.0, "xiaomi" },
-    { "deepseek-chat", "DeepSeek Chat", 
-      "DeepSeek-V3 非思考模式，适合日常翻译任务", 64000, 0.3, "deepseek" },
-    { "deepseek-reasoner", "DeepSeek Reasoner", 
-      "DeepSeek-V3 思考模式，更强的推理能力，翻译质量更高", 64000, 0.3, "deepseek" }
+    { "deepseek-v4-pro", "DeepSeek V4 Pro (最新)", 
+      "最新 V4 专业版，思考模式，翻译质量最高", 128000, 1.0, "deepseek" },
+    { "deepseek-v4-flash", "DeepSeek V4 Flash (快速)", 
+      "最新 V4 快速版，非思考模式，高性价比", 128000, 0.3, "deepseek" },
+    { "deepseek-chat", "DeepSeek Chat (即将弃用)", 
+      "V3 非思考模式，将于 2026/07/24 弃用，请迁移至 V4 Flash", 64000, 0.3, "deepseek" },
+    { "deepseek-reasoner", "DeepSeek Reasoner (即将弃用)", 
+      "V3 思考模式，将于 2026/07/24 弃用，请迁移至 V4 Pro", 64000, 0.3, "deepseek" }
 };
 
 const QList<TranslateConfigDialog::UnifiedPromptTemplate> TranslateConfigDialog::s_presets = {

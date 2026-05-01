@@ -333,30 +333,6 @@
             );
         };
 
-        const CodeBlock = ({ code }) => {
-            return (
-                <div className="relative bg-slate-900 dark:bg-slate-800 rounded-xl p-4 overflow-x-auto border border-slate-700/50">
-                    <pre className="text-sm font-mono text-emerald-400 leading-relaxed"><code>{code}</code></pre>
-                    <div className="absolute top-2 right-3 flex gap-1.5">
-                        <span className="w-2.5 h-2.5 rounded-full bg-red-400/80" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400/80" />
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400/80" />
-                    </div>
-                </div>
-            );
-        };
-
-        const ImagePlaceholder = ({ label }) => {
-            return (
-                <div className="flex items-center justify-center h-48 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-100/50 dark:bg-slate-800/50">
-                    <div className="text-center text-slate-400 dark:text-slate-500">
-                        <i className="fas fa-image text-3xl mb-2 block" />
-                        <span className="text-sm">{label}</span>
-                    </div>
-                </div>
-            );
-        };
-
         const ContentArea = ({ activeSection }) => {
             const contentRef = useRef(null);
 
@@ -375,23 +351,25 @@
                                     <i className="fas fa-rocket gradient-text mr-3" />软件简介
                                 </h2>
                                 <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
-                                    GXTStudio 是一款专业的 <strong className="text-orange-500">GTA 系列游戏文本资源编辑器</strong>，用于查看、编辑和管理
-                                    GXT 格式的游戏文本文件。支持 GTA III、Vice City、San Andreas、Liberty City Stories、Vice City Stories 以及 GTA IV 等多个版本的 GXT 文件格式。
+                                    GXTStudio 是一款专业的 <strong className="text-orange-500">GTA 系列游戏文本资源编辑器</strong>，由 <strong>Lzh10_慕黑</strong> 使用 C++ 和 Qt6 开发，是原 III.VC.SAGXTExtracter 项目的替代品。
+                                    用于查看、编辑和管理 GXT 格式的游戏文本文件。
                                 </p>
                                 <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
                                     无论你是游戏汉化者、MOD 开发者还是普通玩家，GXTStudio 都能帮助你高效地处理游戏中的各种文本资源，
-                                    包括菜单文本、任务描述、对话内容等。
+                                    包括菜单文本、任务描述、对话内容等。软件还支持 DAT 字库文件编辑、WHM 页面数据查看导出、AI 智能翻译等高级功能。
                                 </p>
 
                                 <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">主要功能</h3>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                                     {[
-                                        { icon: 'fa-edit', title: '文本编辑', desc: '支持键值对的批量编辑与搜索' },
-                                        { icon: 'fa-file-code', title: '多格式支持', desc: '兼容 GTA 全系列 GXT 格式' },
-                                        { icon: 'fa-language', title: '编码转换', desc: '自动处理多种字符编码' },
-                                        { icon: 'fa-magnifying-glass', title: '快速搜索', desc: '多条件搜索与筛选功能' },
-                                        { icon: 'fa-file-export', title: '导入导出', desc: 'CSV 等格式的数据交换' },
-                                        { icon: 'fa-rotate-left', title: '撤销重做', desc: '完善的编辑历史支持' },
+                                        { icon: 'fa-language', title: '智能翻译系统', desc: '内置 AI 翻译引擎，支持小米 MiMo、DeepSeek 等大模型' },
+                                        { icon: 'fa-table-cells', title: '多版本支持', desc: '兼容 GTA III~GTA V 全系列 GXT 格式' },
+                                        { icon: 'fa-palette', title: '文本渲染预览', desc: '实时预览颜色标记、换行符、按键标记等' },
+                                        { icon: 'fa-code', title: '码表转换', desc: '支持罪吧/拇指玩/Play汉化及VC/IV日语版本' },
+                                        { icon: 'fa-magnifying-glass', title: '智能搜索', desc: '正则表达式、大小写敏感、高亮显示' },
+                                        { icon: 'fa-rotate-left', title: '撤销重做', desc: '多步操作回退，编辑更安全可靠' },
+                                        { icon: 'fa-file-export', title: '导出与批量导出', desc: '支持导出到文件，自动生成汇总与分表' },
+                                        { icon: 'fa-gear', title: '个性化设置', desc: '自定义背景图片、高斯模糊、亮度调节' },
                                     ].map((item, i) => (
                                         <div key={i} className="flex items-start gap-3 p-3 rounded-xl glass-card">
                                             <i className={`fas ${item.icon} text-orange-500 mt-0.5`} />
@@ -405,7 +383,7 @@
 
                                 <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">支持的游戏</h3>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-                                    {['GTA III','GTA Vice City','GTA San Andreas','GTA LCS','GTA VCS','GTA IV'].map((game, i) => (
+                                    {['GTA III','GTA Vice City','GTA San Andreas','GTA IV','GTA V'].map((game, i) => (
                                         <div key={i} className="text-center py-3 px-2 rounded-xl glass-card text-sm font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
                                             {game}
                                         </div>
@@ -413,73 +391,7 @@
                                 </div>
 
                                 <TipBox type="info">
-                                    GXTStudio 目前支持 Windows 平台，最低要求 Windows 7 及以上操作系统。
-                                </TipBox>
-                            </div>
-                        );
-
-                    case 'install':
-                        return (
-                            <div className="animate-fade-in-up">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
-                                    <i className="fas fa-download gradient-text mr-3" />安装与启动
-                                </h2>
-
-                                <TutorialStep number={1} title="下载软件">
-                                    <p>前往 GXTStudio 的官方网站或 GitHub Releases 页面下载最新版本的安装包。</p>
-                                    <div className="flex gap-3 mt-2">
-                                        <a href="index.html#download" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl gradient-bg text-white text-sm font-medium shadow-lg shadow-orange-500/25 transition-transform hover:scale-105">
-                                            <i className="fas fa-download" />前往下载页面
-                                        </a>
-                                    </div>
-                                </TutorialStep>
-
-                                <TutorialStep number={2} title="运行软件">
-                                    <p>下载完成后，解压文件到任意目录，双击 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm text-orange-500">GXTStudio.exe</code> 即可启动。</p>
-                                    <TipBox type="warning">
-                                        首次运行时，Windows 可能会弹出安全警告，请选择"仍要运行"以继续。
-                                    </TipBox>
-                                </TutorialStep>
-
-                                <TutorialStep number={3} title="界面语言设置">
-                                    <p>软件启动后默认识别系统语言。如需切换界面语言，请通过菜单栏 <strong>Language</strong> / <strong>语言</strong> 进行选择。</p>
-                                </TutorialStep>
-                            </div>
-                        );
-
-                    case 'interface':
-                        return (
-                            <div className="animate-fade-in-up">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
-                                    <i className="fas fa-window-maximize gradient-text mr-3" />界面概览
-                                </h2>
-                                <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
-                                    GXTStudio 的主界面由以下几个主要区域组成，了解它们可以帮助你更快上手。
-                                </p>
-
-                                <div className="space-y-4 mb-6">
-                                    {[
-                                        { label: '① 菜单栏', desc: '包含文件、编辑、视图、工具等所有功能入口' },
-                                        { label: '② 工具栏', desc: '常用操作的快捷按钮集合' },
-                                        { label: '③ 文件列表', desc: '显示当前打开的所有 GXT 文件' },
-                                        { label: '④ 条目列表', desc: '显示当前文件中所有的键值对条目' },
-                                        { label: '⑤ 编辑区域', desc: '编辑选中条目的键名和文本内容' },
-                                        { label: '⑥ 状态栏', desc: '显示当前文件信息和操作状态' },
-                                    ].map((item, i) => (
-                                        <div key={i} className="flex items-start gap-3 p-3 rounded-xl glass-card">
-                                            <span className="flex-shrink-0 w-6 h-6 rounded-md bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-500 dark:text-slate-400">
-                                                {i + 1}
-                                            </span>
-                                            <div>
-                                                <div className="font-medium text-slate-800 dark:text-slate-100 text-sm">{item.label}</div>
-                                                <div className="text-xs text-slate-500 dark:text-slate-400">{item.desc}</div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                <TipBox type="info">
-                                    所有面板均支持拖拽调整大小和位置，你可以根据自己的喜好自定义工作区布局。
+                                    本软件免费开源，由 Lzh10_慕黑 开发维护。官方网站：gxtstudio.com。平台支持 Windows 7 及以上。
                                 </TipBox>
                             </div>
                         );
@@ -491,24 +403,27 @@
                                     <i className="fas fa-folder-open gradient-text mr-3" />打开文件
                                 </h2>
 
-                                <TutorialStep number={1} title="打开单个文件">
-                                    <p>点击菜单栏 <strong>文件 → 打开</strong>，或直接按快捷键 <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs">Ctrl+O</kbd>，选择要打开的 .gxt 文件。</p>
+                                <TutorialStep number={1} title="打开 GXT 文件">
+                                    <p>双击 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm text-orange-500">GXTStudio.exe</code> 启动编辑器，点击 <strong>文件 → 打开</strong>，选择要编辑的 .gxt 文件即可。</p>
+                                    <TipBox type="warning">
+                                        编辑前需<strong>解除只读模式</strong>，否则无法进行编辑。可在状态栏右下角切换。
+                                    </TipBox>
                                 </TutorialStep>
 
-                                <TutorialStep number={2} title="打开文件夹">
-                                    <p>如果你的 GXT 文件分散在多个子目录，可以使用 <strong>文件 → 打开文件夹</strong> 功能，GXTStudio 会递归扫描文件夹内所有 .gxt 文件并批量导入。</p>
+                                <TutorialStep number={2} title="多标签页支持">
+                                    <p>GXTStudio 支持多标签页，你可以一次性打开多个 GXT 文件，每个文件独占一个标签页，方便在不同文件间快速切换。</p>
                                 </TutorialStep>
 
-                                <TutorialStep number={3} title="拖拽打开">
+                                <TutorialStep number={3} title="最近文件">
+                                    <p>打开过一次文件后，程序会自动记录历史。通过 <strong>文件 → 最近文件</strong> 可以快速重新打开之前编辑过的文件。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={4} title="拖拽打开">
                                     <p>直接将 .gxt 文件从文件资源管理器拖拽到软件窗口中，即可快速打开。</p>
                                     <TipBox type="success">
                                         拖拽支持批量操作——选中多个文件后一起拖入即可同时打开。
                                     </TipBox>
                                 </TutorialStep>
-
-                                <TipBox type="warning">
-                                    打开文件时请确保文件未被其他程序占用，否则可能导致读取失败。
-                                </TipBox>
                             </div>
                         );
 
@@ -519,37 +434,53 @@
                                     <i className="fas fa-pen-to-square gradient-text mr-3" />编辑文本
                                 </h2>
 
-                                <TutorialStep number={1} title="选择条目">
-                                    <p>在左侧的 <strong>条目列表</strong> 中点击任意条目，右侧编辑区域会显示该条目的键名和对应文本。</p>
-                                </TutorialStep>
-
-                                <TutorialStep number={2} title="修改文本">
-                                    <p>在编辑区域中直接修改文本内容，修改后该条目会被标记为已修改状态（条目名称变色提示）。</p>
-                                    <TipBox type="info">
-                                        支持多行文本编辑。对于包含换行符的文本（游戏中常见的多行显示），可直接在编辑框中换行输入。
-                                    </TipBox>
-                                </TutorialStep>
-
-                                <TutorialStep number={3} title="快速搜索">
-                                    <p>按下 <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs">Ctrl+F</kbd> 打开搜索栏，输入关键词即可在所有条目中快速定位。</p>
-                                    <p className="mt-2">搜索支持以下模式：</p>
-                                    <ul className="list-disc list-inside space-y-1 text-sm">
-                                        <li><strong>普通搜索</strong> —— 模糊匹配键名和文本内容</li>
-                                        <li><strong>精确搜索</strong> —— 完全匹配指定字段</li>
-                                        <li><strong>正则搜索</strong> —— 使用正则表达式进行高级匹配</li>
+                                <TutorialStep number={1} title="编辑GXT文本条目">
+                                    <p>打开 GXT 文件后，标签页会显示 <strong>表格列表</strong> 和 <strong>文本条目表</strong>。</p>
+                                    <ul className="list-disc list-inside space-y-1 text-sm mt-2">
+                                        <li><strong>表格列表</strong>：右键或双击表格条目可重命名表名；点击下方 <span className="font-mono text-orange-500">+</span> 按钮可添加表格条目（部分版本的表格条目数受限）。</li>
+                                        <li><strong>文本条目表</strong>：双击条目可编辑文本内容。若文本过长，可右键选择"编辑为"，进入独立弹窗编辑。</li>
                                     </ul>
                                 </TutorialStep>
 
-                                <TutorialStep number={4} title="批量操作">
-                                    <p>选中多个条目后右键，可执行以下批量操作：</p>
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        {['批量替换文本', '批量删除条目', '统一添加前缀/后缀', '大小写转换'].map((op, i) => (
-                                            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card text-sm">
-                                                <i className="fas fa-check-circle text-emerald-500 text-xs" />
-                                                {op}
-                                            </div>
-                                        ))}
+                                <TutorialStep number={2} title="添加新键值对">
+                                    <p>在文本条目表下方填写 KEY 和 VALUE，点击 <span className="font-mono text-orange-500">+</span> 按钮即可添加新的键值对条目。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="批量替换">
+                                    <p>使用 <strong>编辑 → 替换</strong>，在弹出的替换弹窗中输入要替换的字符和目标字符，即可批量替换。</p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card text-sm">
+                                            <i className="fas fa-check-circle text-emerald-500 text-xs" />正则表达式替换
+                                        </div>
+                                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card text-sm">
+                                            <i className="fas fa-check-circle text-emerald-500 text-xs" />大小写敏感替换
+                                        </div>
                                     </div>
+                                </TutorialStep>
+
+                                <TutorialStep number={4} title="删除条目">
+                                    <p>右键文本条目选择删除即可移除。表格条目需点击右侧的 <i className="fas fa-trash text-red-400" /> 垃圾桶图标删除。</p>
+                                    <TipBox type="warning">
+                                        删除操作前请确认已解除只读模式。
+                                    </TipBox>
+                                </TutorialStep>
+
+                                <TutorialStep number={5} title="撤销与重做">
+                                    <p>通过 <strong>编辑 → 撤销</strong> 和 <strong>编辑 → 重做</strong>（快捷键 <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs">Ctrl+Z</kbd> / <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs">Ctrl+Y</kbd>）可回退或恢复操作。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={6} title="自动保存">
+                                    <p>在程序窗口的 <strong>右下角</strong> 可切换是否开启自动保存功能，避免意外丢失编辑内容。</p>
+                                </TutorialStep>
+
+                                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4 mt-8 pt-4 border-t border-slate-200 dark:border-slate-700">特殊文件类型</h3>
+
+                                <TutorialStep number={7} title="编辑 DAT 字库文件">
+                                    <p>编辑 DAT 字库文件时，程序默认屏蔽 ASCII 字符（英文、数字、英文标点），仅保留非 ASCII 字符，同时自动屏蔽重复输入的字符，确保字库数据正确。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={8} title="WHM 页面数据文件">
+                                    <p>WHM 文件为完整的页面数据文件，较为特殊，<strong>暂不支持编辑</strong>，仅支持查看与导出。</p>
                                 </TutorialStep>
                             </div>
                         );
@@ -562,147 +493,143 @@
                                 </h2>
 
                                 <TutorialStep number={1} title="保存文件">
-                                    <p>修改完成后，按 <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs">Ctrl+S</kbd> 或点击工具栏的保存按钮即可保存当前文件。</p>
+                                    <p>修改完成后，点击工具栏的保存按钮即可保存当前文件。</p>
                                     <TipBox type="warning">
                                         保存操作会覆盖原始文件。建议在修改前先备份原始 GXT 文件。
                                     </TipBox>
                                 </TutorialStep>
 
-                                <TutorialStep number={2} title="另存为">
+                                <TutorialStep number={2} title="导出文本">
+                                    <p>点击 <strong>文件 → 导出</strong>，可选择导出路径和文件名。导出完成后程序会自动生成汇总文件以及各分表文件。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="批量导出">
+                                    <p>在 <strong>文件 → 批量导出</strong> 弹窗中选择要导出的文件，即可批量导出多个 GXT 文件。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={4} title="另存为">
                                     <p>如需保留原始文件不变，可以使用 <strong>文件 → 另存为</strong> 将修改后的内容保存为新文件。</p>
-                                </TutorialStep>
-
-                                <TutorialStep number={3} title="导出为 CSV">
-                                    <p>使用 <strong>文件 → 导出 → CSV</strong> 可将当前条目的键值和文本导出为 CSV 格式，方便使用 Excel 等工具进行批量处理。</p>
-                                </TutorialStep>
-
-                                <TutorialStep number={4} title="从 CSV 导入">
-                                    <p>使用 <strong>文件 → 导入 → CSV</strong> 可将 CSV 格式的翻译数据导入到当前 GXT 文件中。</p>
-                                    <div className="p-4 rounded-xl bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
-                                        <p className="font-medium text-sm mb-2 text-slate-700 dark:text-slate-300">CSV 格式要求：</p>
-                                        <CodeBlock code={`EntryName,Text
-"FMAP_WAY","寻路点"
-"FMAP_N","北"
-"FMAP_S","南"
-"FMAP_E","东"
-"FMAP_W","西"`} />
-                                    </div>
                                 </TutorialStep>
                             </div>
                         );
 
-                    case 'encoding':
+                    case 'search':
                         return (
                             <div className="animate-fade-in-up">
                                 <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
-                                    <i className="fas fa-font gradient-text mr-3" />编码设置
+                                    <i className="fas fa-magnifying-glass gradient-text mr-3" />搜索功能
+                                </h2>
+
+                                <TutorialStep number={1} title="搜索条目">
+                                    <p>在界面上方的搜索框中输入关键词即可在所有条目中快速搜索。支持以下搜索模式：</p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                                        {[
+                                            { title: '普通搜索', desc: '模糊匹配键名和文本内容' },
+                                            { title: '正则表达式', desc: '使用正则表达式进行高级匹配' },
+                                            { title: '大小写敏感', desc: '精确匹配大小写' },
+                                            { title: '高亮显示', desc: '搜索到的关键词自动高亮' },
+                                        ].map((item, i) => (
+                                            <div key={i} className="flex items-start gap-2 p-3 rounded-xl glass-card">
+                                                <i className="fas fa-check-circle text-emerald-500 text-xs mt-0.5" />
+                                                <div>
+                                                    <div className="font-medium text-slate-800 dark:text-slate-100 text-sm">{item.title}</div>
+                                                    <div className="text-xs text-slate-500 dark:text-slate-400">{item.desc}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="替换功能中的搜索">
+                                    <p>在 <strong>替换功能</strong>（Ctrl+H）的弹窗中同样可以使用搜索功能，使用方式与主界面的搜索框一致，方便在替换前先定位目标条目。</p>
+                                </TutorialStep>
+                            </div>
+                        );
+
+                    case 'codetable':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-code gradient-text mr-3" />码表转换
                                 </h2>
                                 <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
-                                    不同版本的 GTA 游戏使用不同的字符编码方案，正确设置编码是确保文本不出现乱码的关键。
+                                    部分日语或中文 GXT 使用映射表来方便字符排序，导致 GXT 内容无法直接阅读，需要进行码表转换才能正常显示。
                                 </p>
 
-                                <div className="overflow-x-auto mb-6">
-                                    <table className="w-full text-sm">
-                                        <thead>
-                                            <tr className="border-b border-slate-200 dark:border-slate-700">
-                                                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">游戏</th>
-                                                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">编码</th>
-                                                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">文件格式</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                            {[
-                                                ['GTA III', 'Windows-1252', 'GXT (无TABL)'],
-                                                ['GTA Vice City', 'UTF-16', 'GXT'],
-                                                ['GTA San Andreas', 'Windows-1252', 'GXT'],
-                                                ['GTA LCS', 'UTF-16', 'GXT'],
-                                                ['GTA VCS', 'UTF-16', 'GXT'],
-                                                ['GTA IV', 'UTF-8', 'GXT2 (哈希键)'],
-                                            ].map((row, i) => (
-                                                <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                                    <td className="py-2.5 px-4 font-medium text-slate-800 dark:text-slate-200">{row[0]}</td>
-                                                    <td className="py-2.5 px-4 font-mono text-xs text-blue-500">{row[1]}</td>
-                                                    <td className="py-2.5 px-4 text-slate-500 dark:text-slate-400">{row[2]}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                <TutorialStep number={1} title="下载码表资源">
+                                    <p>本软件<strong>无内置编码转换表</strong>，需前往 <a href="https://github.com/GTASA-ACCHS/CN.resource" className="text-blue-500 hover:underline" target="_blank">静态资源站 <i className="fas fa-external-link-alt text-xs" /></a> 下载。</p>
+                                    <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                        {['罪吧汉化', '拇指玩汉化', 'Play汉化', 'VC日语官方', 'IV日语官方'].map((name, i) => (
+                                            <div key={i} className="text-center py-2 px-3 rounded-lg glass-card text-sm text-slate-700 dark:text-slate-300">
+                                                {name}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="应用码表">
+                                    <p>在 <strong>编辑 → 码表转换</strong> 中选择要使用的码表文件，即可对当前 GXT 内容进行转换，使其恢复正常可读文本。</p>
+                                </TutorialStep>
 
                                 <TipBox type="info">
-                                    GXTStudio 在打开文件时会自动检测格式并选择合适的编码。如果自动检测不准确，
-                                    可以通过 <strong>文件 → 属性</strong> 手动指定编码。
+                                    码表转换仅影响显示，不会修改原始文件内容。如需永久转换，请在转换后保存文件。
                                 </TipBox>
                             </div>
                         );
 
-                    case 'faq':
+                    case 'ai-translate':
                         return (
                             <div className="animate-fade-in-up">
                                 <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
-                                    <i className="fas fa-circle-question gradient-text mr-3" />常见问题
+                                    <i className="fas fa-robot gradient-text mr-3" />智能翻译
                                 </h2>
+                                <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+                                    GXTStudio 内置 AI 翻译引擎，支持批量翻译 GXT 文本条目，大幅提升汉化效率。
+                                </p>
 
-                                <div className="space-y-4">
-                                    {[
-                                        {
-                                            q: 'Q1: 打开文件后显示乱码怎么办？',
-                                            a: '请先确认文件对应的游戏版本。在菜单栏 文件 → 属性 中可以手动切换字符编码。如果不确定编码，可依次尝试 UTF-16、Windows-1252 和 UTF-8。'
-                                        },
-                                        {
-                                            q: 'Q2: 为什么保存后游戏中文本没有变化？',
-                                            a: '请确认已将修改后的 GXT 文件放回游戏目录的正确位置。部分游戏需要新建存档才能看到文本修改效果。另外，请确保使用的是与游戏版本匹配的 GXT 格式。'
-                                        },
-                                        {
-                                            q: 'Q3: 如何批量翻译整个文件？',
-                                            a: '建议使用导出 → CSV 功能，将文本导出后在 Excel 中翻译，翻译完成后再导入回 GXT 文件。对于大型汉化项目，这种方式效率最高。'
-                                        },
-                                        {
-                                            q: 'Q4: 软件提示"无法识别的文件格式"？',
-                                            a: '这表示文件可能不是标准的 GXT 格式，或文件已损坏。请检查文件来源，确保是从游戏原始目录中提取的。'
-                                        },
-                                        {
-                                            q: 'Q5: 支持 GTA V 的 GXT2 格式吗？',
-                                            a: '目前的版本主要支持 GTA III ~ GTA IV 的格式。GTA V 使用了更复杂的格式，后续版本会考虑支持。'
-                                        },
-                                    ].map((item, i) => (
-                                        <div key={i} className="glass-card rounded-xl p-4">
-                                            <h4 className="font-semibold text-slate-800 dark:text-slate-100 mb-2">{item.q}</h4>
-                                            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{item.a}</p>
-                                        </div>
-                                    ))}
-                                </div>
+                                <TutorialStep number={1} title="配置API密钥">
+                                    <p>程序内置 <strong>小米 MiMo</strong>（mimo-v2.5-pro）和 <strong>DeepSeek</strong>（deepseek-v4-pro / deepseek-v4-flash）大模型支持。请自行注册获取 API 密钥：</p>
+                                    <div className="flex gap-3 mt-2">
+                                        <a href="https://platform.xiaomimimo.com" target="_blank" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-card text-sm font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
+                                            <i className="fas fa-external-link-alt text-xs" />小米 MiMo
+                                        </a>
+                                        <a href="https://platform.deepseek.com" target="_blank" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-card text-sm font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
+                                            <i className="fas fa-external-link-alt text-xs" />DeepSeek
+                                        </a>
+                                    </div>
+                                    <p className="mt-3 text-sm">可在设置中配置 API 密钥、系统提示词和批次大小。自动频率控制和重试机制确保翻译稳定性。</p>
+                                    <TipBox type="warning">
+                                        DeepSeek 旧版模型（deepseek-chat / deepseek-reasoner）将于 2026/07/24 弃用，请迁移至 V4 系列。
+                                    </TipBox>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="执行翻译">
+                                    <p>通过 <strong>编辑 → 智能翻译</strong> 选择要翻译的文本条目即可执行。也可在表格中选定单元格区域，右键选择 <span className="font-mono text-orange-500 text-sm">🌐 翻译选定行</span> 快速翻译。</p>
+                                    <TipBox type="success">
+                                        建议翻译前先备份原始文件，翻译完成后请人工校对以确保准确性。
+                                    </TipBox>
+                                </TutorialStep>
                             </div>
                         );
 
-                    case 'shortcuts':
+                    case 'personalize':
                         return (
                             <div className="animate-fade-in-up">
                                 <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
-                                    <i className="fas fa-keyboard gradient-text mr-3" />快捷键一览
+                                    <i className="fas fa-paint-brush gradient-text mr-3" />个性化设置
                                 </h2>
 
-                                <div className="space-y-1 mb-6">
-                                    {[
-                                        ['Ctrl+O', '打开文件'],
-                                        ['Ctrl+S', '保存文件'],
-                                        ['Ctrl+Shift+S', '另存为...'],
-                                        ['Ctrl+F', '搜索条目'],
-                                        ['Ctrl+Z', '撤销'],
-                                        ['Ctrl+Y', '重做'],
-                                        ['Ctrl+A', '全选条目'],
-                                        ['Delete', '删除选中条目'],
-                                        ['F2', '重命名选中条目'],
-                                        ['F5', '刷新文件列表'],
-                                        ['Ctrl+Tab', '切换文件标签'],
-                                        ['Ctrl+W', '关闭当前文件'],
-                                    ].map(([key, desc], i) => (
-                                        <div key={i} className="flex items-center justify-between py-2.5 px-4 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                            <kbd className="px-2.5 py-1 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs text-slate-700 dark:text-slate-300 min-w-[80px] text-center">{key}</kbd>
-                                            <span className="text-sm text-slate-600 dark:text-slate-400">{desc}</span>
-                                        </div>
-                                    ))}
-                                </div>
+                                <TutorialStep number={1} title="设置背景图片">
+                                    <p>在 <strong>视图 → 设置背景图片</strong> 中选择要使用的图片文件，即可自定义编辑器界面的背景。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="调整效果">
+                                    <p>可调节 <strong>高斯模糊</strong> 和 <strong>亮度</strong> 参数来优化背景效果。注意：较高的模糊值可能会导致轻微的性能下降。</p>
+                                </TutorialStep>
+
+                                <TipBox type="info">
+                                    背景图片设置会保存在本地配置中，下次启动软件时自动加载。
+                                </TipBox>
                             </div>
                         );
 
@@ -723,14 +650,13 @@
         const MobileNavToggle = ({ onClick, section }) => {
             const sections = {
                 intro: '软件简介',
-                install: '安装与启动',
-                interface: '界面概览',
                 'open-file': '打开文件',
                 'edit-text': '编辑文本',
                 'save-export': '保存与导出',
-                encoding: '编码设置',
-                faq: '常见问题',
-                shortcuts: '快捷键',
+                search: '搜索功能',
+                codetable: '码表转换',
+                'ai-translate': '智能翻译',
+                personalize: '个性化设置',
             };
 
             return (
@@ -746,14 +672,13 @@
 
         const sections = [
             { id: 'intro', label: '软件简介', icon: 'fa-rocket' },
-            { id: 'install', label: '安装与启动', icon: 'fa-download' },
-            { id: 'interface', label: '界面概览', icon: 'fa-window-maximize' },
             { id: 'open-file', label: '打开文件', icon: 'fa-folder-open' },
             { id: 'edit-text', label: '编辑文本', icon: 'fa-pen-to-square' },
             { id: 'save-export', label: '保存与导出', icon: 'fa-floppy-disk' },
-            { id: 'encoding', label: '编码设置', icon: 'fa-font' },
-            { id: 'faq', label: '常见问题', icon: 'fa-circle-question' },
-            { id: 'shortcuts', label: '快捷键一览', icon: 'fa-keyboard' },
+            { id: 'search', label: '搜索功能', icon: 'fa-magnifying-glass' },
+            { id: 'codetable', label: '码表转换', icon: 'fa-code' },
+            { id: 'ai-translate', label: '智能翻译', icon: 'fa-robot' },
+            { id: 'personalize', label: '个性化设置', icon: 'fa-paint-brush' },
         ];
 
         const App = () => {

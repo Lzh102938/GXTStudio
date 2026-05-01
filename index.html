@@ -1282,7 +1282,7 @@
         };
 
         const HeroSection = () => {
-            const [stat1Ref, stat1] = useAnimatedValue(6);
+            const [stat1Ref, stat1] = useAnimatedValue(5);
             const [stat2Ref, stat2] = useAnimatedValue(10);
             const [stat3Ref, stat3] = useAnimatedValue(100);
             
@@ -1293,7 +1293,7 @@
             const springX = useSpring(mousePosition.x, { tension: 100, friction: 20 });
             const springY = useSpring(mousePosition.y, { tension: 100, friction: 20 });
 
-            const tabs = ['GTA SA', 'GTA IV', 'GTA VC', 'GTA III', 'GTA LCS', 'GTA VCS'];
+            const tabs = ['GTA SA', 'GTA IV', 'GTA V', 'GTA VC', 'GTA III'];
 
             const codeContentByTab = {
                 0: [
@@ -1306,34 +1306,29 @@
                     { num: 7, content: '<span class="text-slate-400 italic">// GTA SA - Windows-1252编码</span>' },
                 ],
                 1: [
-                    { num: 1, content: '<span class="text-purple-500">[GXT2]</span>' },
-                    { num: 2, content: '<span class="text-cyan-500">0x8FCC246C</span> = <span class="text-pink-500">"Mission Passed"</span>' },
-                    { num: 3, content: '<span class="text-cyan-500">0xA23CFFDE</span> = <span class="text-pink-500">"Wasted"</span>' },
-                    { num: 4, content: '<span class="text-cyan-500">0xB7B99321</span> = <span class="text-pink-500">"Busted"</span>' },
-                    { num: 5, content: '<span class="text-slate-400 italic">// GTA IV - UTF-8编码</span>' },
+                    { num: 1, content: '<span class="text-cyan-500">0x8FCC246C</span> = <span class="text-pink-500">"Mission Passed"</span>' },
+                    { num: 2, content: '<span class="text-cyan-500">0xA23CFFDE</span> = <span class="text-pink-500">"Wasted"</span>' },
+                    { num: 3, content: '<span class="text-cyan-500">0xB7B99321</span> = <span class="text-pink-500">"Busted"</span>' },
+                    { num: 4, content: '<span class="text-slate-400 italic">// GTA IV - .gxt 哈希键索引</span>' },
                 ],
                 2: [
+                    { num: 1, content: '<span class="text-purple-500">[GXT2]</span>' },
+                    { num: 2, content: '<span class="text-cyan-500">0x5A3C0F72</span> = <span class="text-pink-500">"~r~Wasted"</span>' },
+                    { num: 3, content: '<span class="text-cyan-500">0x81D4E2B9</span> = <span class="text-pink-500">"~g~Stunt Jump"</span>' },
+                    { num: 4, content: '<span class="text-slate-400 italic">// GTA V - 哈希键索引</span>' },
+                ],
+                3: [
                     { num: 1, content: '<span class="text-orange-500">[MAIN]</span>' },
                     { num: 2, content: '<span class="text-yellow-500">"FEST_HF"</span> = <span class="text-red-400">"Health & Armor"</span>' },
                     { num: 3, content: '<span class="text-yellow-500">"FEST_WE"</span> = <span class="text-red-400">"Weapons"</span>' },
                     { num: 4, content: '<span class="text-yellow-500">"FEST_MO"</span> = <span class="text-red-400">"Money"</span>' },
                     { num: 5, content: '<span class="text-slate-400 italic">// GTA VC - UTF-16编码</span>' },
                 ],
-                3: [
+                4: [
                     { num: 1, content: '<span class="text-green-500">[TKEY]</span>' },
                     { num: 2, content: '<span class="text-lime-500">"INTRO_1"</span> = <span class="text-teal-400">"Welcome to Liberty City"</span>' },
                     { num: 3, content: '<span class="text-lime-500">"INTRO_2"</span> = <span class="text-teal-400">"The City That Never Sleeps"</span>' },
                     { num: 4, content: '<span class="text-slate-400 italic">// GTA III - 无TABL块支持</span>' },
-                ],
-                4: [
-                    { num: 1, content: '<span class="text-blue-500">[MAIN]</span>' },
-                    { num: 2, content: '<span class="text-emerald-500">"LCS_001"</span> = <span class="text-amber-500">"自由城故事"</span>' },
-                    { num: 3, content: '<span class="text-slate-400 italic">// GTA LCS - 与VC格式相同</span>' },
-                ],
-                5: [
-                    { num: 1, content: '<span class="text-blue-500">[MAIN]</span>' },
-                    { num: 2, content: '<span class="text-emerald-500">"VCS_001"</span> = <span class="text-amber-500">"罪恶都市传奇"</span>' },
-                    { num: 3, content: '<span class="text-slate-400 italic">// GTA VCS - 与VC格式相同</span>' },
                 ],
             };
 
@@ -1544,10 +1539,10 @@
 
         const FeaturesSection = () => {
             const features = useMemo(() => [
-                { icon: 'fa-language', title: '智能翻译系统', description: '内置AI翻译引擎，支持批量翻译GXT文本条目。可配置API密钥、系统提示词和批次大小，自动频率控制和重试机制确保翻译稳定性。', tag: 'AI驱动' },
-                { icon: 'fa-table-cells', title: '多版本支持', description: '支持GTA III、罪恶都市、圣安地列斯、GTA IV、自由城故事、罪恶都市传奇等多个版本的GXT文件格式，自动识别版本并适配解析方式。', tag: '全版本' },
+                { icon: 'fa-language', title: '智能翻译系统', description: '内置AI翻译引擎，支持小米MiMo (mimo-v2.5-pro)、DeepSeek (deepseek-v4-pro/flash) 等多个大模型，可配置API密钥、系统提示词和批次大小，自动频率控制和重试机制确保翻译稳定性。', tag: 'AI驱动' },
+                { icon: 'fa-table-cells', title: '多版本支持', description: '支持GTA III、罪恶都市、圣安地列斯、GTA IV、GTA V等多个版本的GXT文件格式，自动识别版本并适配解析方式。', tag: '全版本' },
                 { icon: 'fa-palette', title: '文本渲染预览', description: '实时预览GXT文本在游戏中的渲染效果，支持颜色标记、换行符、按键标记等特殊字符的可视化显示。', tag: '实时预览' },
-                { icon: 'fa-code', title: '码表转换', description: '内置多种字符编码转换表，支持Windows-1252、UTF-16LE等GXT专用字符集与Unicode之间的相互转换。', tag: '编码转换' },
+                { icon: 'fa-code', title: '码表转换', description: '支持多种字符编码转换表，兼容罪吧汉化、拇指玩汉化、Play汉化以及VC和IV的官方日语版本。', tag: '编码转换' },
                 { icon: 'fa-magnifying-glass', title: '智能搜索', description: '强大的搜索和过滤功能，支持正则表达式、大小写敏感、全词匹配、CRC32哈希查找等多种搜索模式。', tag: '高效搜索' },
                 { icon: 'fa-rotate', title: '撤销重做', description: '完整的撤销/重做系统，支持多步操作回退，让编辑更加安全可靠。', tag: '安全编辑' },
             ]);
@@ -1586,9 +1581,8 @@
                 { name: 'GTA III', ext: '.gxt', status: '支持', desc: '无文件头，TKEY块起始' },
                 { name: 'GTA VC', ext: '.gxt', status: '支持', desc: '新增TABL块，多子表' },
                 { name: 'GTA SA', ext: '.gxt', status: '支持', desc: 'CRC32索引，Windows-1252' },
-                { name: 'GTA IV', ext: '.gxt', status: '支持', desc: 'GXT2格式，自定义哈希' },
-                { name: 'GTA LCS', ext: '.gxt', status: '支持', desc: '与VC格式相同' },
-                { name: 'GTA VCS', ext: '.gxt', status: '支持', desc: '与VC格式相同' },
+                { name: 'GTA IV', ext: '.gxt', status: '支持', desc: 'GXT格式，自定义哈希' },
+                { name: 'GTA V', ext: '.gxt2', status: '支持', desc: 'GXT2格式，哈希键索引' },
             ];
 
             const tokens = [
@@ -1937,7 +1931,8 @@
                 { id: 'iii', name: 'GTA III', structure: ['TKEY块', 'TDAT块'], features: ['无文件头，直接以TKEY块起始', '宽字符编码（UTF-16LE）', '条目按字母顺序排序', 'Xbox版VC也采用此格式'] },
                 { id: 'vc', name: 'GTA VC', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['新增TABL块支持多子表', '宽字符编码（UTF-16LE）', '支持MAIN主表', '字符集基于fonts.txd'] },
                 { id: 'sa', name: 'GTA SA', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['完整TABL/TKEY/TDAT支持', 'Windows-1252编码', 'CRC32条目索引', '最多200个子表'] },
-                { id: 'iv', name: 'GTA IV', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['GXT2新格式（版本号4）', '支持8位/16位编码', '自定义哈希算法', '伪UTF-16编码'] },
+                { id: 'iv', name: 'GTA IV', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['GXT格式（哈希键名）', '支持8位/16位编码', '自定义哈希算法', '伪UTF-16编码'] },
+                { id: 'v', name: 'GTA V', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['GXT2格式（版本号10）', '哈希键索引', 'UTF-8编码', '更大文件容量'] },
             ];
 
             const currentVersion = versions.find(v => v.id === activeVersion);
