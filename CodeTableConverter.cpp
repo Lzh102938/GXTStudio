@@ -108,19 +108,21 @@ bool CodeTableConverter::convertForward(GXTStudio* viewer)
         return false;
     }
 
+    if (!m_reverseMapValid) {
+        buildReverseMap();
+    }
+
     FileTab* currentTab = viewer->getCurrentTab();
     if (!currentTab) {
         qWarning() << "未打开任何文件";
         return false;
     }
 
-    // 检查是否为WHM文件
     if (currentTab->isWHM) {
         qWarning() << "WHM文件不支持码表转换";
         return false;
     }
 
-    // 遍历所有表进行转换
     int totalConvertedCount = 0;
 
     for (size_t tableIndex = 0; tableIndex < currentTab->tables.size(); ++tableIndex) {
@@ -134,10 +136,76 @@ bool CodeTableConverter::convertForward(GXTStudio* viewer)
             QString convertedText;
             bool converted = false;
 
+            for (int j = 0; j < originalText.length(); ++j) {
+                QChar currentChar = originalText[j];
+
+                if (m_reverseMap.contains(currentChar)) {
+                    convertedText.append(m_reverseMap[currentChar]);
+                    converted = true;
+                } else {
+                    convertedText.append(currentChar);
+                }
+            }
+
+            if (converted) {
+                entry.value = convertedText.toStdString();
+                tableConvertedCount++;
+            }
+        }
+
+        totalConvertedCount += tableConvertedCount;
+        qDebug() << "表" << QString::fromStdString(table.name)
+                  << "转换了" << tableConvertedCount << "个条目";
+    }
+
+    viewer->updateEntryTable();
+
+    m_state = CodeTableState::Converted;
+    qDebug() << "正向转换完成，共转换" << totalConvertedCount << "个单元格";
+
+    return true;
+}
+
+bool CodeTableConverter::convertReverse(GXTStudio* viewer)
+{
+    if (!isTableMounted()) {
+        qWarning() << "未挂载码表，无法执行反向转换";
+        return false;
+    }
+
+    if (!viewer) {
+        qWarning() << "无效的viewer指针";
+        return false;
+    }
+
+    FileTab* currentTab = viewer->getCurrentTab();
+    if (!currentTab) {
+        qWarning() << "未打开任何文件";
+        return false;
+    }
+
+    if (currentTab->isWHM) {
+        qWarning() << "WHM文件不支持码表转换";
+        return false;
+    }
+
+    int totalConvertedCount = 0;
+
+    for (size_t tableIndex = 0; tableIndex < currentTab->tables.size(); ++tableIndex) {
+        GXTTabl& table = currentTab->tables[tableIndex];
+        int tableConvertedCount = 0;
+
+        for (size_t i = 0; i < table.entries.size(); ++i) {
+            GXTEntry& entry = table.entries[i];
+
+            QString convertedText;
+            bool converted = false;
+
+            QString originalText = QString::fromStdString(entry.value);
+
             for (int j = 0; j < originalText.length(); ) {
                 QString currentChar = originalText[j];
 
-                // 检查是否在映射表中
                 if (m_conversionMap.contains(currentChar)) {
                     convertedText.append(m_conversionMap[currentChar]);
                     converted = true;
@@ -159,88 +227,7 @@ bool CodeTableConverter::convertForward(GXTStudio* viewer)
                   << "转换了" << tableConvertedCount << "个条目";
     }
 
-    // 更新表格视图以反映更改
-    if (currentTab->entryTableView && currentTab->entryTableView->model()) {
-        currentTab->entryTableView->viewport()->update();
-    }
-
-    m_state = CodeTableState::Converted;
-    qDebug() << "正向转换完成，共转换" << totalConvertedCount << "个单元格";
-
-    return true;
-}
-
-bool CodeTableConverter::convertReverse(GXTStudio* viewer)
-{
-    if (!isTableMounted()) {
-        qWarning() << "未挂载码表，无法执行反向转换";
-        return false;
-    }
-
-    if (!viewer) {
-        qWarning() << "无效的viewer指针";
-        return false;
-    }
-
-    // 确保反向映射表已构建
-    if (!m_reverseMapValid) {
-        buildReverseMap();
-    }
-
-    FileTab* currentTab = viewer->getCurrentTab();
-    if (!currentTab) {
-        qWarning() << "未打开任何文件";
-        return false;
-    }
-
-    // 检查是否为WHM文件
-    if (currentTab->isWHM) {
-        qWarning() << "WHM文件不支持码表转换";
-        return false;
-    }
-
-    // 遍历所有表进行转换
-    int totalConvertedCount = 0;
-
-    for (size_t tableIndex = 0; tableIndex < currentTab->tables.size(); ++tableIndex) {
-        GXTTabl& table = currentTab->tables[tableIndex];
-        int tableConvertedCount = 0;
-
-        for (size_t i = 0; i < table.entries.size(); ++i) {
-            GXTEntry& entry = table.entries[i];
-
-            QString convertedText;
-            bool converted = false;
-
-            QString originalText = QString::fromStdString(entry.value);
-
-            for (int j = 0; j < originalText.length(); ++j) {
-                QChar currentChar = originalText[j];
-
-                // 检查是否在反向映射表中
-                if (m_reverseMap.contains(currentChar)) {
-                    convertedText.append(m_reverseMap[currentChar]);
-                    converted = true;
-                } else {
-                    convertedText.append(currentChar);
-                }
-            }
-
-            if (converted) {
-                entry.value = convertedText.toStdString();
-                tableConvertedCount++;
-            }
-        }
-
-        totalConvertedCount += tableConvertedCount;
-        qDebug() << "表" << QString::fromStdString(table.name)
-                  << "转换了" << tableConvertedCount << "个条目";
-    }
-
-    // 更新表格视图以反映更改
-    if (currentTab->entryTableView && currentTab->entryTableView->model()) {
-        currentTab->entryTableView->viewport()->update();
-    }
+    viewer->updateEntryTable();
 
     m_state = CodeTableState::Original;
     qDebug() << "反向转换完成，共转换" << totalConvertedCount << "个单元格";

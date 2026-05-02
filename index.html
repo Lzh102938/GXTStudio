@@ -2105,63 +2105,22 @@
                             <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">获取帮助、分享经验、参与开发</p>
                         </MotionDiv>
 
-                        <div className="grid md:grid-cols-2 gap-4 sm:gap-6 md:gap-8 max-w-4xl mx-auto">
-                            <MotionDiv from="left" className="immersive-card rounded-xl sm:rounded-2xl p-4 sm:p-6 md:p-8 shadow-lg hover-lift group">
-                                <div className="flex items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
-                                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-slate-900 dark:bg-slate-700 flex items-center justify-center text-white text-lg sm:text-xl group-hover:scale-105 transition-all duration-300">
-                                        <i className="fab fa-github" />
-                                    </div>
-                                    <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">开源项目</h3>
+                        <div className="max-w-lg mx-auto">
+                            <MotionDiv className="immersive-card rounded-xl sm:rounded-2xl p-6 sm:p-8 md:p-10 shadow-lg hover-lift text-center">
+                                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl gradient-bg flex items-center justify-center text-white text-2xl sm:text-3xl mx-auto mb-4 sm:mb-6">
+                                    <i className="fab fa-qq" />
                                 </div>
-                                <p className="text-slate-600 dark:text-slate-400 mb-4 sm:mb-6 text-sm sm:text-base">
-                                    GXTStudio 完全开源，代码托管在GitHub。欢迎提交Issue、Pull Request，或Fork项目进行二次开发。
+                                <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white mb-3">QQ 交流群</h3>
+                                <p className="text-slate-600 dark:text-slate-400 mb-6 text-sm sm:text-base">
+                                    与其他 GTA 模组开发者交流经验，获取技术支持，分享你的作品。
                                 </p>
-                                <div className="space-y-2 sm:space-y-3">
-                                    <a href="https://github.com/Lzh102938/GXTStudio" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg sm:rounded-xl glass-button hover-scale group/item">
-                                        <i className="fas fa-code-branch text-blue-500 text-sm" />
-                                        <span className="flex-1 text-slate-700 dark:text-slate-300 text-sm sm:text-base">查看源代码</span>
-                                        <i className="fas fa-arrow-right text-slate-400 dark:text-slate-500 group-hover/item:text-blue-500 group-hover/item:translate-x-1 transition-all text-sm" />
+                                <MagneticButton strength={0.12}>
+                                    <a href="https://qm.qq.com/q/YB31lPrf2i" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl gradient-bg text-white font-semibold text-sm shadow-lg shadow-blue-500/20 btn-hover group">
+                                        <i className="fab fa-qq" />
+                                        加入 QQ 群
+                                        <i className="fas fa-arrow-right text-sm opacity-70 group-hover:translate-x-1 transition-transform" />
                                     </a>
-                                    <a href="https://github.com/Lzh102938/GXTStudio/issues" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg sm:rounded-xl glass-button hover-scale group/item">
-                                        <i className="fas fa-bug text-amber-500 text-sm" />
-                                        <span className="flex-1 text-slate-700 dark:text-slate-300 text-sm sm:text-base">报告问题</span>
-                                        <i className="fas fa-arrow-right text-slate-400 dark:text-slate-500 group-hover/item:text-blue-500 group-hover/item:translate-x-1 transition-all text-sm" />
-                                    </a>
-                                    <a href="https://github.com/Lzh102938/GXTStudio" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg sm:rounded-xl glass-button hover-scale group/item">
-                                        <i className="fas fa-book text-emerald-500 text-sm" />
-                                        <span className="flex-1 text-slate-700 dark:text-slate-300 text-sm sm:text-base">开发文档</span>
-                                        <i className="fas fa-arrow-right text-slate-400 dark:text-slate-500 group-hover/item:text-blue-500 group-hover/item:translate-x-1 transition-all text-sm" />
-                                    </a>
-                                </div>
-                            </MotionDiv>
-
-                            <MotionDiv from="right" className="immersive-card rounded-xl sm:rounded-2xl p-4 sm:p-6 md:p-8 shadow-lg hover-lift group">
-                                <div className="flex items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
-                                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl gradient-bg flex items-center justify-center text-white text-lg sm:text-xl group-hover:scale-105 transition-all duration-300">
-                                        <i className="fas fa-comments" />
-                                    </div>
-                                    <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">交流社区</h3>
-                                </div>
-                                <p className="text-slate-600 dark:text-slate-400 mb-4 sm:mb-6 text-sm sm:text-base">
-                                    加入QQ群或Discord服务器，与其他GTA模组开发者交流经验，获取技术支持，分享你的作品。
-                                </p>
-                                <div className="space-y-2 sm:space-y-3">
-                                    <a href="#" className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg sm:rounded-xl glass-button hover-scale group/item">
-                                        <i className="fab fa-qq text-blue-500 text-sm" />
-                                        <span className="flex-1 text-slate-700 dark:text-slate-300 text-sm sm:text-base">QQ交流群</span>
-                                        <i className="fas fa-arrow-right text-slate-400 dark:text-slate-500 group-hover/item:text-blue-500 group-hover/item:translate-x-1 transition-all text-sm" />
-                                    </a>
-                                    <a href="#" className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg sm:rounded-xl glass-button hover-scale group/item">
-                                        <i className="fab fa-discord text-indigo-500 text-sm" />
-                                        <span className="flex-1 text-slate-700 dark:text-slate-300 text-sm sm:text-base">Discord 服务器</span>
-                                        <i className="fas fa-arrow-right text-slate-400 dark:text-slate-500 group-hover/item:text-blue-500 group-hover/item:translate-x-1 transition-all text-sm" />
-                                    </a>
-                                    <a href="#" className="flex items-center gap-2 sm:gap-3 p-2 sm:p-3 rounded-lg sm:rounded-xl glass-button hover-scale group/item">
-                                        <i className="fas fa-globe text-cyan-500 text-sm" />
-                                        <span className="flex-1 text-slate-700 dark:text-slate-300 text-sm sm:text-base">GTAmod 中文论坛</span>
-                                        <i className="fas fa-arrow-right text-slate-400 dark:text-slate-500 group-hover/item:text-blue-500 group-hover/item:translate-x-1 transition-all text-sm" />
-                                    </a>
-                                </div>
+                                </MagneticButton>
                             </MotionDiv>
                         </div>
                     </div>
@@ -2245,7 +2204,7 @@
                                     <a href="https://github.com/GXTStudio/GXTStudio" target="_blank" rel="noopener noreferrer" className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl glass-button flex items-center justify-center hover:gradient-bg hover:text-white transition-all hover-scale">
                                         <i className="fab fa-github text-sm sm:text-base" />
                                     </a>
-                                    <a href="#" className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl glass-button flex items-center justify-center hover:gradient-bg hover:text-white transition-all hover-scale">
+                                    <a href="https://qm.qq.com/q/YB31lPrf2i" target="_blank" rel="noopener noreferrer" className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl glass-button flex items-center justify-center hover:gradient-bg hover:text-white transition-all hover-scale">
                                         <i className="fab fa-qq text-sm sm:text-base" />
                                     </a>
                                 </div>
