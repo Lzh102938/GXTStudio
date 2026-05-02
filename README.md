@@ -2,7 +2,7 @@
 ## 项目介绍
 本项目系[III.VC.SAGXTExtracter](https://github.com/Lzh102938/III.VC.SAGXTExtracter)项目的**替代项目**，原项目停止支持。  
 为实现更流畅、高效的使用体验，本项目采用 **C++** 和 **Qt6.0** 进行重构原项目，并在原有功能上新增若干功能。  
-**本项目官方网页：**[https://gxtstudio.com/](https://gxtstudio.com/)  
+**本项目官方网页：**[https://gxtstudio.lzh1029384756.workers.dev/](https://gxtstudio.lzh1029384756.workers.dev/)  
 **哔哩哔哩：**[https://space.bilibili.com/1657432204](https://space.bilibili.com/1657432204) *欢迎充电支持！*  
 **作者：** Lzh10_慕黑
 
