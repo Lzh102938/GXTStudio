@@ -2105,8 +2105,8 @@
                             <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">获取帮助、分享经验、参与开发</p>
                         </MotionDiv>
 
-                        <div className="max-w-lg mx-auto">
-                            <MotionDiv className="immersive-card rounded-xl sm:rounded-2xl p-6 sm:p-8 md:p-10 shadow-lg hover-lift text-center">
+                        <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <MotionDiv className="immersive-card rounded-xl sm:rounded-2xl p-6 sm:p-8 shadow-lg hover-lift text-center">
                                 <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl gradient-bg flex items-center justify-center text-white text-2xl sm:text-3xl mx-auto mb-4 sm:mb-6">
                                     <i className="fab fa-qq" />
                                 </div>
@@ -2118,6 +2118,22 @@
                                     <a href="https://qm.qq.com/q/YB31lPrf2i" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl gradient-bg text-white font-semibold text-sm shadow-lg shadow-blue-500/20 btn-hover group">
                                         <i className="fab fa-qq" />
                                         加入 QQ 群
+                                        <i className="fas fa-arrow-right text-sm opacity-70 group-hover:translate-x-1 transition-transform" />
+                                    </a>
+                                </MagneticButton>
+                            </MotionDiv>
+                            <MotionDiv className="immersive-card rounded-xl sm:rounded-2xl p-6 sm:p-8 shadow-lg hover-lift text-center">
+                                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-slate-800 dark:bg-slate-700 flex items-center justify-center text-white text-2xl sm:text-3xl mx-auto mb-4 sm:mb-6">
+                                    <i className="fab fa-github" />
+                                </div>
+                                <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white mb-3">GitHub</h3>
+                                <p className="text-slate-600 dark:text-slate-400 mb-6 text-sm sm:text-base">
+                                    查看源代码、提交 Issue、参与项目开发，为 GXTStudio 做出贡献。
+                                </p>
+                                <MagneticButton strength={0.12}>
+                                    <a href="https://github.com/GXTStudio/GXTStudio" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-slate-800 dark:bg-slate-700 text-white font-semibold text-sm shadow-lg shadow-slate-500/20 btn-hover group">
+                                        <i className="fab fa-github" />
+                                        访问 GitHub
                                         <i className="fas fa-arrow-right text-sm opacity-70 group-hover:translate-x-1 transition-transform" />
                                     </a>
                                 </MagneticButton>
