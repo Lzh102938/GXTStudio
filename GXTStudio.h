@@ -444,7 +444,8 @@ public:
     // 提供给码表转换器的公共方法
     void updateEntryTable();
     
-    // 格式化键值显示（添加0x前缀）
+    void openFileFromPath(const QString& filePath);
+    
     static QString formatKeyForDisplay(const QString& key);
     
     // 提供给后台替换工作者的公共方法
@@ -525,6 +526,7 @@ private slots:
 
     // 调试相关
     void onDebugConfig();  // 打开调试配置编辑器
+    void onSetDefaultApp(); // 设为默认打开程序
 
     // 码表转换相关
     void onMountCodeTable(); // 挂载码表
@@ -679,6 +681,7 @@ private:
     QAction* m_setBackgroundAction;    // 设置背景图片
     QAction* m_clearBackgroundAction;  // 清除背景图片
     QAction* m_debugConfigAction;      // 调试配置编辑器
+    QAction* m_setDefaultAppAction;    // 设为默认打开程序
     
     // 撤销/重做相关
     QAction* m_undoAction;

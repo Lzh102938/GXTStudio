@@ -1371,9 +1371,15 @@
                         <div className="grid lg:grid-cols-2 gap-8 sm:gap-12 lg:gap-20 items-center">
                             <div className="space-y-6 sm:space-y-8">
                                 <MotionDiv from="left" delay={0}>
-                                    <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-xs sm:text-sm font-medium text-blue-500">
-                                        <i className="fas fa-heart text-pink-500 animate-pulse" />
-                                        个人开发者用爱发电
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-xs sm:text-sm font-medium text-blue-500">
+                                            <i className="fas fa-heart text-pink-500 animate-pulse" />
+                                            个人开发者用爱发电
+                                        </div>
+                                        <a href="https://yy.gtamodx.com/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-xs sm:text-sm font-medium text-blue-500 hover:text-orange-500 hover:scale-105 transition-all">
+                                            <i className="fas fa-handshake" />
+                                            <span>合作伙伴<span className="hidden sm:inline"> · GTAMODX</span></span>
+                                        </a>
                                     </div>
                                 </MotionDiv>
 
@@ -2243,7 +2249,9 @@
                             </div>
                         </div>
                         <div className="flex flex-col md:flex-row items-center justify-between gap-3 sm:gap-4 pt-6 sm:pt-8 border-t border-white/20 dark:border-white/5">
-                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">© 2025 GXTStudio. 基于 GPL-3.0 协议开源</p>
+                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                                © 2025 GXTStudio · <a href="https://yy.gtamodx.com/" target="_blank" rel="noopener noreferrer" className="hover:text-orange-500 transition-colors">友情链接：GTAMODX</a> · 基于 GPL-3.0 协议开源
+                            </p>
                             <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 glass-button rounded-lg sm:rounded-xl hover-scale group">
                                 <img src="icon/favicon.png" alt="GXTStudio" className="w-6 h-6 sm:w-8 sm:h-8 rounded-md sm:rounded-lg" />
                                 <div className="text-xs sm:text-sm">

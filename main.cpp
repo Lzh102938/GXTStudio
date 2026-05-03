@@ -8,6 +8,7 @@
 #include <QSurfaceFormat>
 #include <QTimer>
 #include <QDir>
+#include <QFileInfo>
 #include <QDebug>
 #include <QObject>
 
@@ -161,6 +162,16 @@ int main(int argc, char *argv[])
     
     GXTStudio window;
     window.show();
+    
+    for (int i = 1; i < argc; ++i) {
+        QString filePath = QString::fromLocal8Bit(argv[i]);
+        QFileInfo fi(filePath);
+        if (fi.exists() && fi.isFile()) {
+            QTimer::singleShot(100, &window, [&window, filePath]() {
+                window.openFileFromPath(filePath);
+            });
+        }
+    }
     
     return app.exec();
 }

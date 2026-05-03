@@ -13,6 +13,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QDir>
+#include <QCoreApplication>
 
 // IVTKEY映射静态成员定义
 std::unordered_map<std::string, uint32_t> GXTEditor::s_ivtKeyMap;
@@ -1565,7 +1566,7 @@ void GXTEditor::LoadIVTKeyMap() {
     }
     
     // 构建文件路径
-    QString keylistPath = QDir::current().filePath("keylist/IVTKEY.lst");
+    QString keylistPath = QCoreApplication::applicationDirPath() + "/keylist/IVTKEY.lst";
     
     // 检查文件是否存在
     if (!QFile::exists(keylistPath)) {

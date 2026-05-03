@@ -39,6 +39,9 @@
 #include <QRadioButton>
 #include <QButtonGroup>
 #include <QToolButton>
+#include <QSizePolicy>
+#include <QSize>
+#include <QFontMetrics>
 #include <QLabel>
 #include <QDebug>
 #include <QFrame>
@@ -579,6 +582,10 @@ void GXTStudio::setupMenus()
         m_debugConfigAction->setShortcut(QKeySequence("Ctrl+M"));
         m_debugConfigAction->setToolTip(QString::fromUtf8("打开调试配置编辑器 (Ctrl+M)"));
         ui.menuHelp->addAction(m_debugConfigAction);
+
+        m_setDefaultAppAction = new QAction(QString::fromUtf8("设为默认打开程序"), this);
+        m_setDefaultAppAction->setToolTip(QString::fromUtf8("将 GXTStudio 设为 .gxt/.gxt2 文件的默认打开程序"));
+        ui.menuHelp->addAction(m_setDefaultAppAction);
     }
     
     // 创建最近文件菜单
@@ -606,6 +613,8 @@ void GXTStudio::setupMenus()
 void GXTStudio::setupToolBars()
 {
     m_toolBar = ui.mainToolBar;
+    m_toolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_toolBar->setIconSize(QSize(16, 16));
     
     m_toolBar->addAction(m_openAction);
     m_toolBar->addAction(m_saveAction);
@@ -617,6 +626,8 @@ void GXTStudio::setupToolBars()
     m_codeTableButton->setText("码表转换(&C)");
     m_codeTableButton->setToolTip("码表转换功能 (Ctrl+Alt+C)");
     m_codeTableButton->setPopupMode(QToolButton::MenuButtonPopup);
+    m_codeTableButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    m_codeTableButton->setMinimumWidth(QFontMetrics(m_codeTableButton->font()).horizontalAdvance("码表转换(&C)") + 32);
     
     QMenu* codeTableMenu = new QMenu(this);
     
@@ -651,6 +662,8 @@ void GXTStudio::setupToolBars()
     m_smartTranslateButton->setText("智能翻译(&T)");
     m_smartTranslateButton->setToolTip("智能翻译功能 (Ctrl+Alt+T)");
     m_smartTranslateButton->setPopupMode(QToolButton::MenuButtonPopup);
+    m_smartTranslateButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    m_smartTranslateButton->setMinimumWidth(QFontMetrics(m_smartTranslateButton->font()).horizontalAdvance("智能翻译(&T)") + 32);
     
     QMenu* translateMenu = new QMenu(this);
     
@@ -894,6 +907,9 @@ void GXTStudio::connectSignals()
     // 调试菜单连接
     if (m_debugConfigAction) {
         connect(m_debugConfigAction, &QAction::triggered, this, &GXTStudio::onDebugConfig);
+    }
+    if (m_setDefaultAppAction) {
+        connect(m_setDefaultAppAction, &QAction::triggered, this, &GXTStudio::onSetDefaultApp);
     }
 
     // 标签页信号连接
@@ -1552,6 +1568,23 @@ void GXTStudio::openFile()
             // 多文件使用并行解析
             startBatchAsyncParse(gxtFiles);
         }
+    }
+}
+
+void GXTStudio::openFileFromPath(const QString& filePath)
+{
+    if (filePath.isEmpty()) return;
+    
+    QFileInfo fi(filePath);
+    if (!fi.exists()) {
+        showLogMessage(QString("文件不存在: %1").arg(filePath));
+        return;
+    }
+    
+    if (fi.suffix().toLower() == "txt") {
+        importTxtFile(filePath);
+    } else {
+        startAsyncParse(filePath);
     }
 }
 
@@ -10517,6 +10550,68 @@ void GXTStudio::onDebugConfig()
 {
     DebugConfigDialog dialog(this);
     dialog.exec();
+}
+
+void GXTStudio::onSetDefaultApp()
+{
+    QMessageBox::StandardButton reply = QMessageBox::question(
+        this,
+        QString::fromUtf8("设为默认打开程序"),
+        QString::fromUtf8("将 GXTStudio 设为 .gxt 和 .gxt2 文件的默认打开程序？\n\n"
+                          "设置后，双击 .gxt/.gxt2 文件将自动使用 GXTStudio 打开。"),
+        QMessageBox::Yes | QMessageBox::No
+    );
+
+    if (reply != QMessageBox::Yes) {
+        return;
+    }
+
+    QString exePath = QCoreApplication::applicationFilePath();
+    exePath.replace('/', '\\');
+
+    QString iconPath = QCoreApplication::applicationDirPath() + "/icon/favicon.ico";
+    iconPath.replace('/', '\\');
+
+    QStringList extensions = { ".gxt", ".gxt2" };
+    bool allOk = true;
+    QStringList failedExts;
+
+    for (const QString& ext : extensions) {
+        QSettings extSettings("HKEY_CURRENT_USER\\Software\\Classes\\GXTStudio" + ext, QSettings::NativeFormat);
+        extSettings.setValue("Default", "GTA Text Resource File");
+        extSettings.beginGroup("DefaultIcon");
+        extSettings.setValue("Default", iconPath);
+        extSettings.endGroup();
+        extSettings.beginGroup("shell/open/command");
+        extSettings.setValue("Default", "\"" + exePath + "\" \"%1\"");
+        extSettings.endGroup();
+
+        QSettings assoc("HKEY_CURRENT_USER\\Software\\Classes\\" + ext, QSettings::NativeFormat);
+        assoc.setValue("Default", "GXTStudio" + ext);
+
+        QString verifyProgId = assoc.value("Default").toString();
+        if (verifyProgId != "GXTStudio" + ext) {
+            allOk = false;
+            failedExts.append(ext);
+        }
+    }
+
+    if (allOk) {
+        QMessageBox::information(
+            this,
+            QString::fromUtf8("设置成功"),
+            QString::fromUtf8("GXTStudio 已设为 .gxt 和 .gxt2 文件的默认打开程序。\n\n"
+                              "提示：如需修改图标，请重启资源管理器或重新登录。")
+        );
+    } else {
+        QMessageBox::warning(
+            this,
+            QString::fromUtf8("设置失败"),
+            QString::fromUtf8("以下扩展名注册失败：%1\n\n"
+                              "请尝试以管理员身份运行程序后重试。")
+                .arg(failedExts.join(", "))
+        );
+    }
 }
 
 // ==================== 自定义背景方法结束 ====================

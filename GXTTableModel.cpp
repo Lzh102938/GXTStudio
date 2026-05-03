@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QDir>
+#include <QCoreApplication>
 #include <QRegularExpression>
 #include <QApplication>
 
@@ -48,7 +49,7 @@ void GXTTableModel::setEditable(bool editable)
 namespace {
     // 高效的键映射加载函数 - 使用移动语义和预分配
     int loadKeyMapInternal(const QString& fileName, QHash<uint32_t, QString>& keyMap, QHash<QString, uint32_t>& reverseMap, bool caseInsensitive) {
-        QString keylistPath = QDir::current().filePath(fileName);
+        QString keylistPath = QCoreApplication::applicationDirPath() + "/" + fileName;
         
         if (!QFile::exists(keylistPath)) {
             qWarning() << "文件不存在:" << keylistPath;
