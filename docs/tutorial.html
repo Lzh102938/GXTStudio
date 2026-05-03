@@ -243,7 +243,7 @@
                         <a href="index.html" className="flex items-center gap-2 group">
                             <img src="icon/favicon.png" alt="GXTStudio" className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl transition-transform group-hover:rotate-[-5deg] group-hover:scale-105" />
                             <span className="font-bold text-lg sm:text-xl">GXT<span className="text-blue-500">Studio</span></span>
-                            <span className="hidden sm:inline-block ml-2 px-2 py-0.5 text-xs font-medium text-orange-500 bg-orange-50 dark:bg-orange-500/10 rounded-full">使用教程</span>
+                            <span className="hidden sm:inline-block ml-2 px-2 py-0.5 text-sm font-medium text-orange-500 bg-orange-50 dark:bg-orange-500/10 rounded-full">使用教程</span>
                         </a>
 
                         <div className="flex items-center gap-3">
@@ -251,7 +251,7 @@
                                 <i className={`fas fa-sun text-amber-500 absolute transition-all duration-500 text-sm ${isDark ? 'opacity-0 rotate-180 scale-0' : 'opacity-100 rotate-0 scale-100'}`} />
                                 <i className={`fas fa-moon text-indigo-500 absolute transition-all duration-500 text-sm ${isDark ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-180 scale-0'}`} />
                             </button>
-                            <a href="index.html" className="px-4 py-2 rounded-xl glass-button text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-blue-500 transition-colors">
+                            <a href="index.html" className="px-4 py-2 rounded-xl glass-button text-base font-medium text-slate-600 dark:text-slate-300 hover:text-blue-500 transition-colors">
                                 <i className="fas fa-arrow-left mr-1.5" />返回首页
                             </a>
                         </div>
@@ -262,15 +262,15 @@
 
         const Sidebar = ({ sections, activeSection, onSectionClick, mobileOpen, onMobileClose }) => {
             return (
-                <aside className={`sidebar-container ${mobileOpen ? 'open' : ''} w-full md:w-64 lg:w-72 flex-shrink-0 md:static overflow-y-auto`}>
+                <aside className={`sidebar-container ${mobileOpen ? 'open' : ''} w-full md:w-72 lg:w-80 flex-shrink-0 md:static overflow-y-auto`}>
                     <nav className="glass-panel rounded-2xl p-3 md:p-4 h-full">
                         <div className="flex items-center justify-between md:hidden mb-3 px-2">
-                            <span className="font-semibold text-sm text-slate-500 dark:text-slate-400">教程目录</span>
+                            <span className="font-semibold text-base text-slate-500 dark:text-slate-400">教程目录</span>
                             <button onClick={onMobileClose} className="w-8 h-8 rounded-lg glass-button flex items-center justify-center">
                                 <i className="fas fa-times text-sm" />
                             </button>
                         </div>
-                        <h3 className="hidden md:block px-3 pb-3 text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">教程目录</h3>
+                        <h3 className="hidden md:block px-3 pb-3 text-sm font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">教程目录</h3>
                         <ul className="space-y-1">
                             {sections.map((section) => {
                                 const isActive = activeSection === section.id;
@@ -283,7 +283,7 @@
                                                 onSectionClick(section.id);
                                                 onMobileClose();
                                             }}
-                                            className={`sidebar-link flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-all ${isActive ? 'active' : 'text-slate-600 dark:text-slate-400'}`}
+                                            className={`sidebar-link flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-base transition-all ${isActive ? 'active' : 'text-slate-600 dark:text-slate-400'}`}
                                         >
                                             <i className={`fas ${section.icon} w-4 text-center ${isActive ? 'text-orange-500' : 'text-slate-400 dark:text-slate-500'}`} />
                                             <span>{section.label}</span>
@@ -302,10 +302,10 @@
             return (
                 <div className="mb-8">
                     <div className="flex items-start gap-4 mb-3">
-                        <span className="flex-shrink-0 w-8 h-8 rounded-lg gradient-bg flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-orange-500/20">
+                        <span className="flex-shrink-0 w-9 h-9 rounded-lg gradient-bg flex items-center justify-center text-white text-base font-bold shadow-lg shadow-orange-500/20">
                             {number}
                         </span>
-                        <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 pt-0.5">{title}</h3>
+                        <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 pt-0.5">{title}</h3>
                     </div>
                     <div className="ml-12 text-slate-600 dark:text-slate-300 leading-relaxed space-y-3">
                         {children}
@@ -327,14 +327,14 @@
             };
 
             return (
-                <div className={`flex items-start gap-3 p-4 rounded-xl border ${colors[type]} text-sm`}>
+                <div className={`flex items-start gap-3 p-4 rounded-xl border ${colors[type]} text-base`}>
                     <i className={`fas ${icons[type]} mt-0.5 flex-shrink-0`} />
                     <div>{children}</div>
                 </div>
             );
         };
 
-        const ContentArea = ({ activeSection }) => {
+        const ContentArea = ({ activeSection, onSectionClick }) => {
             const contentRef = useRef(null);
 
             useEffect(() => {
@@ -348,7 +348,7 @@
                     case 'intro':
                         return (
                             <div className="animate-fade-in-up">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
                                     <i className="fas fa-rocket gradient-text mr-3" />软件简介
                                 </h2>
                                 <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
@@ -360,7 +360,7 @@
                                     包括菜单文本、任务描述、对话内容等。软件还支持 DAT 字库文件编辑、WHM 页面数据查看导出、AI 智能翻译等高级功能。
                                 </p>
 
-                                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">主要功能</h3>
+                                <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 mb-4">主要功能</h3>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                                     {[
                                         { icon: 'fa-language', title: '智能翻译系统', desc: '内置 AI 翻译引擎，支持小米 MiMo、DeepSeek 等大模型' },
@@ -375,17 +375,17 @@
                                         <div key={i} className="flex items-start gap-3 p-3 rounded-xl glass-card">
                                             <i className={`fas ${item.icon} text-orange-500 mt-0.5`} />
                                             <div>
-                                                <div className="font-medium text-slate-800 dark:text-slate-100 text-sm">{item.title}</div>
-                                                <div className="text-xs text-slate-500 dark:text-slate-400">{item.desc}</div>
+                                                <div className="font-medium text-slate-800 dark:text-slate-100 text-base">{item.title}</div>
+                                                <div className="text-sm text-slate-500 dark:text-slate-400">{item.desc}</div>
                                             </div>
                                         </div>
                                     ))}
                                 </div>
 
-                                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4">支持的游戏</h3>
+                                <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 mb-4">支持的游戏</h3>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
                                     {['GTA III','GTA Vice City','GTA San Andreas','GTA IV','GTA V'].map((game, i) => (
-                                        <div key={i} className="text-center py-3 px-2 rounded-xl glass-card text-sm font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
+                                        <div key={i} className="text-center py-3 px-2 rounded-xl glass-card text-base font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
                                             {game}
                                         </div>
                                     ))}
@@ -400,12 +400,12 @@
                     case 'open-file':
                         return (
                             <div className="animate-fade-in-up">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
                                     <i className="fas fa-folder-open gradient-text mr-3" />打开文件
                                 </h2>
 
                                 <TutorialStep number={1} title="打开 GXT 文件">
-                                    <p>双击 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm text-orange-500">GXTStudio.exe</code> 启动编辑器，点击 <strong>文件 → 打开</strong>，选择要编辑的 .gxt 文件即可。</p>
+                                    <p>双击 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-base text-orange-500">GXTStudio.exe</code> 启动编辑器，点击 <strong>文件 → 打开</strong>，选择要编辑的 .gxt 文件即可。</p>
                                     <TipBox type="warning">
                                         编辑前需<strong>解除只读模式</strong>，否则无法进行编辑。可在状态栏右下角切换。
                                     </TipBox>
@@ -431,13 +431,13 @@
                     case 'edit-text':
                         return (
                             <div className="animate-fade-in-up">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
                                     <i className="fas fa-pen-to-square gradient-text mr-3" />编辑文本
                                 </h2>
 
                                 <TutorialStep number={1} title="编辑GXT文本条目">
                                     <p>打开 GXT 文件后，标签页会显示 <strong>表格列表</strong> 和 <strong>文本条目表</strong>。</p>
-                                    <ul className="list-disc list-inside space-y-1 text-sm mt-2">
+                                    <ul className="list-disc list-inside space-y-1 text-base mt-2">
                                         <li><strong>表格列表</strong>：右键或双击表格条目可重命名表名；点击下方 <span className="font-mono text-orange-500">+</span> 按钮可添加表格条目（部分版本的表格条目数受限）。</li>
                                         <li><strong>文本条目表</strong>：双击条目可编辑文本内容。若文本过长，可右键选择"编辑为"，进入独立弹窗编辑。</li>
                                     </ul>
@@ -450,11 +450,11 @@
                                 <TutorialStep number={3} title="批量替换">
                                     <p>使用 <strong>编辑 → 替换</strong>，在弹出的替换弹窗中输入要替换的字符和目标字符，即可批量替换。</p>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-                                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card text-sm">
+                                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card text-base">
                                             <i className="fas fa-check-circle text-emerald-500 text-xs" />正则表达式替换
                                         </div>
-                                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card text-sm">
-                                            <i className="fas fa-check-circle text-emerald-500 text-xs" />大小写敏感替换
+                                        <div className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card text-base">
+                                            <i className="fas fa-check-circle text-emerald-500 text-sm" />大小写敏感替换
                                         </div>
                                     </div>
                                 </TutorialStep>
@@ -467,14 +467,14 @@
                                 </TutorialStep>
 
                                 <TutorialStep number={5} title="撤销与重做">
-                                    <p>通过 <strong>编辑 → 撤销</strong> 和 <strong>编辑 → 重做</strong>（快捷键 <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs">Ctrl+Z</kbd> / <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-xs">Ctrl+Y</kbd>）可回退或恢复操作。</p>
+                                    <p>通过 <strong>编辑 → 撤销</strong> 和 <strong>编辑 → 重做</strong>（快捷键 <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm">Ctrl+Z</kbd> / <kbd className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm">Ctrl+Y</kbd>）可回退或恢复操作。</p>
                                 </TutorialStep>
 
                                 <TutorialStep number={6} title="自动保存">
                                     <p>在程序窗口的 <strong>右下角</strong> 可切换是否开启自动保存功能，避免意外丢失编辑内容。</p>
                                 </TutorialStep>
 
-                                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-4 mt-8 pt-4 border-t border-slate-200 dark:border-slate-700">特殊文件类型</h3>
+                                <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 mb-4 mt-8 pt-4 border-t border-slate-200 dark:border-slate-700">特殊文件类型</h3>
 
                                 <TutorialStep number={7} title="编辑 DAT 字库文件">
                                     <p>编辑 DAT 字库文件时，程序默认屏蔽 ASCII 字符（英文、数字、英文标点），仅保留非 ASCII 字符，同时自动屏蔽重复输入的字符，确保字库数据正确。</p>
@@ -489,7 +489,7 @@
                     case 'save-export':
                         return (
                             <div className="animate-fade-in-up">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
                                     <i className="fas fa-floppy-disk gradient-text mr-3" />保存与导出
                                 </h2>
 
@@ -517,7 +517,7 @@
                     case 'search':
                         return (
                             <div className="animate-fade-in-up">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
                                     <i className="fas fa-magnifying-glass gradient-text mr-3" />搜索功能
                                 </h2>
 
@@ -533,8 +533,8 @@
                                             <div key={i} className="flex items-start gap-2 p-3 rounded-xl glass-card">
                                                 <i className="fas fa-check-circle text-emerald-500 text-xs mt-0.5" />
                                                 <div>
-                                                    <div className="font-medium text-slate-800 dark:text-slate-100 text-sm">{item.title}</div>
-                                                    <div className="text-xs text-slate-500 dark:text-slate-400">{item.desc}</div>
+                                                    <div className="font-medium text-slate-800 dark:text-slate-100 text-base">{item.title}</div>
+                                                    <div className="text-sm text-slate-500 dark:text-slate-400">{item.desc}</div>
                                                 </div>
                                             </div>
                                         ))}
@@ -550,7 +550,7 @@
                     case 'codetable':
                         return (
                             <div className="animate-fade-in-up">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
                                     <i className="fas fa-code gradient-text mr-3" />码表转换
                                 </h2>
                                 <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
@@ -561,7 +561,7 @@
                                     <p>本软件<strong>无内置编码转换表</strong>，需前往 <a href="https://github.com/GTASA-ACCHS/CN.resource" className="text-blue-500 hover:underline" target="_blank">静态资源站 <i className="fas fa-external-link-alt text-xs" /></a> 下载。</p>
                                     <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
                                         {['罪吧汉化', '拇指玩汉化', 'Play汉化', 'VC日语官方', 'IV日语官方'].map((name, i) => (
-                                            <div key={i} className="text-center py-2 px-3 rounded-lg glass-card text-sm text-slate-700 dark:text-slate-300">
+                                            <div key={i} className="text-center py-2 px-3 rounded-lg glass-card text-base text-slate-700 dark:text-slate-300">
                                                 {name}
                                             </div>
                                         ))}
@@ -581,7 +581,7 @@
                     case 'ai-translate':
                         return (
                             <div className="animate-fade-in-up">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
                                     <i className="fas fa-robot gradient-text mr-3" />智能翻译
                                 </h2>
                                 <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
@@ -591,21 +591,21 @@
                                 <TutorialStep number={1} title="配置API密钥">
                                     <p>程序内置 <strong>小米 MiMo</strong>（mimo-v2.5-pro）和 <strong>DeepSeek</strong>（deepseek-v4-pro / deepseek-v4-flash）大模型支持。请自行注册获取 API 密钥：</p>
                                     <div className="flex gap-3 mt-2">
-                                        <a href="https://platform.xiaomimimo.com" target="_blank" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-card text-sm font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
+                                        <a href="https://platform.xiaomimimo.com" target="_blank" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-card text-base font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
                                             <i className="fas fa-external-link-alt text-xs" />小米 MiMo
                                         </a>
-                                        <a href="https://platform.deepseek.com" target="_blank" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-card text-sm font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
+                                        <a href="https://platform.deepseek.com" target="_blank" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl glass-card text-base font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
                                             <i className="fas fa-external-link-alt text-xs" />DeepSeek
                                         </a>
                                     </div>
-                                    <p className="mt-3 text-sm">可在设置中配置 API 密钥、系统提示词和批次大小。自动频率控制和重试机制确保翻译稳定性。</p>
+                                    <p className="mt-3 text-base">可在设置中配置 API 密钥、系统提示词和批次大小。自动频率控制和重试机制确保翻译稳定性。</p>
                                     <TipBox type="warning">
                                         DeepSeek 旧版模型（deepseek-chat / deepseek-reasoner）将于 2026/07/24 弃用，请迁移至 V4 系列。
                                     </TipBox>
                                 </TutorialStep>
 
                                 <TutorialStep number={2} title="执行翻译">
-                                    <p>通过 <strong>编辑 → 智能翻译</strong> 选择要翻译的文本条目即可执行。也可在表格中选定单元格区域，右键选择 <span className="font-mono text-orange-500 text-sm">🌐 翻译选定行</span> 快速翻译。</p>
+                                    <p>通过 <strong>编辑 → 智能翻译</strong> 选择要翻译的文本条目即可执行。也可在表格中选定单元格区域，右键选择 <span className="font-mono text-orange-500 text-base">🌐 翻译选定行</span> 快速翻译。</p>
                                     <TipBox type="success">
                                         建议翻译前先备份原始文件，翻译完成后请人工校对以确保准确性。
                                     </TipBox>
@@ -616,7 +616,7 @@
                     case 'personalize':
                         return (
                             <div className="animate-fade-in-up">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
                                     <i className="fas fa-paint-brush gradient-text mr-3" />个性化设置
                                 </h2>
 
@@ -640,9 +640,42 @@
             };
 
             return (
-                <main ref={contentRef} className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 py-6 min-h-0">
-                    <div className="glass-card rounded-2xl p-5 md:p-8 max-w-4xl mx-auto">
+                <main ref={contentRef} className="flex-1 overflow-y-auto px-4 md:px-6 lg:px-8 py-6 min-h-0 flex flex-col">
+                    <div className="glass-card rounded-2xl p-5 md:p-8 max-w-5xl mx-auto w-full flex-1">
                         {renderContent()}
+                        <div className="flex items-center justify-between mt-10 pt-6 border-t border-slate-200 dark:border-slate-700">
+                            {(() => {
+                                const currentIndex = sections.findIndex(s => s.id === activeSection);
+                                const prev = currentIndex > 0 ? sections[currentIndex - 1] : null;
+                                const next = currentIndex < sections.length - 1 ? sections[currentIndex + 1] : null;
+                                return (
+                                    <>
+                                        <div>
+                                            {prev ? (
+                                                <button
+                                                    onClick={() => onSectionClick(prev.id)}
+                                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl glass-button text-slate-600 dark:text-slate-300 hover:text-blue-500 dark:hover:text-blue-400 transition-all group"
+                                                >
+                                                    <i className="fas fa-chevron-left text-xs group-hover:-translate-x-0.5 transition-transform" />
+                                                    <span className="text-sm font-medium">{prev.label}</span>
+                                                </button>
+                                            ) : <div />}
+                                        </div>
+                                        <div>
+                                            {next ? (
+                                                <button
+                                                    onClick={() => onSectionClick(next.id)}
+                                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl gradient-bg text-white shadow-lg shadow-orange-500/20 hover:shadow-orange-500/30 transition-all group"
+                                                >
+                                                    <span className="text-sm font-medium">{next.label}</span>
+                                                    <i className="fas fa-chevron-right text-xs group-hover:translate-x-0.5 transition-transform" />
+                                                </button>
+                                            ) : <div />}
+                                        </div>
+                                    </>
+                                );
+                            })()}
+                        </div>
                     </div>
                 </main>
             );
@@ -663,7 +696,7 @@
             return (
                 <button
                     onClick={onClick}
-                    className="md:hidden fixed bottom-6 right-6 z-[950] w-14 h-14 rounded-2xl gradient-bg text-white shadow-lg shadow-orange-500/30 flex flex-col items-center justify-center gap-0.5 text-xs font-medium active:scale-95 transition-transform"
+                    className="md:hidden fixed bottom-6 right-6 z-[950] w-14 h-14 rounded-2xl gradient-bg text-white shadow-lg shadow-orange-500/30 flex flex-col items-center justify-center gap-0.5 text-sm font-medium active:scale-95 transition-transform"
                 >
                     <i className="fas fa-list-ul text-base mb-0.5" />
                     <span className="text-[10px]">{sections[section] || '目录'}</span>
@@ -720,7 +753,7 @@
                                 mobileOpen={mobileMenuOpen}
                                 onMobileClose={() => setMobileMenuOpen(false)}
                             />
-                            <ContentArea activeSection={activeSection} />
+                            <ContentArea activeSection={activeSection} onSectionClick={handleSectionClick} />
                         </div>
                         <MobileNavToggle
                             onClick={() => setMobileMenuOpen(true)}
