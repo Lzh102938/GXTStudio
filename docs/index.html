@@ -1,0 +1,2326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GXTStudio - GTA文本资源编辑器</title>
+    <link rel="icon" href="icon/favicon.png" type="image/png">
+    <link rel="apple-touch-icon" href="icon/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        primary: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            200: '#bfdbfe',
+                            300: '#93c5fd',
+                            400: '#60a5fa',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                        },
+                        accent: {
+                            400: '#22d3ee',
+                            500: '#06b6d4',
+                        }
+                    },
+                    animation: {
+                        'float': 'float 3s ease-in-out infinite',
+                        'pulse-slow': 'pulse 3s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-10px)' },
+                        },
+                    },
+                },
+            },
+        }
+    </script>
+    <style>
+        html { scroll-behavior: smooth; min-height: 100vh; }
+        body { 
+            -webkit-font-smoothing: antialiased; 
+            -moz-osx-font-smoothing: grayscale;
+            background-image: url('image/Background.png');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+            min-height: 100vh;
+            position: relative;
+        }
+        
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.35);
+            pointer-events: none;
+            z-index: 0;
+        }
+        
+        .dark body::before,
+        html.dark body::before {
+            background: rgba(15, 23, 42, 0.55);
+        }
+        
+        #root {
+            position: relative;
+            z-index: 1;
+        }
+        
+        .gradient-text {
+            background: linear-gradient(135deg, #f97316, #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .gradient-bg {
+            background: linear-gradient(135deg, #f97316, #ec4899);
+        }
+        
+        .glass {
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            transform: translateZ(0);
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(24px) saturate(200%);
+            -webkit-backdrop-filter: blur(24px) saturate(200%);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            transform: translateZ(0);
+        }
+
+        .dark .glass-card {
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .glass-button {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transform: translateZ(0);
+        }
+
+        .dark .glass-button {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .glass-input {
+            background: rgba(255, 255, 255, 0.5);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            transform: translateZ(0);
+        }
+
+        .dark .glass-input {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.4);
+            backdrop-filter: blur(32px) saturate(180%);
+            -webkit-backdrop-filter: blur(32px) saturate(180%);
+            transform: translateZ(0);
+        }
+
+        .dark .glass-panel {
+            background: rgba(15, 23, 42, 0.6);
+        }
+
+        .glass-badge {
+            background: rgba(255, 255, 255, 0.5);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transform: translateZ(0);
+        }
+
+        .dark .glass-badge {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .immersive-section {
+            background: transparent;
+        }
+        
+        .immersive-card {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: none;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+            transform: translateZ(0);
+        }
+
+        .dark .immersive-card {
+            background: rgba(30, 41, 59, 0.4);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .immersive-badge {
+            background: rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: none;
+            transform: translateZ(0);
+        }
+
+        .dark .immersive-badge {
+            background: rgba(30, 41, 59, 0.5);
+        }
+        
+        .animate-on-view {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .animate-on-view.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .animate-on-view.from-left {
+            transform: translateX(-30px) translateY(30px);
+        }
+        
+        .animate-on-view.from-left.visible {
+            transform: translateX(0) translateY(0);
+        }
+        
+        .animate-on-view.from-right {
+            transform: translateX(30px) translateY(30px);
+        }
+        
+        .animate-on-view.from-right.visible {
+            transform: translateX(0) translateY(0);
+        }
+        
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+        
+        .cursor-blink {
+            animation: blink 1s step-end infinite;
+        }
+        
+        @keyframes codeFadeIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        
+        .code-line-animate {
+            opacity: 0;
+            animation: codeFadeIn 0.5s ease forwards;
+        }
+        
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .dark ::-webkit-scrollbar-thumb { background: #475569; }
+        .dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        
+        .card-hover {
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: translateZ(0);
+        }
+        .card-hover:hover { transform: translateY(-8px) scale(1.02) translateZ(0); }
+        
+        .btn-hover:hover { transform: translateY(-2px); }
+        .btn-hover:active { transform: translateY(0); }
+        
+        .particle-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+        }
+        
+        .cursor-glow {
+            position: fixed;
+            width: 300px;
+            height: 300px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(37, 99, 235, 0.15) 0%, transparent 70%);
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            z-index: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .dark .cursor-glow {
+            background: radial-gradient(circle, rgba(96, 165, 250, 0.1) 0%, transparent 70%);
+        }
+        
+        @media (max-width: 768px) {
+            .particle-canvas, .cursor-glow { display: none; }
+        }
+        
+        .stagger-1 { animation-delay: 0.1s; }
+        .stagger-2 { animation-delay: 0.2s; }
+        .stagger-3 { animation-delay: 0.3s; }
+        .stagger-4 { animation-delay: 0.4s; }
+        .stagger-5 { animation-delay: 0.5s; }
+        .stagger-6 { animation-delay: 0.6s; }
+        .stagger-7 { animation-delay: 0.7s; }
+        .stagger-8 { animation-delay: 0.8s; }
+
+        .page-loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            transition: opacity 0.5s ease, visibility 0.5s ease;
+        }
+        
+        .dark .page-loader {
+            background: #0f172a;
+        }
+        
+        .page-loader.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        @keyframes loaderPulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
+            50% { transform: scale(1.05); box-shadow: 0 0 30px 10px rgba(249, 115, 22, 0.3); }
+        }
+
+        .loader-icon {
+            animation: loaderPulse 1.5s ease infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes slide-in-up {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-slide-in-up {
+            animation: slide-in-up 0.4s ease forwards;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(249, 115, 22, 0.3); }
+            50% { box-shadow: 0 0 40px rgba(249, 115, 22, 0.5); }
+        }
+
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+
+        .shimmer {
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            background-size: 200% 100%;
+            animation: shimmer 2s infinite;
+        }
+
+        @keyframes ripple {
+            to { transform: scale(4); opacity: 0; }
+        }
+
+        .ripple-effect {
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            width: 100px;
+            height: 100px;
+            transform: scale(0);
+            animation: ripple 0.6s linear;
+            pointer-events: none;
+        }
+
+        @keyframes slideInLeft {
+            from { opacity: 0; transform: translateX(-50px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(50px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes slideInUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes scaleIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        @keyframes rotateIn {
+            from { opacity: 0; transform: rotate(-10deg) scale(0.9); }
+            to { opacity: 1; transform: rotate(0) scale(1); }
+        }
+
+        .animate-slide-in-left { animation: slideInLeft 0.6s ease forwards; }
+        .animate-slide-in-right { animation: slideInRight 0.6s ease forwards; }
+        .animate-slide-in-up { animation: slideInUp 0.6s ease forwards; }
+        .animate-scale-in { animation: scaleIn 0.5s ease forwards; }
+        .animate-rotate-in { animation: rotateIn 0.5s ease forwards; }
+
+        .parallax-slow,
+        .parallax-medium,
+        .parallax-fast {
+            will-change: transform;
+            transform: translateZ(0);
+        }
+
+        .hover-lift { transition: transform 0.3s ease, box-shadow 0.3s ease; }
+        .hover-lift:hover { transform: translateY(-5px); box-shadow: 0 20px 40px rgba(0,0,0,0.1); }
+
+        .hover-glow { transition: box-shadow 0.3s ease; }
+        .hover-glow:hover { box-shadow: 0 0 30px rgba(249, 115, 22, 0.3); }
+
+        .text-shimmer {
+            background: linear-gradient(90deg, #f97316, #ec4899, #f97316);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: shimmer 3s linear infinite;
+        }
+
+        .glow-border {
+            position: relative;
+        }
+
+        .glow-border::before {
+            content: '';
+            position: absolute;
+            inset: -2px;
+            background: linear-gradient(45deg, #f97316, #ec4899, #f97316);
+            border-radius: inherit;
+            z-index: -1;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .glow-border:hover::before {
+            opacity: 1;
+        }
+
+        .magnetic-btn {
+            transition: transform 0.2s ease;
+        }
+
+        @keyframes bounce-subtle {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+        }
+
+        .animate-bounce-subtle {
+            animation: bounce-subtle 2s ease-in-out infinite;
+        }
+
+        @keyframes gradient-shift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .gradient-animate {
+            background-size: 200% 200%;
+            animation: gradient-shift 5s ease infinite;
+        }
+
+        @keyframes glow-pulse {
+            0%, 100% { box-shadow: 0 0 15px rgba(59, 130, 246, 0.2); }
+            50% { box-shadow: 0 0 25px rgba(59, 130, 246, 0.35); }
+        }
+
+        .glow-pulse {
+            animation: glow-pulse 3s ease-in-out infinite;
+        }
+
+        @keyframes border-glow {
+            0%, 100% { border-color: rgba(59, 130, 246, 0.3); }
+            50% { border-color: rgba(59, 130, 246, 0.6); }
+        }
+
+        .border-glow {
+            animation: border-glow 2s ease-in-out infinite;
+        }
+
+        @keyframes subtle-float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+
+        .subtle-float {
+            animation: subtle-float 4s ease-in-out infinite;
+        }
+
+        @keyframes gradient-text-flow {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        .gradient-text-flow {
+            background: linear-gradient(90deg, #3b82f6, #6366f1, #8b5cf6, #3b82f6);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: gradient-text-flow 4s linear infinite;
+        }
+
+        .hover-lift {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .hover-lift:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 12px 24px -8px rgba(0, 0, 0, 0.15);
+        }
+
+        .hover-scale {
+            transition: transform 0.2s ease;
+        }
+
+        .hover-scale:hover {
+            transform: scale(1.02);
+        }
+
+        .magnetic-hover {
+            transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+
+        @keyframes ripple-expand {
+            0% { transform: scale(0); opacity: 0.4; }
+            100% { transform: scale(4); opacity: 0; }
+        }
+
+        .ripple-container {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .ripple-effect-btn {
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(0);
+            animation: ripple-expand 0.5s ease-out;
+            pointer-events: none;
+        }
+
+        @keyframes typewriter-cursor {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .typewriter-cursor::after {
+            content: '|';
+            animation: typewriter-cursor 0.8s infinite;
+        }
+
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .fade-in-up {
+            animation: fade-in-up 0.4s ease-out forwards;
+        }
+
+        @keyframes scale-in {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .scale-in {
+            animation: scale-in 0.3s ease-out forwards;
+        }
+
+        .text-2xl {
+            font-size: 1.5rem;
+            line-height: 2rem;
+        }
+
+        .font-bold {
+            font-weight: 700;
+        }
+
+        @media (max-width: 640px) {
+            html { font-size: 14px; }
+            body { background-attachment: scroll; }
+            .immersive-card { padding: 1rem; }
+            .glass-panel { padding: 0.75rem; }
+            .container { padding-left: 1rem; padding-right: 1rem; }
+            section { padding-top: 3rem; padding-bottom: 3rem; }
+            .hover-lift:hover { transform: none; }
+            .hover-scale:hover { transform: none; }
+            .magnetic-hover { transition: none; }
+            .magnetic-btn { transition: none; }
+            .glow-border::before { display: none; }
+            .btn-hover:hover { transform: none; }
+            .card-hover:hover { transform: none; }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors duration-300">
+    <div id="pageLoader" class="page-loader">
+        <div class="text-center">
+            <img src="icon/favicon.png" alt="GXTStudio" style="width: 60px; height: 60px; border-radius: 16px; margin-bottom: 20px;" class="loader-icon">
+            <div class="text-slate-500 dark:text-slate-400">正在加载...</div>
+        </div>
+    </div>
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel" data-presets="react">
+        // @ts-nocheck
+        /* eslint-disable */
+        const { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext } = React;
+
+        const ThemeContext = createContext();
+
+        const useTheme = () => useContext(ThemeContext);
+
+        const useInView = (options = {}) => {
+            const ref = useRef(null);
+            const [isInView, setIsInView] = useState(false);
+
+            useEffect(() => {
+                const observer = new IntersectionObserver(([entry]) => {
+                    if (entry.isIntersecting) {
+                        setIsInView(true);
+                        observer.unobserve(entry.target);
+                    }
+                }, { threshold: 0.1, ...options });
+
+                if (ref.current) observer.observe(ref.current);
+                return () => observer.disconnect();
+            }, []);
+
+            return [ref, isInView];
+        };
+
+        const useAnimatedValue = (end, duration = 2000, start = 0) => {
+            const [value, setValue] = useState(start);
+            const [ref, isInView] = useInView();
+
+            useEffect(() => {
+                if (!isInView) return;
+                const startTime = performance.now();
+                const animate = (currentTime) => {
+                    const elapsed = currentTime - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    const easeProgress = 1 - Math.pow(1 - progress, 3);
+                    setValue(Math.floor(easeProgress * (end - start) + start));
+                    if (progress < 1) requestAnimationFrame(animate);
+                    else setValue(end);
+                };
+                requestAnimationFrame(animate);
+            }, [isInView, end, duration, start]);
+
+            return [ref, value];
+        };
+
+        const useSpring = (target, config = { tension: 170, friction: 26 }) => {
+            const [value, setValue] = useState(0);
+            const currentRef = useRef(0);
+            const velocityRef = useRef(0);
+            const targetRef = useRef(target);
+            const frameRef = useRef();
+
+            useEffect(() => {
+                targetRef.current = target;
+            }, [target]);
+
+            useEffect(() => {
+                const animate = () => {
+                    const current = currentRef.current;
+                    const targetVal = targetRef.current;
+                    const velocity = velocityRef.current;
+                    
+                    const force = (targetVal - current) * config.tension * 0.001;
+                    const damping = velocity * config.friction * 0.01;
+                    
+                    const newVelocity = velocity + force - damping;
+                    const newValue = current + newVelocity;
+                    
+                    currentRef.current = newValue;
+                    velocityRef.current = newVelocity;
+                    setValue(newValue);
+                    
+                    if (Math.abs(targetVal - newValue) > 0.001 || Math.abs(newVelocity) > 0.001) {
+                        frameRef.current = requestAnimationFrame(animate);
+                    }
+                };
+                
+                frameRef.current = requestAnimationFrame(animate);
+                return () => cancelAnimationFrame(frameRef.current);
+            }, [config.tension, config.friction]);
+
+            return value;
+        };
+
+        const useTypewriter = (text, speed = 50, delay = 0) => {
+            const [displayText, setDisplayText] = useState('');
+            const [isTyping, setIsTyping] = useState(false);
+
+            useEffect(() => {
+                setDisplayText('');
+                setIsTyping(true);
+                
+                const timeout = setTimeout(() => {
+                    let index = 0;
+                    const interval = setInterval(() => {
+                        if (index < text.length) {
+                            setDisplayText(text.slice(0, index + 1));
+                            index++;
+                        } else {
+                            setIsTyping(false);
+                            clearInterval(interval);
+                        }
+                    }, speed);
+                    
+                    return () => clearInterval(interval);
+                }, delay);
+                
+                return () => clearTimeout(timeout);
+            }, [text, speed, delay]);
+
+            return { displayText, isTyping };
+        };
+
+        const useMousePosition = () => {
+            const positionRef = useRef({ x: 0, y: 0 });
+            const [position, setPosition] = useState({ x: 0, y: 0 });
+            const rafRef = useRef(null);
+
+            useEffect(() => {
+                const handleMouseMove = (e) => {
+                    positionRef.current = { x: e.clientX, y: e.clientY };
+                    if (!rafRef.current) {
+                        rafRef.current = requestAnimationFrame(() => {
+                            setPosition(positionRef.current);
+                            rafRef.current = null;
+                        });
+                    }
+                };
+                window.addEventListener('mousemove', handleMouseMove);
+                return () => {
+                    window.removeEventListener('mousemove', handleMouseMove);
+                    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                };
+            }, []);
+
+            return position;
+        };
+
+        const useScrollDirection = () => {
+            const [scrollDirection, setScrollDirection] = useState('up');
+            const [scrollY, setScrollY] = useState(0);
+            const lastScrollYRef = useRef(0);
+            const directionRef = useRef('up');
+            const rafRef = useRef(null);
+
+            useEffect(() => {
+                const updateScrollDirection = () => {
+                    const currentScrollY = window.scrollY;
+                    const lastScrollY = lastScrollYRef.current;
+                    const direction = currentScrollY > lastScrollY ? 'down' : 'up';
+
+                    if (direction !== directionRef.current && Math.abs(currentScrollY - lastScrollY) > 10) {
+                        directionRef.current = direction;
+                        setScrollDirection(direction);
+                    }
+                    setScrollY(currentScrollY);
+                    lastScrollYRef.current = currentScrollY > 0 ? currentScrollY : 0;
+                    rafRef.current = null;
+                };
+
+                const handleScroll = () => {
+                    if (!rafRef.current) {
+                        rafRef.current = requestAnimationFrame(updateScrollDirection);
+                    }
+                };
+
+                window.addEventListener('scroll', handleScroll, { passive: true });
+                return () => {
+                    window.removeEventListener('scroll', handleScroll);
+                    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                };
+            }, []);
+
+            return { scrollDirection, scrollY };
+        };
+
+        const useLocalStorage = (key, initialValue) => {
+            const [storedValue, setStoredValue] = useState(() => {
+                try {
+                    const item = window.localStorage.getItem(key);
+                    return item ? JSON.parse(item) : initialValue;
+                } catch (error) {
+                    return initialValue;
+                }
+            });
+
+            const setValue = (value) => {
+                try {
+                    const valueToStore = value instanceof Function ? value(storedValue) : value;
+                    setStoredValue(valueToStore);
+                    window.localStorage.setItem(key, JSON.stringify(valueToStore));
+                } catch (error) {
+                    console.error(error);
+                }
+            };
+
+            return [storedValue, setValue];
+        };
+
+        const useDebounce = (value, delay) => {
+            const [debouncedValue, setDebouncedValue] = useState(value);
+
+            useEffect(() => {
+                const handler = setTimeout(() => {
+                    setDebouncedValue(value);
+                }, delay);
+
+                return () => clearTimeout(handler);
+            }, [value, delay]);
+
+            return debouncedValue;
+        };
+
+        const MotionDiv = ({ children, className = '', delay = 0, from = 'bottom', ...props }) => {
+            const [ref, isInView] = useInView();
+            const fromClass = from === 'left' ? 'from-left' : from === 'right' ? 'from-right' : '';
+            
+            return (
+                <div 
+                    ref={ref} 
+                    className={`animate-on-view ${fromClass} ${className}`}
+                    style={{ 
+                        transitionDelay: `${delay}ms`,
+                        ...(isInView ? { opacity: 1, transform: 'translate(0, 0)' } : {})
+                    }}
+                    {...props}
+                >
+                    {children}
+                </div>
+            );
+        };
+
+        const ParticleCanvas = () => {
+            const canvasRef = useRef(null);
+            const { isDark } = useTheme();
+
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                let particles = [];
+                let mouse = { x: -1000, y: -1000 };
+                let animationId;
+                let frameCount = 0;
+
+                const resize = () => {
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerHeight;
+                };
+
+                const init = () => {
+                    particles = [];
+                    for (let i = 0; i < 25; i++) {
+                        particles.push({
+                            x: Math.random() * canvas.width,
+                            y: Math.random() * canvas.height,
+                            vx: (Math.random() - 0.5) * 0.3,
+                            vy: (Math.random() - 0.5) * 0.3,
+                            radius: Math.random() * 1.5 + 0.5,
+                            opacity: Math.random() * 0.15 + 0.05
+                        });
+                    }
+                };
+
+                const animate = () => {
+                    frameCount++;
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    const color = isDark ? '96, 165, 250' : '37, 99, 235';
+
+                    particles.forEach((p, i) => {
+                        const dx = mouse.x - p.x;
+                        const dy = mouse.y - p.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+
+                        if (dist < 150 && dist > 0) {
+                            const force = (150 - dist) / 150;
+                            p.vx -= (dx / dist) * force * 0.02;
+                            p.vy -= (dy / dist) * force * 0.02;
+                        }
+
+                        p.x += p.vx;
+                        p.y += p.vy;
+                        if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+                        if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+                        p.vx *= 0.99;
+                        p.vy *= 0.99;
+
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                        ctx.fillStyle = `rgba(${color}, ${p.opacity})`;
+                        ctx.fill();
+
+                        if (frameCount % 2 === 0) {
+                            for (let j = i + 1; j < particles.length; j++) {
+                                const p2 = particles[j];
+                                const dx2 = p.x - p2.x;
+                                const dy2 = p.y - p2.y;
+                                const distance = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+                                if (distance < 120) {
+                                    ctx.beginPath();
+                                    ctx.moveTo(p.x, p.y);
+                                    ctx.lineTo(p2.x, p2.y);
+                                    ctx.strokeStyle = `rgba(${color}, ${0.08 * (1 - distance / 120)})`;
+                                    ctx.lineWidth = 0.5;
+                                    ctx.stroke();
+                                }
+                            }
+                        }
+                    });
+
+                    animationId = requestAnimationFrame(animate);
+                };
+
+                const handleMouseMove = (e) => { mouse.x = e.clientX; mouse.y = e.clientY; };
+                const handleResize = () => { resize(); init(); };
+
+                resize();
+                init();
+                animate();
+
+                window.addEventListener('mousemove', handleMouseMove);
+                window.addEventListener('resize', handleResize);
+
+                return () => {
+                    cancelAnimationFrame(animationId);
+                    window.removeEventListener('mousemove', handleMouseMove);
+                    window.removeEventListener('resize', handleResize);
+                };
+            }, [isDark]);
+
+            return <canvas ref={canvasRef} className="particle-canvas" />;
+        };
+
+        const CursorGlow = () => {
+            const glowRef = useRef(null);
+            const mouseRef = useRef({ x: 0, y: 0 });
+            const glowPosRef = useRef({ x: 0, y: 0 });
+
+            useEffect(() => {
+                const handleMouseMove = (e) => {
+                    mouseRef.current = { x: e.clientX, y: e.clientY };
+                };
+
+                const animate = () => {
+                    glowPosRef.current.x += (mouseRef.current.x - glowPosRef.current.x) * 0.1;
+                    glowPosRef.current.y += (mouseRef.current.y - glowPosRef.current.y) * 0.1;
+                    if (glowRef.current) {
+                        glowRef.current.style.left = glowPosRef.current.x + 'px';
+                        glowRef.current.style.top = glowPosRef.current.y + 'px';
+                    }
+                    requestAnimationFrame(animate);
+                };
+
+                window.addEventListener('mousemove', handleMouseMove);
+                animate();
+
+                return () => window.removeEventListener('mousemove', handleMouseMove);
+            }, []);
+
+            return <div ref={glowRef} className="cursor-glow" />;
+        };
+
+        const MagneticButton = React.memo(({ children, className = '', strength = 0.2, ...props }) => {
+            const buttonRef = useRef(null);
+            const offsetRef = useRef({ x: 0, y: 0 });
+            const [offset, setOffset] = useState({ x: 0, y: 0 });
+            const rafRef = useRef(null);
+
+            const handleMouseMove = useCallback((e) => {
+                if (!buttonRef.current) return;
+                if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                
+                rafRef.current = requestAnimationFrame(() => {
+                    const rect = buttonRef.current.getBoundingClientRect();
+                    const centerX = rect.left + rect.width / 2;
+                    const centerY = rect.top + rect.height / 2;
+                    const deltaX = (e.clientX - centerX) * strength;
+                    const deltaY = (e.clientY - centerY) * strength;
+                    offsetRef.current = { x: deltaX, y: deltaY };
+                    setOffset({ x: deltaX, y: deltaY });
+                });
+            }, [strength]);
+
+            const handleMouseLeave = useCallback(() => {
+                if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                offsetRef.current = { x: 0, y: 0 };
+                setOffset({ x: 0, y: 0 });
+            }, []);
+
+            useEffect(() => {
+                return () => {
+                    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                };
+            }, []);
+
+            return (
+                <div
+                    ref={buttonRef}
+                    onMouseMove={handleMouseMove}
+                    onMouseLeave={handleMouseLeave}
+                    className={`magnetic-hover ${className}`}
+                    style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
+                    {...props}
+                >
+                    {children}
+                </div>
+            );
+        });
+
+        const AnimatedCounter = React.memo(({ end, duration = 2000, suffix = '' }) => {
+            const [ref, isInView] = useInView();
+            const [count, setCount] = useState(0);
+            const countRef = useRef(0);
+            const startTimeRef = useRef(null);
+            const rafRef = useRef(null);
+
+            useEffect(() => {
+                if (!isInView) return;
+                
+                const animate = (timestamp) => {
+                    if (!startTimeRef.current) startTimeRef.current = timestamp;
+                    const progress = Math.min((timestamp - startTimeRef.current) / duration, 1);
+                    const easeOut = 1 - Math.pow(1 - progress, 3);
+                    const currentCount = Math.floor(easeOut * end);
+                    
+                    if (currentCount !== countRef.current) {
+                        countRef.current = currentCount;
+                        setCount(currentCount);
+                    }
+                    
+                    if (progress < 1) {
+                        rafRef.current = requestAnimationFrame(animate);
+                    } else {
+                        setCount(end);
+                    }
+                };
+                
+                rafRef.current = requestAnimationFrame(animate);
+                
+                return () => {
+                    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                };
+            }, [isInView, end, duration]);
+
+            return <span ref={ref} className="text-2xl font-bold text-slate-900 dark:text-white">{count}{suffix}</span>;
+        });
+
+        const GlowText = React.memo(({ children, className = '' }) => {
+            return (
+                <span className={`gradient-text-flow ${className}`}>
+                    {children}
+                </span>
+            );
+        });
+
+        const ScrollProgress = () => {
+            const progressRef = useRef(0);
+            const [progress, setProgress] = useState(0);
+            const rafRef = useRef(null);
+
+            useEffect(() => {
+                const handleScroll = () => {
+                    if (!rafRef.current) {
+                        rafRef.current = requestAnimationFrame(() => {
+                            const scrollTop = window.scrollY;
+                            const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+                            const newProgress = (scrollTop / docHeight) * 100;
+                            if (Math.abs(newProgress - progressRef.current) > 0.5) {
+                                progressRef.current = newProgress;
+                                setProgress(newProgress);
+                            }
+                            rafRef.current = null;
+                        });
+                    }
+                };
+                window.addEventListener('scroll', handleScroll, { passive: true });
+                return () => {
+                    window.removeEventListener('scroll', handleScroll);
+                    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                };
+            }, []);
+
+            return (
+                <div className="fixed top-0 left-0 h-0.5 gradient-bg z-[10001]" style={{ width: `${progress}%`, transition: 'width 0.1s linear' }} />
+            );
+        };
+
+        const ClickRipple = () => {
+            useEffect(() => {
+                const handleClick = (e) => {
+                    const ripple = document.createElement('div');
+                    ripple.className = 'ripple-effect';
+                    ripple.style.left = e.clientX - 50 + 'px';
+                    ripple.style.top = e.clientY - 50 + 'px';
+                    ripple.style.position = 'fixed';
+                    ripple.style.zIndex = '9999';
+                    document.body.appendChild(ripple);
+                    setTimeout(() => ripple.remove(), 600);
+                };
+
+                document.addEventListener('click', handleClick);
+                return () => document.removeEventListener('click', handleClick);
+            }, []);
+
+            return null;
+        };
+
+        const ParallaxEffect = () => {
+            useEffect(() => {
+                let ticking = false;
+                const slowEls = document.querySelectorAll('.parallax-slow');
+                const mediumEls = document.querySelectorAll('.parallax-medium');
+                const fastEls = document.querySelectorAll('.parallax-fast');
+
+                const updateParallax = () => {
+                    const scrolled = window.scrollY;
+                    slowEls.forEach(el => {
+                        el.style.transform = `translateY(${scrolled * 0.1}px) translateZ(0)`;
+                    });
+                    mediumEls.forEach(el => {
+                        el.style.transform = `translateY(${scrolled * 0.2}px) translateZ(0)`;
+                    });
+                    fastEls.forEach(el => {
+                        el.style.transform = `translateY(${scrolled * 0.3}px) translateZ(0)`;
+                    });
+                    ticking = false;
+                };
+
+                const handleScroll = () => {
+                    if (!ticking) {
+                        requestAnimationFrame(updateParallax);
+                        ticking = true;
+                    }
+                };
+
+                window.addEventListener('scroll', handleScroll, { passive: true });
+                return () => window.removeEventListener('scroll', handleScroll);
+            }, []);
+
+            return null;
+        };
+
+        const Navbar = () => {
+            const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+            const { isDark, toggleTheme } = useTheme();
+            const { scrollDirection, scrollY } = useScrollDirection();
+            const [activeSection, setActiveSection] = useState('');
+            const rafRef = useRef(null);
+
+            useEffect(() => {
+                const sections = ['features', 'specs', 'format-guide', 'tools', 'download', 'comments'];
+                const handleScroll = () => {
+                    if (rafRef.current) return;
+                    rafRef.current = requestAnimationFrame(() => {
+                        for (const section of sections) {
+                            const el = document.getElementById(section);
+                            if (el) {
+                                const rect = el.getBoundingClientRect();
+                                if (rect.top <= 100 && rect.bottom >= 100) {
+                                    setActiveSection(section);
+                                    break;
+                                }
+                            }
+                        }
+                        rafRef.current = null;
+                    });
+                };
+                window.addEventListener('scroll', handleScroll, { passive: true });
+                return () => {
+                    window.removeEventListener('scroll', handleScroll);
+                    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+                };
+            }, []);
+
+            const navLinks = [
+                { href: '#features', icon: 'fa-star', label: '功能特性' },
+                { href: '#specs', icon: 'fa-cog', label: '技术规格' },
+                { href: '#format-guide', icon: 'fa-file-code', label: '文件格式' },
+                { href: '#tools', icon: 'fa-tools', label: '在线工具' },
+                { href: 'tutorial.html', icon: 'fa-book', label: '使用教程' },
+                { href: '#download', icon: 'fa-download', label: '下载' },
+                { href: '#comments', icon: 'fa-comments', label: '评论区' },
+            ];
+
+            const scrolled = scrollY > 50;
+
+            return (
+                <nav className={`fixed top-0 left-0 right-0 z-[1000] transition-all duration-300 ${scrolled ? 'py-2 sm:py-3 glass bg-white/70 dark:bg-slate-900/70 border-b border-white/20 dark:border-white/5' : 'py-3 sm:py-4'}`}>
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6 flex items-center justify-between">
+                        <a href="#" className="flex items-center gap-2 sm:gap-3 group">
+                            <img src="icon/favicon.png" alt="GXTStudio" className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl transition-transform group-hover:rotate-[-5deg] group-hover:scale-105" />
+                            <span className="font-bold text-lg sm:text-xl">GXT<span className="text-blue-500">Studio</span></span>
+                        </a>
+
+                        <ul className="hidden lg:flex items-center gap-1">
+                            {navLinks.map((link) => {
+                                const sectionId = link.href.replace('#', '');
+                                const isActive = activeSection === sectionId;
+                                return (
+                                    <li key={link.href}>
+                                        <a href={link.href} className={`px-4 py-2 rounded-xl transition-all font-medium text-sm relative group glass-button ${isActive ? 'text-blue-500' : 'text-slate-600 dark:text-slate-300 hover:text-blue-500'}`}>
+                                            {link.label}
+                                            <span className={`absolute bottom-1 left-1/2 -translate-x-1/2 h-0.5 gradient-bg transition-all rounded-full ${isActive ? 'w-5' : 'w-0 group-hover:w-5'}`} />
+                                        </a>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+
+                        <div className="flex items-center gap-2 sm:gap-3">
+                            <button onClick={toggleTheme} className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl glass-button flex items-center justify-center hover:scale-105 sm:hover:scale-110 transition-transform relative overflow-hidden group">
+                                <i className={`fas fa-sun text-amber-500 absolute transition-all duration-500 text-sm ${isDark ? 'opacity-0 rotate-180 scale-0' : 'opacity-100 rotate-0 scale-100'}`} />
+                                <i className={`fas fa-moon text-indigo-500 absolute transition-all duration-500 text-sm ${isDark ? 'opacity-100 rotate-0 scale-100' : 'opacity-0 -rotate-180 scale-0'}`} />
+                            </button>
+                            <MagneticButton strength={0.2}>
+                                <a href="#download" className="hidden md:flex items-center gap-2 px-5 py-2.5 rounded-xl gradient-bg text-white font-semibold text-sm shadow-lg shadow-orange-500/25 btn-hover group glow-pulse">
+                                    <i className="fas fa-download group-hover:animate-bounce" />下载
+                                </a>
+                            </MagneticButton>
+                            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden w-9 h-9 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl glass-button flex items-center justify-center transition-transform active:scale-95">
+                                <i className={`fas ${mobileMenuOpen ? 'fa-times' : 'fa-bars'} text-sm transition-transform duration-300 ${mobileMenuOpen ? 'rotate-90' : ''}`} />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className={`lg:hidden absolute top-full left-2 right-2 sm:left-4 sm:right-4 mt-1 sm:mt-2 glass-card rounded-xl sm:rounded-2xl shadow-xl p-2 transition-all duration-300 overflow-hidden ${mobileMenuOpen ? 'max-h-[400px] opacity-100' : 'max-h-0 opacity-0 mt-0 pointer-events-none'}`}>
+                        {navLinks.map((link, index) => (
+                            <a 
+                                key={link.href} 
+                                href={link.href} 
+                                onClick={() => setMobileMenuOpen(false)} 
+                                className="flex items-center gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg sm:rounded-xl hover:bg-white/30 dark:hover:bg-white/10 transition-colors text-sm sm:text-base"
+                                style={{ 
+                                    transitionDelay: mobileMenuOpen ? `${index * 50}ms` : '0ms',
+                                    transform: mobileMenuOpen ? 'translateX(0)' : 'translateX(-20px)',
+                                    opacity: mobileMenuOpen ? 1 : 0,
+                                    transition: 'all 0.3s ease'
+                                }}
+                            >
+                                <i className={`fas ${link.icon} text-blue-500 w-5 text-sm`} />
+                                <span>{link.label}</span>
+                            </a>
+                        ))}
+                        <div className="border-t border-white/20 dark:border-white/5 mt-2 pt-2">
+                            <a href="#download" onClick={() => setMobileMenuOpen(false)} className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 sm:py-3 rounded-lg sm:rounded-xl gradient-bg text-white font-semibold text-sm sm:text-base">
+                                <i className="fas fa-download" />下载
+                            </a>
+                        </div>
+                    </div>
+                </nav>
+            );
+        };
+
+        const HeroSection = () => {
+            const [stat1Ref, stat1] = useAnimatedValue(5);
+            const [stat2Ref, stat2] = useAnimatedValue(10);
+            const [stat3Ref, stat3] = useAnimatedValue(100);
+            
+            const [activeTab, setActiveTab] = useState(0);
+            const [visibleLines, setVisibleLines] = useState(0);
+            const [isTransitioning, setIsTransitioning] = useState(false);
+            const mousePosition = useMousePosition();
+            const springX = useSpring(mousePosition.x, { tension: 100, friction: 20 });
+            const springY = useSpring(mousePosition.y, { tension: 100, friction: 20 });
+
+            const tabs = ['GTA SA', 'GTA IV', 'GTA V', 'GTA VC', 'GTA III'];
+
+            const codeContentByTab = {
+                0: [
+                    { num: 1, content: '<span class="text-blue-500">[MAIN]</span>' },
+                    { num: 2, content: '<span class="text-emerald-500">"FMAP_WAY"</span> = <span class="text-amber-500">"寻路点"</span>' },
+                    { num: 3, content: '<span class="text-emerald-500">"FMAP_N"</span> = <span class="text-amber-500">"北"</span>' },
+                    { num: 4, content: '<span class="text-emerald-500">"FMAP_S"</span> = <span class="text-amber-500">"南"</span>' },
+                    { num: 5, content: '<span class="text-emerald-500">"FMAP_E"</span> = <span class="text-amber-500">"东"</span>' },
+                    { num: 6, content: '<span class="text-emerald-500">"FMAP_W"</span> = <span class="text-amber-500">"西"</span>' },
+                    { num: 7, content: '<span class="text-slate-400 italic">// GTA SA - Windows-1252编码</span>' },
+                ],
+                1: [
+                    { num: 1, content: '<span class="text-cyan-500">0x8FCC246C</span> = <span class="text-pink-500">"Mission Passed"</span>' },
+                    { num: 2, content: '<span class="text-cyan-500">0xA23CFFDE</span> = <span class="text-pink-500">"Wasted"</span>' },
+                    { num: 3, content: '<span class="text-cyan-500">0xB7B99321</span> = <span class="text-pink-500">"Busted"</span>' },
+                    { num: 4, content: '<span class="text-slate-400 italic">// GTA IV - .gxt 哈希键索引</span>' },
+                ],
+                2: [
+                    { num: 1, content: '<span class="text-purple-500">[GXT2]</span>' },
+                    { num: 2, content: '<span class="text-cyan-500">0x5A3C0F72</span> = <span class="text-pink-500">"~r~Wasted"</span>' },
+                    { num: 3, content: '<span class="text-cyan-500">0x81D4E2B9</span> = <span class="text-pink-500">"~g~Stunt Jump"</span>' },
+                    { num: 4, content: '<span class="text-slate-400 italic">// GTA V - 哈希键索引</span>' },
+                ],
+                3: [
+                    { num: 1, content: '<span class="text-orange-500">[MAIN]</span>' },
+                    { num: 2, content: '<span class="text-yellow-500">"FEST_HF"</span> = <span class="text-red-400">"Health & Armor"</span>' },
+                    { num: 3, content: '<span class="text-yellow-500">"FEST_WE"</span> = <span class="text-red-400">"Weapons"</span>' },
+                    { num: 4, content: '<span class="text-yellow-500">"FEST_MO"</span> = <span class="text-red-400">"Money"</span>' },
+                    { num: 5, content: '<span class="text-slate-400 italic">// GTA VC - UTF-16编码</span>' },
+                ],
+                4: [
+                    { num: 1, content: '<span class="text-green-500">[TKEY]</span>' },
+                    { num: 2, content: '<span class="text-lime-500">"INTRO_1"</span> = <span class="text-teal-400">"Welcome to Liberty City"</span>' },
+                    { num: 3, content: '<span class="text-lime-500">"INTRO_2"</span> = <span class="text-teal-400">"The City That Never Sleeps"</span>' },
+                    { num: 4, content: '<span class="text-slate-400 italic">// GTA III - 无TABL块支持</span>' },
+                ],
+            };
+
+            const currentCodeLines = codeContentByTab[activeTab] || codeContentByTab[0];
+
+            useEffect(() => {
+                setVisibleLines(0);
+                setIsTransitioning(true);
+                const timeout = setTimeout(() => setIsTransitioning(false), 300);
+                return () => clearTimeout(timeout);
+            }, [activeTab]);
+
+            useEffect(() => {
+                if (isTransitioning) return;
+                const interval = setInterval(() => {
+                    setVisibleLines(prev => prev < currentCodeLines.length ? prev + 1 : currentCodeLines.length);
+                }, 150);
+                return () => clearInterval(interval);
+            }, [currentCodeLines.length, isTransitioning]);
+
+            useEffect(() => {
+                const tabInterval = setInterval(() => {
+                    setActiveTab(prev => (prev + 1) % tabs.length);
+                }, 5000);
+                return () => clearInterval(tabInterval);
+            }, []);
+
+            return (
+                <section className="min-h-screen flex items-center pt-20 sm:pt-24 pb-12 sm:pb-16 relative overflow-hidden">
+                    <div 
+                        className="absolute w-[600px] h-[600px] rounded-full pointer-events-none transition-all duration-1000 hidden sm:block"
+                        style={{
+                            background: 'radial-gradient(circle, rgba(249, 115, 22, 0.1) 0%, transparent 70%)',
+                            left: springX - 300,
+                            top: springY - 300,
+                        }}
+                    />
+                    
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
+                        <div className="grid lg:grid-cols-2 gap-8 sm:gap-12 lg:gap-20 items-center">
+                            <div className="space-y-6 sm:space-y-8">
+                                <MotionDiv from="left" delay={0}>
+                                    <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-xs sm:text-sm font-medium text-blue-500">
+                                        <i className="fas fa-heart text-pink-500 animate-pulse" />
+                                        个人开发者用爱发电
+                                    </div>
+                                </MotionDiv>
+
+                                <MotionDiv from="left" delay={100}>
+                                    <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight tracking-tight">
+                                        <span className="block">专业的</span>
+                                        <span className="block gradient-text-flow">GXT文本</span>
+                                        <span className="block">资源编辑器</span>
+                                    </h1>
+                                </MotionDiv>
+
+                                <MotionDiv from="left" delay={200}>
+                                    <p className="text-base sm:text-lg text-slate-600 dark:text-slate-400 leading-relaxed max-w-lg">
+                                        专业的GTA文本资源编辑器。支持GTA III、罪恶都市、圣安地列斯、GTA IV、自由城故事、罪恶都市传奇等版本的GXT文件编辑，提供智能翻译、码表转换、文本渲染预览等功能。
+                                    </p>
+                                </MotionDiv>
+
+                                <MotionDiv from="left" delay={300}>
+                                    <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+                                        <MagneticButton strength={0.15}>
+                                            <a href="#download" className="inline-flex items-center justify-center gap-2 px-5 sm:px-6 py-3 sm:py-4 rounded-lg sm:rounded-xl gradient-bg text-white font-semibold text-sm sm:text-base shadow-lg shadow-blue-500/20 btn-hover group">
+                                                <i className="fas fa-download group-hover:animate-bounce" />
+                                                下载 Windows 版本
+                                            </a>
+                                        </MagneticButton>
+                                        <MagneticButton strength={0.15}>
+                                            <a href="#features" className="inline-flex items-center justify-center gap-2 px-5 sm:px-6 py-3 sm:py-4 rounded-lg sm:rounded-xl glass-button text-slate-700 dark:text-slate-300 font-semibold text-sm sm:text-base hover-lift">
+                                                <i className="fas fa-play" />
+                                                了解更多
+                                            </a>
+                                        </MagneticButton>
+                                    </div>
+                                </MotionDiv>
+
+                                <MotionDiv from="left" delay={400}>
+                                    <div className="flex flex-wrap gap-3 sm:gap-4 pt-6 sm:pt-8 border-t border-white/30 dark:border-white/10">
+                                        <div ref={stat1Ref} className="flex-1 min-w-[80px] sm:min-w-[100px] text-center p-3 sm:p-4 immersive-card rounded-lg sm:rounded-xl hover-lift cursor-default">
+                                            <AnimatedCounter end={6} />
+                                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">支持游戏版本</p>
+                                        </div>
+                                        <div ref={stat2Ref} className="flex-1 min-w-[80px] sm:min-w-[100px] text-center p-3 sm:p-4 immersive-card rounded-lg sm:rounded-xl hover-lift cursor-default">
+                                            <AnimatedCounter end={10} />
+                                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">核心功能</p>
+                                        </div>
+                                        <div ref={stat3Ref} className="flex-1 min-w-[80px] sm:min-w-[100px] text-center p-3 sm:p-4 immersive-card rounded-lg sm:rounded-xl hover-lift cursor-default">
+                                            <AnimatedCounter end={100} suffix="%" />
+                                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">免费开源</p>
+                                        </div>
+                                    </div>
+                                </MotionDiv>
+                            </div>
+
+                            <MotionDiv from="right" delay={200} className="relative hidden lg:block">
+                                <div
+                                    className="immersive-card rounded-2xl shadow-2xl overflow-hidden transition-transform duration-300"
+                                    style={{
+                                        transform: `perspective(1000px) rotateY(${(springX - window.innerWidth / 2) * 0.01}deg) rotateX(${(window.innerHeight / 2 - springY) * 0.01}deg)`
+                                    }}
+                                >
+                                    <div className="flex items-center gap-2 px-4 py-3 glass-panel border-b border-white/20 dark:border-white/5">
+                                        <div className="flex gap-2">
+                                            <div className="w-3 h-3 rounded-full bg-red-500 hover:scale-125 transition-transform cursor-pointer" />
+                                            <div className="w-3 h-3 rounded-full bg-amber-500 hover:scale-125 transition-transform cursor-pointer" />
+                                            <div className="w-3 h-3 rounded-full bg-emerald-500 hover:scale-125 transition-transform cursor-pointer" />
+                                        </div>
+                                        <span className="flex-1 text-center text-sm text-slate-500 dark:text-slate-400">GXTStudio - english.gxt</span>
+                                        <div className="w-12" />
+                                    </div>
+                                    
+                                    <div className="flex gap-1 p-2 glass-panel border-b border-white/20 dark:border-white/5">
+                                        {tabs.map((tab, i) => (
+                                            <button 
+                                                key={tab} 
+                                                onClick={() => setActiveTab(i)}
+                                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${activeTab === i ? 'gradient-bg text-white scale-105 shadow-lg' : 'text-slate-500 hover:bg-white/30 dark:hover:bg-white/10'}`}
+                                            >
+                                                {tab}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <div className={`p-6 glass-panel min-h-[280px] font-mono text-sm transition-all duration-300 ${isTransitioning ? 'opacity-0 translate-y-2' : 'opacity-100 translate-y-0'}`}>
+                                        {currentCodeLines.slice(0, visibleLines).map((line, i) => (
+                                            <div 
+                                                key={`${activeTab}-${line.num}`} 
+                                                className="flex gap-4 opacity-0 animate-slide-in-up"
+                                                style={{ animationDelay: `${i * 80}ms`, animationFillMode: 'forwards' }}
+                                            >
+                                                <span className="text-slate-400 dark:text-slate-500 w-6 text-right select-none">{line.num}</span>
+                                                <span dangerouslySetInnerHTML={{ __html: line.content }} />
+                                            </div>
+                                        ))}
+                                        <div className="flex gap-4 mt-1">
+                                            <span className="text-slate-400 dark:text-slate-500 w-6 text-right select-none">{currentCodeLines.length + 1}</span>
+                                            <span className="text-blue-400 animate-pulse">|</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div
+                                    className="absolute top-4 right-4 immersive-badge rounded-xl px-4 py-2 shadow-lg transition-all duration-300 hover:scale-110"
+                                    style={{ transform: `translate(${(springX - window.innerWidth / 2) * 0.02}px, ${(springY - window.innerHeight / 2) * 0.02}px)` }}
+                                >
+                                    <span className="text-emerald-500 text-sm font-medium flex items-center gap-2">
+                                        <i className="fas fa-check-circle" />{tabs[activeTab]} 就绪
+                                    </span>
+                                </div>
+
+                                <div
+                                    className="absolute bottom-8 left-4 immersive-badge rounded-xl px-4 py-2 shadow-lg transition-all duration-300 hover:scale-110"
+                                    style={{ transform: `translate(${(springX - window.innerWidth / 2) * -0.02}px, ${(springY - window.innerHeight / 2) * -0.02}px)` }}
+                                >
+                                    <span className="text-blue-500 text-sm font-medium flex items-center gap-2">
+                                        <i className="fas fa-file-code animate-pulse" />{activeTab === 0 ? 'CRC32索引' : activeTab === 1 ? '自定义哈希' : '字符串键名'}
+                                    </span>
+                                </div>
+                            </MotionDiv>
+                        </div>
+                    </div>
+                </section>
+            );
+        };
+
+        const FeatureCard = React.memo(({ icon, title, description, tag, delay }) => {
+            const [ref, isInView] = useInView();
+            const [isHovered, setIsHovered] = useState(false);
+
+            const handleMouseEnter = useCallback(() => {
+                setIsHovered(true);
+            }, []);
+
+            const handleMouseLeave = useCallback(() => {
+                setIsHovered(false);
+            }, []);
+
+            const cardStyle = useMemo(() => ({
+                transitionDelay: `${delay}ms`,
+            }), [delay]);
+
+            return (
+                <div
+                    ref={ref}
+                    onMouseEnter={handleMouseEnter}
+                    onMouseLeave={handleMouseLeave}
+                    className={`immersive-card rounded-xl sm:rounded-2xl p-4 sm:p-6 md:p-8 relative overflow-hidden hover-lift group ${isInView ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
+                    style={cardStyle}
+                >
+                    <div className={`w-10 h-10 sm:w-12 sm:h-12 md:w-14 md:h-14 rounded-xl sm:rounded-2xl glass-button flex items-center justify-center text-blue-500 text-lg sm:text-xl md:text-2xl mb-3 sm:mb-4 md:mb-6 relative z-10 transition-all duration-300 ${isHovered ? 'gradient-bg text-white scale-105' : ''}`}>
+                        <i className={`fas ${icon}`} />
+                    </div>
+
+                    <h3 className="text-base sm:text-lg md:text-xl font-bold mb-2 md:mb-3 relative z-10 text-slate-900 dark:text-white">{title}</h3>
+                    <p className="text-xs sm:text-sm md:text-base text-slate-600 dark:text-slate-400 leading-relaxed relative z-10">{description}</p>
+
+                    {tag && (
+                        <span className="inline-block mt-2 sm:mt-3 md:mt-4 px-2 sm:px-3 py-0.5 sm:py-1 glass-button text-blue-600 dark:text-blue-400 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium relative z-10">
+                            {tag}
+                        </span>
+                    )}
+                </div>
+            );
+        });
+
+        const FeaturesSection = () => {
+            const features = useMemo(() => [
+                { icon: 'fa-language', title: '智能翻译系统', description: '内置AI翻译引擎，支持小米MiMo (mimo-v2.5-pro)、DeepSeek (deepseek-v4-pro/flash) 等多个大模型，可配置API密钥、系统提示词和批次大小，自动频率控制和重试机制确保翻译稳定性。', tag: 'AI驱动' },
+                { icon: 'fa-table-cells', title: '多版本支持', description: '支持GTA III、罪恶都市、圣安地列斯、GTA IV、GTA V等多个版本的GXT文件格式，自动识别版本并适配解析方式。', tag: '全版本' },
+                { icon: 'fa-palette', title: '文本渲染预览', description: '实时预览GXT文本在游戏中的渲染效果，支持颜色标记、换行符、按键标记等特殊字符的可视化显示。', tag: '实时预览' },
+                { icon: 'fa-code', title: '码表转换', description: '支持多种字符编码转换表，兼容罪吧汉化、拇指玩汉化、Play汉化以及VC和IV的官方日语版本。', tag: '编码转换' },
+                { icon: 'fa-magnifying-glass', title: '智能搜索', description: '强大的搜索和过滤功能，支持正则表达式、大小写敏感、全词匹配、CRC32哈希查找等多种搜索模式。', tag: '高效搜索' },
+                { icon: 'fa-rotate', title: '撤销重做', description: '完整的撤销/重做系统，支持多步操作回退，让编辑更加安全可靠。', tag: '安全编辑' },
+            ]);
+
+            return (
+                <section id="features" className="py-16 sm:py-20 md:py-24 relative">
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
+                        <MotionDiv className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 md:mb-16">
+                            <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-blue-600 dark:text-blue-400 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-3 sm:mb-4">
+                                <i className="fas fa-sparkles animate-pulse" />核心功能
+                            </div>
+                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-4">强大而易用的<GlowText>功能特性</GlowText></h2>
+                            <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">专为GTA模组开发者设计，让文本编辑变得简单高效</p>
+                        </MotionDiv>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
+                            {features.map((feature, index) => (
+                                <FeatureCard key={index} {...feature} delay={index * 100} />
+                            ))}
+                        </div>
+                    </div>
+                </section>
+            );
+        };
+
+        const SpecsSection = () => {
+            const [activeTab, setActiveTab] = useState('formats');
+            
+            const tabs = [
+                { id: 'formats', label: '文件格式', icon: 'fa-file-code' },
+                { id: 'tokens', label: '颜色标记', icon: 'fa-palette' },
+                { id: 'keybinds', label: '快捷键', icon: 'fa-keyboard' },
+            ];
+
+            const formats = [
+                { name: 'GTA III', ext: '.gxt', status: '支持', desc: '无文件头，TKEY块起始' },
+                { name: 'GTA VC', ext: '.gxt', status: '支持', desc: '新增TABL块，多子表' },
+                { name: 'GTA SA', ext: '.gxt', status: '支持', desc: 'CRC32索引，Windows-1252' },
+                { name: 'GTA IV', ext: '.gxt', status: '支持', desc: 'GXT格式，自定义哈希' },
+                { name: 'GTA V', ext: '.gxt2', status: '支持', desc: 'GXT2格式，哈希键索引' },
+            ];
+
+            const tokens = [
+                { code: '~r~', color: 'text-red-500', desc: '红色文本' },
+                { code: '~g~', color: 'text-green-500', desc: '绿色文本' },
+                { code: '~b~', color: 'text-blue-500', desc: '蓝色文本' },
+                { code: '~y~', color: 'text-yellow-500', desc: '黄色文本' },
+                { code: '~p~', color: 'text-purple-500', desc: '紫色文本' },
+                { code: '~w~', color: 'text-gray-300', desc: '灰色/白色' },
+                { code: '~h~', color: 'text-white', desc: '高亮/白色' },
+                { code: '~l~', color: 'text-gray-500', desc: '黑色/重置颜色' },
+                { code: '~n~', color: 'text-cyan-500', desc: '换行符' },
+                { code: '~s~', color: 'text-orange-500', desc: '恢复标准颜色' },
+                { code: '~z~', color: 'text-slate-400', desc: '字幕标记' },
+                { code: '~f~', color: 'text-pink-400', desc: '闪烁效果' },
+            ];
+
+            return (
+                <section id="specs" className="py-16 sm:py-20 md:py-24">
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
+                        <MotionDiv className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 md:mb-16">
+                            <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-blue-600 dark:text-blue-400 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-3 sm:mb-4">
+                                <i className="fas fa-cog animate-spin" style={{ animationDuration: '3s' }} />技术规格
+                            </div>
+                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-4">详细<GlowText>技术规格</GlowText>说明</h2>
+                            <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">了解GXT文件格式和编辑器的各项技术细节</p>
+                        </MotionDiv>
+
+                        <div className="immersive-card rounded-xl sm:rounded-2xl overflow-hidden shadow-xl">
+                            <div className="flex flex-col sm:flex-row glass-panel border-b border-white/20 dark:border-white/5">
+                                {tabs.map((tab) => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id)}
+                                        className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 font-medium transition-all relative text-sm sm:text-base ${activeTab === tab.id ? 'text-blue-500 bg-white/30 dark:bg-white/10' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                                    >
+                                        <i className={`fas ${tab.icon} text-sm`} />
+                                        <span>{tab.label}</span>
+                                        {activeTab === tab.id && <div className="absolute bottom-0 left-0 right-0 h-0.5 gradient-bg" />}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div className="p-3 sm:p-4 md:p-6">
+                                {activeTab === 'formats' && (
+                                    <div className="overflow-x-auto -mx-3 sm:mx-0">
+                                        <table className="w-full min-w-[500px]">
+                                            <thead>
+                                                <tr className="border-b border-white/20 dark:border-white/5">
+                                                    <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">游戏版本</th>
+                                                    <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">扩展名</th>
+                                                    <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">状态</th>
+                                                    <th className="text-left py-2 sm:py-3 px-2 sm:px-4 text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">说明</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {formats.map((format, i) => (
+                                                    <tr key={i} className="border-b border-white/10 dark:border-white/5 hover:bg-white/30 dark:hover:bg-white/10 transition-colors">
+                                                        <td className="py-2 sm:py-3 md:py-4 px-2 sm:px-4 font-medium text-sm">{format.name}</td>
+                                                        <td className="py-2 sm:py-3 md:py-4 px-2 sm:px-4 font-mono text-blue-500 text-sm">{format.ext}</td>
+                                                        <td className="py-2 sm:py-3 md:py-4 px-2 sm:px-4">
+                                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 sm:py-1 glass-badge text-emerald-600 dark:text-emerald-400 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium">
+                                                                <i className="fas fa-check text-xs" />{format.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 sm:py-3 md:py-4 px-2 sm:px-4 text-slate-500 dark:text-slate-400 text-xs sm:text-sm">{format.desc}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+
+                                {activeTab === 'tokens' && (
+                                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3 md:gap-4">
+                                        {tokens.map((token, i) => (
+                                            <div key={i} className="glass-button rounded-lg sm:rounded-xl p-3 sm:p-4 text-center hover:scale-105 transition-transform cursor-default">
+                                                <div className={`font-mono text-base sm:text-lg mb-1 sm:mb-2 ${token.color}`}>{token.code}</div>
+                                                <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">{token.desc}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {activeTab === 'keybinds' && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 md:gap-4">
+                                        {[
+                                            { key: 'Ctrl + O', action: '打开文件' },
+                                            { key: 'Ctrl + S', action: '保存文件' },
+                                            { key: 'Ctrl + Z', action: '撤销' },
+                                            { key: 'Ctrl + Y', action: '重做' },
+                                            { key: 'Ctrl + F', action: '搜索' },
+                                            { key: 'Ctrl + H', action: '替换' },
+                                        ].map((kb, i) => (
+                                            <div key={i} className="flex items-center justify-between p-3 sm:p-4 glass-button rounded-lg sm:rounded-xl">
+                                                <span className="text-slate-600 dark:text-slate-300 text-sm sm:text-base">{kb.action}</span>
+                                                <kbd className="px-2 sm:px-3 py-1 sm:py-1.5 glass-badge rounded-md sm:rounded-lg font-mono text-xs sm:text-sm">{kb.key}</kbd>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            );
+        };
+
+        const ToolsSection = () => {
+            const [tokenInput, setTokenInput] = useState('~r~Hello ~g~World~s~!');
+            const [hashInput, setHashInput] = useState('FMAP_WAY');
+
+            const tokenColors = {
+                'r': 'text-red-500',
+                'g': 'text-green-500',
+                'b': 'text-blue-500',
+                'y': 'text-yellow-500',
+                'p': 'text-purple-500',
+                'w': 'text-gray-200',
+                'h': 'text-white',
+                'l': 'text-gray-500',
+                'o': 'text-pink-400',
+                's': 'text-slate-400',
+                'n': 'text-cyan-400',
+            };
+
+            const renderTokenText = (text) => {
+                const result = [];
+                let currentColor = null;
+                let currentText = '';
+                let i = 0;
+
+                while (i < text.length) {
+                    if (text[i] === '~' && i + 2 < text.length && text[i + 2] === '~') {
+                        if (currentText) {
+                            result.push(currentColor ? <span key={i} className={tokenColors[currentColor]}>{currentText}</span> : currentText);
+                            currentText = '';
+                        }
+                        const token = text[i + 1].toLowerCase();
+                        if (token === 'n') {
+                            result.push(<br key={`br-${i}`} />);
+                        } else if (token === 's') {
+                            currentColor = null;
+                        } else if (tokenColors[token]) {
+                            currentColor = token;
+                        }
+                        i += 3;
+                    } else {
+                        currentText += text[i];
+                        i++;
+                    }
+                }
+                if (currentText) {
+                    result.push(currentColor ? <span key="end" className={tokenColors[currentColor]}>{currentText}</span> : currentText);
+                }
+                return result.length > 0 ? result : <span className="text-slate-400 dark:text-slate-500">预览区域</span>;
+            };
+
+            const crc32 = (str) => {
+                let crc = 0xFFFFFFFF;
+                const table = [];
+                for (let n = 0; n < 256; n++) {
+                    let c = n;
+                    for (let k = 0; k < 8; k++) c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1));
+                    table[n] = c;
+                }
+                for (let i = 0; i < str.length; i++) crc = (crc >>> 8) ^ table[(crc ^ str.charCodeAt(i)) & 0xFF];
+                return (crc ^ 0xFFFFFFFF) >>> 0;
+            };
+
+            const jamcrc = (str) => (0xFFFFFFFF ^ crc32(str.toUpperCase())) >>> 0;
+
+            const gta4Hash = (str) => {
+                let retHash = 0;
+                for (let i = 0; i < str.length; i++) {
+                    let c = str[i];
+                    if (c >= 'A' && c <= 'Z') c = String.fromCharCode(c.charCodeAt(0) + 32);
+                    else if (c === '\\') c = '/';
+                    const cVal = c.charCodeAt(0) & 0xFF;
+                    const tmp = (retHash + cVal) >>> 0;
+                    const mult = (1025 * tmp) >>> 0;
+                    retHash = ((mult >>> 6) ^ mult) >>> 0;
+                }
+                const a = (9 * retHash) >>> 0;
+                return (32769 * (a ^ (a >>> 11))) >>> 0;
+            };
+
+            const quickTokens = [
+                { token: '~r~', label: '红', color: 'hover:bg-red-500' },
+                { token: '~g~', label: '绿', color: 'hover:bg-green-500' },
+                { token: '~b~', label: '蓝', color: 'hover:bg-blue-500' },
+                { token: '~y~', label: '黄', color: 'hover:bg-yellow-500' },
+                { token: '~p~', label: '紫', color: 'hover:bg-purple-500' },
+                { token: '~w~', label: '灰', color: 'hover:bg-gray-400' },
+                { token: '~h~', label: '高亮', color: 'hover:bg-white' },
+                { token: '~n~', label: '换行', color: 'hover:bg-cyan-500' },
+                { token: '~s~', label: '重置', color: 'hover:bg-orange-500' },
+            ];
+
+            return (
+                <section id="tools" className="py-16 sm:py-20 md:py-24">
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
+                        <MotionDiv className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 md:mb-16">
+                            <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-blue-600 dark:text-blue-400 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-3 sm:mb-4">
+                                <i className="fas fa-tools" />在线工具
+                            </div>
+                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-4">实用在线工具</h2>
+                            <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">快速预览和转换GXT相关数据</p>
+                        </MotionDiv>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 md:gap-6">
+                            <div className="immersive-card rounded-xl sm:rounded-2xl overflow-hidden shadow-lg">
+                                <div className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 md:p-5 glass-panel border-b border-white/20 dark:border-white/5">
+                                    <div className="w-9 h-9 sm:w-10 sm:h-10 md:w-12 md:h-12 rounded-lg sm:rounded-xl gradient-bg flex items-center justify-center text-white text-base sm:text-lg md:text-xl flex-shrink-0">
+                                        <i className="fas fa-palette" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <h3 className="font-bold text-sm sm:text-base md:text-lg">Token 预览器</h3>
+                                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">实时预览GXT颜色标记</p>
+                                    </div>
+                                </div>
+                                <div className="p-3 sm:p-4 md:p-5 space-y-3 sm:space-y-4">
+                                    <div>
+                                        <label className="block text-xs sm:text-sm font-medium mb-1.5 sm:mb-2">输入文本</label>
+                                        <textarea
+                                            value={tokenInput}
+                                            onChange={(e) => setTokenInput(e.target.value)}
+                                            className="w-full h-20 sm:h-24 px-3 sm:px-4 py-2 sm:py-3 rounded-lg sm:rounded-xl glass-input focus:ring-2 focus:ring-blue-500/20 outline-none transition-all font-mono text-xs sm:text-sm resize-none"
+                                            placeholder="输入带Token的文本..."
+                                        />
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                                        <span className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">快速插入:</span>
+                                        {quickTokens.map((t) => (
+                                            <button
+                                                key={t.token}
+                                                onClick={() => setTokenInput(prev => prev + t.token)}
+                                                className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-md sm:rounded-lg glass-button text-xs sm:text-sm font-mono transition-colors ${t.color} hover:text-white`}
+                                            >
+                                                {t.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs sm:text-sm font-medium mb-1.5 sm:mb-2">预览效果</label>
+                                        <div className="glass-panel rounded-lg sm:rounded-xl p-3 sm:p-4 min-h-[60px] sm:min-h-[80px] text-sm sm:text-base md:text-lg font-bold break-all">
+                                            {renderTokenText(tokenInput)}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="immersive-card rounded-xl sm:rounded-2xl overflow-hidden shadow-lg">
+                                <div className="flex items-center gap-3 sm:gap-4 p-3 sm:p-4 md:p-5 glass-panel border-b border-white/20 dark:border-white/5">
+                                    <div className="w-9 h-9 sm:w-10 sm:h-10 md:w-12 md:h-12 rounded-lg sm:rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white text-base sm:text-lg md:text-xl flex-shrink-0">
+                                        <i className="fas fa-hashtag" />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <h3 className="font-bold text-sm sm:text-base md:text-lg">哈希计算器</h3>
+                                        <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">计算JAMCRC和GTA IV哈希</p>
+                                    </div>
+                                </div>
+                                <div className="p-3 sm:p-4 md:p-5 space-y-3 sm:space-y-4">
+                                    <div>
+                                        <label className="block text-xs sm:text-sm font-medium mb-1.5 sm:mb-2">输入字符串</label>
+                                        <input
+                                            type="text"
+                                            value={hashInput}
+                                            onChange={(e) => setHashInput(e.target.value)}
+                                            className="w-full px-3 sm:px-4 py-2 sm:py-3 rounded-lg sm:rounded-xl glass-input focus:ring-2 focus:ring-blue-500/20 outline-none transition-all font-mono text-xs sm:text-sm"
+                                            placeholder="输入字符串..."
+                                        />
+                                    </div>
+                                    <div className="space-y-2 sm:space-y-3">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 glass-button rounded-lg sm:rounded-xl gap-2">
+                                            <div className="min-w-0 overflow-hidden">
+                                                <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mb-1">JAMCRC (GTA SA)</div>
+                                                <div className="font-mono text-blue-500 text-xs sm:text-sm break-all">0x{jamcrc(hashInput).toString(16).toUpperCase().padStart(8, '0')}</div>
+                                            </div>
+                                            <button className="p-2 rounded-lg hover:bg-white/30 dark:hover:bg-white/10 transition-colors flex-shrink-0 self-start sm:self-center" onClick={() => navigator.clipboard.writeText('0x' + jamcrc(hashInput).toString(16).toUpperCase().padStart(8, '0'))}>
+                                                <i className="fas fa-copy text-slate-400 dark:text-slate-500" />
+                                            </button>
+                                        </div>
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 glass-button rounded-lg sm:rounded-xl gap-2">
+                                            <div className="min-w-0 overflow-hidden">
+                                                <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mb-1">GTA IV Hash</div>
+                                                <div className="font-mono text-amber-500 text-xs sm:text-sm break-all">0x{gta4Hash(hashInput).toString(16).toUpperCase().padStart(8, '0')}</div>
+                                            </div>
+                                            <button className="p-2 rounded-lg hover:bg-white/30 dark:hover:bg-white/10 transition-colors flex-shrink-0 self-start sm:self-center" onClick={() => navigator.clipboard.writeText('0x' + gta4Hash(hashInput).toString(16).toUpperCase().padStart(8, '0'))}>
+                                                <i className="fas fa-copy text-slate-400 dark:text-slate-500" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            );
+        };
+
+        const DownloadSection = React.memo(() => {
+            return (
+                <section id="download" className="py-16 sm:py-20 md:py-24">
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
+                        <div className="relative immersive-card rounded-2xl sm:rounded-3xl p-6 sm:p-8 md:p-12 lg:p-16 text-center overflow-hidden">
+                            <div className="absolute inset-0 opacity-20">
+                                <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-500/30 rounded-full blur-3xl" />
+                                <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-indigo-500/30 rounded-full blur-3xl" />
+                            </div>
+                            
+                            <div className="relative z-10">
+                                <div className="w-14 h-14 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-xl sm:rounded-2xl gradient-bg flex items-center justify-center text-white text-2xl sm:text-3xl mx-auto mb-4 sm:mb-6 md:mb-8 shadow-xl shadow-blue-500/20 subtle-float">
+                                    <i className="fas fa-download" />
+                                </div>
+                                
+                                <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-4">立即下载 <GlowText>GXTStudio</GlowText></h2>
+                                <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg max-w-lg mx-auto mb-6 sm:mb-8">
+                                    免费开源，无需注册，下载即用。支持Windows 7及以上系统。
+                                </p>
+                                
+                                <MagneticButton strength={0.12}>
+                                    <a href="https://github.com/Lzh102938/GXTStudio/releases" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 sm:gap-3 px-6 sm:px-8 py-3 sm:py-4 rounded-lg sm:rounded-xl gradient-bg text-white font-semibold text-base sm:text-lg shadow-xl shadow-blue-500/20 btn-hover group">
+                                        <i className="fas fa-download group-hover:animate-bounce" />
+                                        下载最新版本
+                                        <i className="fas fa-arrow-right text-sm opacity-70 group-hover:translate-x-1 transition-transform" />
+                                    </a>
+                                </MagneticButton>
+                                
+                                <div className="mt-4">
+                                    <MagneticButton strength={0.1}>
+                                        <a href="https://yy.gtamodx.com/mods/e4abb7f7-571d-4c74-ac63-f52709856db9" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl glass-button text-blue-500 font-medium text-sm hover:scale-105 transition-transform">
+                                            <i className="fas fa-external-link-alt" />
+                                            从 GTAMODX 下载
+                                        </a>
+                                    </MagneticButton>
+                                </div>
+                                
+                                <div className="flex flex-wrap justify-center gap-3 sm:gap-4 md:gap-6 mt-6 sm:mt-8 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+                                    <span className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 glass-button rounded-full hover-scale"><i className="fas fa-check-circle text-emerald-500" />免费开源</span>
+                                    <span className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 glass-button rounded-full hover-scale"><i className="fas fa-check-circle text-emerald-500" />无需安装</span>
+                                    <span className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 glass-button rounded-full hover-scale"><i className="fas fa-check-circle text-emerald-500" />持续更新</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            );
+        });
+
+        const FormatGuideSection = () => {
+            const [activeVersion, setActiveVersion] = useState('sa');
+
+            const versions = [
+                { id: 'iii', name: 'GTA III', structure: ['TKEY块', 'TDAT块'], features: ['无文件头，直接以TKEY块起始', '宽字符编码（UTF-16LE）', '条目按字母顺序排序', 'Xbox版VC也采用此格式'] },
+                { id: 'vc', name: 'GTA VC', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['新增TABL块支持多子表', '宽字符编码（UTF-16LE）', '支持MAIN主表', '字符集基于fonts.txd'] },
+                { id: 'sa', name: 'GTA SA', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['完整TABL/TKEY/TDAT支持', 'Windows-1252编码', 'CRC32条目索引', '最多200个子表'] },
+                { id: 'iv', name: 'GTA IV', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['GXT格式（哈希键名）', '支持8位/16位编码', '自定义哈希算法', '伪UTF-16编码'] },
+                { id: 'v', name: 'GTA V', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['GXT2格式（版本号10）', '哈希键索引', 'UTF-8编码', '更大文件容量'] },
+            ];
+
+            const currentVersion = versions.find(v => v.id === activeVersion);
+
+            return (
+                <section id="format-guide" className="py-16 sm:py-20 md:py-24">
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
+                        <MotionDiv className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 md:mb-16">
+                            <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-blue-600 dark:text-blue-400 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-3 sm:mb-4">
+                                <i className="fas fa-book animate-pulse" />文件格式
+                            </div>
+                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-4"><GlowText>GXT文件</GlowText>格式详解</h2>
+                            <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">了解GXT文件的内部结构，掌握各版本格式差异</p>
+                        </MotionDiv>
+
+                        <div className="grid lg:grid-cols-2 gap-4 sm:gap-6 md:gap-8">
+                            <MotionDiv from="left" className="immersive-card rounded-xl sm:rounded-2xl p-4 sm:p-6 md:p-8 shadow-lg">
+                                <div className="flex items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
+                                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white text-lg sm:text-xl">
+                                        <i className="fas fa-info-circle" />
+                                    </div>
+                                    <h3 className="text-lg sm:text-xl font-bold">格式概述</h3>
+                                </div>
+                                <p className="text-slate-600 dark:text-slate-400 leading-relaxed mb-3 sm:mb-4 text-sm sm:text-base">
+                                    GXT文件的作用相当于字典，将简短的符号型字符串映射为完整的长文本字符串。开发人员在代码中仅需使用简短的键名（例如 <code className="px-1.5 sm:px-2 py-0.5 sm:py-1 glass-button rounded text-blue-500 text-xs sm:text-sm">GM_OVR</code>），在游戏向玩家展示文本时，该键名会被替换为玩家所选语言的翻译文本。
+                                </p>
+                                <p className="text-slate-600 dark:text-slate-400 leading-relaxed text-sm sm:text-base">
+                                    这种设计让游戏的多语言翻译工作无需对核心代码做大量修改：翻译人员只需将游戏文本翻译成对应语言，玩家选择该语言后，游戏就会调用对应语言的GXT文件中的文本内容。
+                                </p>
+                            </MotionDiv>
+
+                            <MotionDiv from="right" className="immersive-card rounded-xl sm:rounded-2xl p-4 sm:p-6 md:p-8 shadow-lg">
+                                <h3 className="text-lg sm:text-xl font-bold mb-4 sm:mb-6">版本对比</h3>
+                                <div className="flex flex-wrap gap-2 mb-4 sm:mb-6">
+                                    {versions.map((v) => (
+                                        <button
+                                            key={v.id}
+                                            onClick={() => setActiveVersion(v.id)}
+                                            className={`px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl font-medium transition-all text-xs sm:text-sm md:text-base ${activeVersion === v.id ? 'gradient-bg text-white shadow-lg' : 'glass-button text-slate-600 dark:text-slate-300 hover:scale-105'}`}
+                                        >
+                                            {v.name}
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="space-y-3 sm:space-y-4">
+                                    <div>
+                                        <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mb-1.5 sm:mb-2">文件结构</div>
+                                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                                            {currentVersion.structure.map((block, i) => (
+                                                <span key={i}>
+                                                    <span className="px-2 sm:px-3 py-1 sm:py-1.5 glass-button text-blue-600 dark:text-blue-400 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium">{block}</span>
+                                                    {i < currentVersion.structure.length - 1 && <i className="fas fa-arrow-right text-slate-400 dark:text-slate-500 mx-0.5 sm:mx-1 text-xs sm:text-sm" />}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mb-1.5 sm:mb-2">特性</div>
+                                        <ul className="space-y-1.5 sm:space-y-2">
+                                            {currentVersion.features.map((feature, i) => (
+                                                <li key={i} className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-xs sm:text-sm">
+                                                    <i className="fas fa-check text-emerald-500 text-xs" />
+                                                    {feature}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                </div>
+                            </MotionDiv>
+                        </div>
+                    </div>
+                </section>
+            );
+        };
+
+        const KeybindsSection = () => {
+            const [activeTab, setActiveTab] = useState('walking');
+
+            const keybinds = {
+                walking: [
+                    { code: '~PED_FIREWEAPON~', desc: '开火' },
+                    { code: '~PED_CYCLE_WEAPON_RIGHT~', desc: '下一个武器' },
+                    { code: '~PED_CYCLE_WEAPON_LEFT~', desc: '上一个武器' },
+                    { code: '~PED_LOCK_TARGET~', desc: '锁定目标' },
+                    { code: '~PED_LOOKBEHIND~', desc: '向后看' },
+                    { code: '~PED_SPRINT~', desc: '冲刺' },
+                    { code: '~PED_JUMPING~', desc: '跳跃' },
+                    { code: '~PED_DUCK~', desc: '蹲下' },
+                    { code: '~PED_ENTER_CAR~', desc: '进入/离开载具' },
+                    { code: '~PED_CENTER_CAMERA_BEHIND_PLAYER~', desc: '镜头归位' },
+                    { code: '~GROUP_CONTROL_FWD~', desc: '团队前进指令' },
+                    { code: '~GROUP_CONTROL_BWD~', desc: '团队后退指令' },
+                ],
+                vehicle: [
+                    { code: '~VEHICLE_FIREWEAPON~', desc: '开火' },
+                    { code: '~VEHICLE_FIREWEAPON_ALT~', desc: '副武器开火' },
+                    { code: '~VEHICLE_ACCELERATE~', desc: '加速' },
+                    { code: '~VEHICLE_BRAKE~', desc: '刹车/倒车' },
+                    { code: '~VEHICLE_HANDBRAKE~', desc: '手刹' },
+                    { code: '~VEHICLE_HORN~', desc: '鸣笛' },
+                    { code: '~VEHICLE_RADIO_STATION_UP~', desc: '下一个电台' },
+                    { code: '~VEHICLE_RADIO_STATION_DOWN~', desc: '上一个电台' },
+                    { code: '~VEHICLE_LOOKLEFT~', desc: '向左看' },
+                    { code: '~VEHICLE_LOOKRIGHT~', desc: '向右看' },
+                    { code: '~VEHICLE_LOOKBEHIND~', desc: '回头看' },
+                    { code: '~VEHICLE_TURRETLEFT~', desc: '炮塔左移' },
+                    { code: '~VEHICLE_TURRETRIGHT~', desc: '炮塔右移' },
+                    { code: '~VEHICLE_ENTER_EXIT~', desc: '进入/离开载具' },
+                ],
+            };
+
+            return (
+                <section className="py-16 sm:py-20 md:py-24">
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
+                        <MotionDiv className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 md:mb-16">
+                            <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-blue-600 dark:text-blue-400 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-3 sm:mb-4">
+                                <i className="fas fa-gamepad" />按键标记
+                            </div>
+                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-4">按键标记参考</h2>
+                            <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">GXT文本中常用的按键标记符号</p>
+                        </MotionDiv>
+
+                        <div className="max-w-4xl mx-auto immersive-card rounded-xl sm:rounded-2xl overflow-hidden shadow-lg">
+                            <div className="flex flex-col sm:flex-row glass-panel border-b border-white/20 dark:border-white/5">
+                                <button
+                                    onClick={() => setActiveTab('walking')}
+                                    className={`flex-1 px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 font-medium transition-all text-sm sm:text-base ${activeTab === 'walking' ? 'text-blue-500 bg-white/30 dark:bg-white/10 border-b-2 border-blue-500' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    <i className="fas fa-walking mr-2" />步行操控
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('vehicle')}
+                                    className={`flex-1 px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 font-medium transition-all text-sm sm:text-base ${activeTab === 'vehicle' ? 'text-blue-500 bg-white/30 dark:bg-white/10 border-b-2 border-blue-500' : 'text-slate-500 hover:text-slate-700'}`}
+                                >
+                                    <i className="fas fa-car mr-2" />载具操控
+                                </button>
+                            </div>
+                            <div className="p-3 sm:p-4 md:p-6 grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                                {keybinds[activeTab].map((item, i) => (
+                                    <div key={i} className="flex items-center justify-between p-2 sm:p-3 glass-button rounded-lg sm:rounded-xl hover:scale-[1.02] transition-all">
+                                        <code className="text-xs sm:text-sm font-mono text-blue-500 glass-badge px-1.5 sm:px-2 py-0.5 sm:py-1 rounded">{item.code}</code>
+                                        <span className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">{item.desc}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            );
+        };
+
+        const CommunitySection = React.memo(() => {
+            return (
+                <section id="community" className="py-16 sm:py-20 md:py-24">
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
+                        <MotionDiv className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 md:mb-16">
+                            <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-blue-600 dark:text-blue-400 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-3 sm:mb-4">
+                                <i className="fas fa-users" />社区支持
+                            </div>
+                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-4">加入我们的<GlowText>社区</GlowText></h2>
+                            <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">获取帮助、分享经验、参与开发</p>
+                        </MotionDiv>
+
+                        <div className="max-w-3xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <MotionDiv className="immersive-card rounded-xl sm:rounded-2xl p-6 sm:p-8 shadow-lg hover-lift text-center">
+                                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl gradient-bg flex items-center justify-center text-white text-2xl sm:text-3xl mx-auto mb-4 sm:mb-6">
+                                    <i className="fab fa-qq" />
+                                </div>
+                                <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white mb-3">QQ 交流群</h3>
+                                <p className="text-slate-600 dark:text-slate-400 mb-6 text-sm sm:text-base">
+                                    与其他 GTA 模组开发者交流经验，获取技术支持，分享你的作品。
+                                </p>
+                                <MagneticButton strength={0.12}>
+                                    <a href="https://qm.qq.com/q/YB31lPrf2i" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl gradient-bg text-white font-semibold text-sm shadow-lg shadow-blue-500/20 btn-hover group">
+                                        <i className="fab fa-qq" />
+                                        加入 QQ 群
+                                        <i className="fas fa-arrow-right text-sm opacity-70 group-hover:translate-x-1 transition-transform" />
+                                    </a>
+                                </MagneticButton>
+                            </MotionDiv>
+                            <MotionDiv className="immersive-card rounded-xl sm:rounded-2xl p-6 sm:p-8 shadow-lg hover-lift text-center">
+                                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-slate-800 dark:bg-slate-700 flex items-center justify-center text-white text-2xl sm:text-3xl mx-auto mb-4 sm:mb-6">
+                                    <i className="fab fa-github" />
+                                </div>
+                                <h3 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white mb-3">GitHub</h3>
+                                <p className="text-slate-600 dark:text-slate-400 mb-6 text-sm sm:text-base">
+                                    查看源代码、提交 Issue、参与项目开发，为 GXTStudio 做出贡献。
+                                </p>
+                                <MagneticButton strength={0.12}>
+                                    <a href="https://github.com/GXTStudio/GXTStudio" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-slate-800 dark:bg-slate-700 text-white font-semibold text-sm shadow-lg shadow-slate-500/20 btn-hover group">
+                                        <i className="fab fa-github" />
+                                        访问 GitHub
+                                        <i className="fas fa-arrow-right text-sm opacity-70 group-hover:translate-x-1 transition-transform" />
+                                    </a>
+                                </MagneticButton>
+                            </MotionDiv>
+                        </div>
+                    </div>
+                </section>
+            );
+        });
+
+        const CommentsSection = () => {
+            const [loaded, setLoaded] = useState(false);
+            const [ref, isInView] = useInView();
+            const giscusRef = useRef(null);
+
+            useEffect(() => {
+                if (isInView && !loaded) {
+                    setLoaded(true);
+                }
+            }, [isInView, loaded]);
+
+            useEffect(() => {
+                if (loaded && giscusRef.current && !giscusRef.current.querySelector('iframe')) {
+                    const script = document.createElement('script');
+                    script.src = 'https://giscus.app/client.js';
+                    script.setAttribute('data-repo', 'Lzh102938/GXTStudio');
+                    script.setAttribute('data-repo-id', 'R_kgDONf8H2w');
+                    script.setAttribute('data-category', 'Announcements');
+                    script.setAttribute('data-category-id', 'DIC_kwDONf8H284Cl8Tz');
+                    script.setAttribute('data-mapping', 'pathname');
+                    script.setAttribute('data-strict', '0');
+                    script.setAttribute('data-reactions-enabled', '1');
+                    script.setAttribute('data-emit-metadata', '0');
+                    script.setAttribute('data-input-position', 'top');
+                    script.setAttribute('data-theme', 'preferred_color_scheme');
+                    script.setAttribute('data-lang', 'zh-CN');
+                    script.setAttribute('data-loading', 'lazy');
+                    script.setAttribute('crossorigin', 'anonymous');
+                    script.async = true;
+                    giscusRef.current.appendChild(script);
+                }
+            }, [loaded]);
+
+            return (
+                <section id="comments" className="py-16 sm:py-20 md:py-24">
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
+                        <MotionDiv className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 md:mb-16">
+                            <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-3 sm:mb-4">
+                                <i className="fas fa-comments" />评论区
+                            </div>
+                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-4">分享你的想法</h2>
+                            <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">使用GitHub账号登录，参与讨论</p>
+                        </MotionDiv>
+
+                        <div ref={ref} className="max-w-4xl mx-auto bg-white dark:bg-slate-800 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-lg">
+                            {loaded ? (
+                                <div ref={giscusRef} className="p-3 sm:p-4 min-h-[250px] sm:min-h-[300px]" />
+                            ) : (
+                                <div className="p-6 sm:p-8 text-center text-slate-500 dark:text-slate-400">
+                                    <i className="fas fa-spinner fa-spin text-xl sm:text-2xl mb-3 sm:mb-4" />
+                                    <p className="text-sm sm:text-base">滚动到此处加载评论...</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </section>
+            );
+        };
+
+        const Footer = React.memo(() => {
+            return (
+                <footer className="py-8 sm:py-10 md:py-12 border-t border-white/20 dark:border-white/5">
+                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 sm:gap-8 mb-6 sm:mb-8">
+                            <div className="sm:col-span-1">
+                                <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+                                    <img src="icon/favicon.png" alt="GXTStudio" className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl subtle-float" />
+                                    <span className="font-bold text-lg sm:text-xl">GXT<span className="gradient-text-flow">Studio</span></span>
+                                </div>
+                                <p className="text-slate-600 dark:text-slate-400 text-xs sm:text-sm leading-relaxed">
+                                    专业的GTA文本资源编辑器。支持GTA III至GTA IV全系列GXT文件格式，完全免费开源。
+                                </p>
+                                <div className="flex gap-2 sm:gap-3 mt-3 sm:mt-4">
+                                    <a href="https://github.com/GXTStudio/GXTStudio" target="_blank" rel="noopener noreferrer" className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl glass-button flex items-center justify-center hover:gradient-bg hover:text-white transition-all hover-scale">
+                                        <i className="fab fa-github text-sm sm:text-base" />
+                                    </a>
+                                    <a href="https://qm.qq.com/q/YB31lPrf2i" target="_blank" rel="noopener noreferrer" className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl glass-button flex items-center justify-center hover:gradient-bg hover:text-white transition-all hover-scale">
+                                        <i className="fab fa-qq text-sm sm:text-base" />
+                                    </a>
+                                </div>
+                            </div>
+                            <div>
+                                <h4 className="font-semibold mb-3 sm:mb-4 text-xs sm:text-sm uppercase tracking-wider text-slate-500 dark:text-slate-400">产品</h4>
+                                <ul className="space-y-2 sm:space-y-3">
+                                    <li><a href="https://github.com/Lzh102938/GXTStudio/releases" target="_blank" rel="noopener noreferrer" className="text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-all flex items-center gap-2 group text-xs sm:text-sm"><i className="fas fa-download text-xs" />下载</a></li>
+                                    <li><a href="https://yy.gtamodx.com/mods/e4abb7f7-571d-4c74-ac63-f52709856db9" target="_blank" rel="noopener noreferrer" className="text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-all flex items-center gap-2 group text-xs sm:text-sm"><i className="fas fa-cloud-download-alt text-xs" />GTAMODX</a></li>
+                                    <li><a href="tutorial.html" className="text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-all flex items-center gap-2 group text-xs sm:text-sm"><i className="fas fa-book text-xs" />使用教程</a></li>
+                                    <li><a href="https://github.com/Lzh102938/GXTStudio/releases" target="_blank" rel="noopener noreferrer" className="text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-all flex items-center gap-2 group text-xs sm:text-sm"><i className="fas fa-history text-xs" />更新日志</a></li>
+                                </ul>
+                            </div>
+                            <div>
+                                <h4 className="font-semibold mb-3 sm:mb-4 text-xs sm:text-sm uppercase tracking-wider text-slate-500 dark:text-slate-400">支持</h4>
+                                <ul className="space-y-2 sm:space-y-3">
+                                    <li><a href="https://github.com/GXTStudio/GXTStudio/issues" target="_blank" rel="noopener noreferrer" className="text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-all flex items-center gap-2 group text-xs sm:text-sm"><i className="fas fa-question-circle text-xs" />问题反馈</a></li>
+                                    <li><a href="https://github.com/GXTStudio/GXTStudio/discussions" target="_blank" rel="noopener noreferrer" className="text-slate-600 dark:text-slate-400 hover:text-blue-500 transition-all flex items-center gap-2 group text-xs sm:text-sm"><i className="fas fa-comments text-xs" />社区讨论</a></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div className="flex flex-col md:flex-row items-center justify-between gap-3 sm:gap-4 pt-6 sm:pt-8 border-t border-white/20 dark:border-white/5">
+                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">© 2025 GXTStudio. 基于 GPL-3.0 协议开源</p>
+                            <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-1.5 sm:py-2 glass-button rounded-lg sm:rounded-xl hover-scale group">
+                                <img src="icon/favicon.png" alt="GXTStudio" className="w-6 h-6 sm:w-8 sm:h-8 rounded-md sm:rounded-lg" />
+                                <div className="text-xs sm:text-sm">
+                                    <span className="font-semibold group-hover:gradient-text-flow">Lzh10_慕黑</span>
+                                    <span className="text-slate-500 dark:text-slate-400 ml-1 sm:ml-2">GTAmod 中文组</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </footer>
+            );
+        });
+
+        const App = () => {
+            const [isDark, setIsDark] = useState(() => {
+                if (typeof window !== 'undefined') {
+                    return localStorage.getItem('theme') === 'dark' || 
+                           (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                }
+                return false;
+            });
+
+            useEffect(() => {
+                document.documentElement.classList.toggle('dark', isDark);
+                localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            }, [isDark]);
+
+            useEffect(() => {
+                const loader = document.getElementById('pageLoader');
+                if (loader) {
+                    setTimeout(() => {
+                        loader.classList.add('hidden');
+                    }, 300);
+                }
+            }, []);
+
+            const toggleTheme = useCallback(() => setIsDark(prev => !prev), []);
+
+            return (
+                <ThemeContext.Provider value={{ isDark, toggleTheme }}>
+                    <ParticleCanvas />
+                    <CursorGlow />
+                    <ScrollProgress />
+                    <ClickRipple />
+                    <ParallaxEffect />
+                    <Navbar />
+                    <main>
+                        <HeroSection />
+                        <FeaturesSection />
+                        <SpecsSection />
+                        <FormatGuideSection />
+                        <KeybindsSection />
+                        <ToolsSection />
+                        <DownloadSection />
+                        <CommunitySection />
+                        <CommentsSection />
+                    </main>
+                    <Footer />
+                </ThemeContext.Provider>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+    <script>
+        window.addEventListener('error', function() {
+            var loader = document.getElementById('pageLoader');
+            if (loader) loader.classList.add('hidden');
+        });
+        setTimeout(function() {
+            var loader = document.getElementById('pageLoader');
+            if (loader) loader.classList.add('hidden');
+        }, 5000);
+    </script>
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"></noscript>
+</body>
+</html>
+
