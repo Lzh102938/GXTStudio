@@ -1038,7 +1038,7 @@
             );
         });
 
-        const AnimatedCounter = React.memo(({ end, duration = 2000, suffix = '' }) => {
+        const AnimatedCounter = React.memo(({ end, duration = 2000, suffix = '', className = '' }) => {
             const [ref, isInView] = useInView();
             const [count, setCount] = useState(0);
             const countRef = useRef(0);
@@ -1073,7 +1073,7 @@
                 };
             }, [isInView, end, duration]);
 
-            return <span ref={ref} className="text-2xl font-bold text-slate-900 dark:text-white">{count}{suffix}</span>;
+            return <span ref={ref} className={`text-2xl font-bold text-slate-900 dark:text-white ${className}`}>{count}{suffix}</span>;
         });
 
         const GlowText = React.memo(({ children, className = '' }) => {
@@ -1206,7 +1206,6 @@
             const navLinks = [
                 { href: '#features', icon: 'fa-star', label: '功能特性' },
                 { href: '#specs', icon: 'fa-cog', label: '技术规格' },
-                { href: '#format-guide', icon: 'fa-file-code', label: '文件格式' },
                 { href: '#tools', icon: 'fa-tools', label: '在线工具' },
                 { href: 'tutorial.html', icon: 'fa-book', label: '使用教程' },
                 { href: '#download', icon: 'fa-download', label: '下载' },
@@ -1294,41 +1293,47 @@
             const springX = useSpring(mousePosition.x, { tension: 100, friction: 20 });
             const springY = useSpring(mousePosition.y, { tension: 100, friction: 20 });
 
-            const tabs = ['GTA SA', 'GTA IV', 'GTA V', 'GTA VC', 'GTA III'];
+            const tabs = [
+                { name: 'GTA SA', icon: 'icon/SA.ico' },
+                { name: 'GTA IV', icon: 'icon/IV.ico' },
+                { name: 'GTA V', icon: 'icon/V.ico' },
+                { name: 'GTA VC', icon: 'icon/VC.ico' },
+                { name: 'GTA III', icon: 'icon/III.ico' },
+            ];
 
             const codeContentByTab = {
                 0: [
                     { num: 1, content: '<span class="text-blue-500">[MAIN]</span>' },
-                    { num: 2, content: '<span class="text-emerald-500">"FMAP_WAY"</span> = <span class="text-amber-500">"寻路点"</span>' },
-                    { num: 3, content: '<span class="text-emerald-500">"FMAP_N"</span> = <span class="text-amber-500">"北"</span>' },
-                    { num: 4, content: '<span class="text-emerald-500">"FMAP_S"</span> = <span class="text-amber-500">"南"</span>' },
-                    { num: 5, content: '<span class="text-emerald-500">"FMAP_E"</span> = <span class="text-amber-500">"东"</span>' },
-                    { num: 6, content: '<span class="text-emerald-500">"FMAP_W"</span> = <span class="text-amber-500">"西"</span>' },
+                    { num: 2, content: '<span class="text-emerald-500">FMAP_WAY</span> = <span class="text-amber-500">寻路点</span>' },
+                    { num: 3, content: '<span class="text-emerald-500">FMAP_N</span> = <span class="text-amber-500">北</span>' },
+                    { num: 4, content: '<span class="text-emerald-500">FMAP_S</span> = <span class="text-amber-500">南</span>' },
+                    { num: 5, content: '<span class="text-emerald-500">FMAP_E</span> = <span class="text-amber-500">东</span>' },
+                    { num: 6, content: '<span class="text-emerald-500">FMAP_W</span> = <span class="text-amber-500">西</span>' },
                     { num: 7, content: '<span class="text-slate-400 italic">// GTA SA - Windows-1252编码</span>' },
                 ],
                 1: [
-                    { num: 1, content: '<span class="text-cyan-500">0x8FCC246C</span> = <span class="text-pink-500">"Mission Passed"</span>' },
-                    { num: 2, content: '<span class="text-cyan-500">0xA23CFFDE</span> = <span class="text-pink-500">"Wasted"</span>' },
-                    { num: 3, content: '<span class="text-cyan-500">0xB7B99321</span> = <span class="text-pink-500">"Busted"</span>' },
+                    { num: 1, content: '<span class="text-cyan-500">0x8FCC246C</span> = <span class="text-pink-500">Mission Passed</span>' },
+                    { num: 2, content: '<span class="text-cyan-500">0xA23CFFDE</span> = <span class="text-pink-500">Wasted</span>' },
+                    { num: 3, content: '<span class="text-cyan-500">0xB7B99321</span> = <span class="text-pink-500">Busted</span>' },
                     { num: 4, content: '<span class="text-slate-400 italic">// GTA IV - .gxt 哈希键索引</span>' },
                 ],
                 2: [
                     { num: 1, content: '<span class="text-purple-500">[GXT2]</span>' },
-                    { num: 2, content: '<span class="text-cyan-500">0x5A3C0F72</span> = <span class="text-pink-500">"~r~Wasted"</span>' },
-                    { num: 3, content: '<span class="text-cyan-500">0x81D4E2B9</span> = <span class="text-pink-500">"~g~Stunt Jump"</span>' },
+                    { num: 2, content: '<span class="text-cyan-500">0x5A3C0F72</span> = <span class="text-pink-500">~r~Wasted</span>' },
+                    { num: 3, content: '<span class="text-cyan-500">0x81D4E2B9</span> = <span class="text-pink-500">~g~Stunt Jump</span>' },
                     { num: 4, content: '<span class="text-slate-400 italic">// GTA V - 哈希键索引</span>' },
                 ],
                 3: [
                     { num: 1, content: '<span class="text-orange-500">[MAIN]</span>' },
-                    { num: 2, content: '<span class="text-yellow-500">"FEST_HF"</span> = <span class="text-red-400">"Health & Armor"</span>' },
-                    { num: 3, content: '<span class="text-yellow-500">"FEST_WE"</span> = <span class="text-red-400">"Weapons"</span>' },
-                    { num: 4, content: '<span class="text-yellow-500">"FEST_MO"</span> = <span class="text-red-400">"Money"</span>' },
+                    { num: 2, content: '<span class="text-yellow-500">FEST_HF</span> = <span class="text-red-400">Health & Armor</span>' },
+                    { num: 3, content: '<span class="text-yellow-500">FEST_WE</span> = <span class="text-red-400">Weapons</span>' },
+                    { num: 4, content: '<span class="text-yellow-500">FEST_MO</span> = <span class="text-red-400">Money</span>' },
                     { num: 5, content: '<span class="text-slate-400 italic">// GTA VC - UTF-16编码</span>' },
                 ],
                 4: [
                     { num: 1, content: '<span class="text-green-500">[TKEY]</span>' },
-                    { num: 2, content: '<span class="text-lime-500">"INTRO_1"</span> = <span class="text-teal-400">"Welcome to Liberty City"</span>' },
-                    { num: 3, content: '<span class="text-lime-500">"INTRO_2"</span> = <span class="text-teal-400">"The City That Never Sleeps"</span>' },
+                    { num: 2, content: '<span class="text-lime-500">INTRO_1</span> = <span class="text-teal-400">Welcome to Liberty City</span>' },
+                    { num: 3, content: '<span class="text-lime-500">INTRO_2</span> = <span class="text-teal-400">The City That Never Sleeps</span>' },
                     { num: 4, content: '<span class="text-slate-400 italic">// GTA III - 无TABL块支持</span>' },
                 ],
             };
@@ -1417,17 +1422,17 @@
 
                                 <MotionDiv from="left" delay={400}>
                                     <div className="flex flex-wrap gap-3 sm:gap-4 pt-6 sm:pt-8 border-t border-white/30 dark:border-white/10">
-                                        <div ref={stat1Ref} className="flex-1 min-w-[80px] sm:min-w-[100px] text-center p-3 sm:p-4 immersive-card rounded-lg sm:rounded-xl hover-lift cursor-default">
-                                            <AnimatedCounter end={6} />
-                                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">支持游戏版本</p>
+                                        <div ref={stat1Ref} className="flex-1 min-w-[100px] sm:min-w-[120px] text-center p-4 sm:p-5 rounded-xl immersive-card cursor-default hover:scale-105 transition-transform duration-300">
+                                            <AnimatedCounter end={6} className="!text-3xl sm:!text-4xl !font-black text-slate-900 dark:text-white" />
+                                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-2 font-medium uppercase tracking-wider">支持游戏版本</p>
                                         </div>
-                                        <div ref={stat2Ref} className="flex-1 min-w-[80px] sm:min-w-[100px] text-center p-3 sm:p-4 immersive-card rounded-lg sm:rounded-xl hover-lift cursor-default">
-                                            <AnimatedCounter end={10} />
-                                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">核心功能</p>
+                                        <div ref={stat2Ref} className="flex-1 min-w-[100px] sm:min-w-[120px] text-center p-4 sm:p-5 rounded-xl immersive-card cursor-default hover:scale-105 transition-transform duration-300">
+                                            <AnimatedCounter end={10} className="!text-3xl sm:!text-4xl !font-black text-slate-900 dark:text-white" />
+                                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-2 font-medium uppercase tracking-wider">核心功能</p>
                                         </div>
-                                        <div ref={stat3Ref} className="flex-1 min-w-[80px] sm:min-w-[100px] text-center p-3 sm:p-4 immersive-card rounded-lg sm:rounded-xl hover-lift cursor-default">
-                                            <AnimatedCounter end={100} suffix="%" />
-                                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">免费开源</p>
+                                        <div ref={stat3Ref} className="flex-1 min-w-[100px] sm:min-w-[120px] text-center p-4 sm:p-5 rounded-xl immersive-card cursor-default hover:scale-105 transition-transform duration-300">
+                                            <AnimatedCounter end={100} suffix="%" className="!text-3xl sm:!text-4xl !font-black text-slate-900 dark:text-white" />
+                                            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-2 font-medium uppercase tracking-wider">免费开源</p>
                                         </div>
                                     </div>
                                 </MotionDiv>
@@ -1453,11 +1458,12 @@
                                     <div className="flex gap-1 p-2 glass-panel border-b border-white/20 dark:border-white/5">
                                         {tabs.map((tab, i) => (
                                             <button 
-                                                key={tab} 
+                                                key={tab.name} 
                                                 onClick={() => setActiveTab(i)}
-                                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${activeTab === i ? 'gradient-bg text-white scale-105 shadow-lg' : 'text-slate-500 hover:bg-white/30 dark:hover:bg-white/10'}`}
+                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${activeTab === i ? 'gradient-bg text-white scale-105 shadow-lg' : 'text-slate-500 hover:bg-white/30 dark:hover:bg-white/10'}`}
                                             >
-                                                {tab}
+                                                <img src={tab.icon} alt={tab.name} className="w-4 h-4" />
+                                                {tab.name}
                                             </button>
                                         ))}
                                     </div>
@@ -1485,7 +1491,7 @@
                                     style={{ transform: `translate(${(springX - window.innerWidth / 2) * 0.02}px, ${(springY - window.innerHeight / 2) * 0.02}px)` }}
                                 >
                                     <span className="text-emerald-500 text-sm font-medium flex items-center gap-2">
-                                        <i className="fas fa-check-circle" />{tabs[activeTab]} 就绪
+                                        <i className="fas fa-check-circle" />{tabs[activeTab].name} 就绪
                                     </span>
                                 </div>
 
@@ -1585,11 +1591,11 @@
             ];
 
             const formats = [
-                { name: 'GTA III', ext: '.gxt', status: '支持', desc: '无文件头，TKEY块起始' },
-                { name: 'GTA VC', ext: '.gxt', status: '支持', desc: '新增TABL块，多子表' },
-                { name: 'GTA SA', ext: '.gxt', status: '支持', desc: 'CRC32索引，Windows-1252' },
-                { name: 'GTA IV', ext: '.gxt', status: '支持', desc: 'GXT格式，自定义哈希' },
-                { name: 'GTA V', ext: '.gxt2', status: '支持', desc: 'GXT2格式，哈希键索引' },
+                { name: 'GTA III', icon: 'icon/III.ico', ext: '.gxt', status: '支持', desc: '无文件头，TKEY块起始' },
+                { name: 'GTA VC', icon: 'icon/VC.ico', ext: '.gxt', status: '支持', desc: '新增TABL块，多子表' },
+                { name: 'GTA SA', icon: 'icon/SA.ico', ext: '.gxt', status: '支持', desc: 'CRC32索引，Windows-1252' },
+                { name: 'GTA IV', icon: 'icon/IV.ico', ext: '.gxt', status: '支持', desc: 'GXT格式，自定义哈希' },
+                { name: 'GTA V', icon: 'icon/V.ico', ext: '.gxt2', status: '支持', desc: 'GXT2格式，哈希键索引' },
             ];
 
             const tokens = [
@@ -1648,7 +1654,7 @@
                                             <tbody>
                                                 {formats.map((format, i) => (
                                                     <tr key={i} className="border-b border-white/10 dark:border-white/5 hover:bg-white/30 dark:hover:bg-white/10 transition-colors">
-                                                        <td className="py-2 sm:py-3 md:py-4 px-2 sm:px-4 font-medium text-sm">{format.name}</td>
+                                                        <td className="py-2 sm:py-3 md:py-4 px-2 sm:px-4 font-medium text-sm"><img src={format.icon} alt={format.name} className="w-5 h-5 inline-block mr-2 align-middle" />{format.name}</td>
                                                         <td className="py-2 sm:py-3 md:py-4 px-2 sm:px-4 font-mono text-blue-500 text-sm">{format.ext}</td>
                                                         <td className="py-2 sm:py-3 md:py-4 px-2 sm:px-4">
                                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 sm:py-1 glass-badge text-emerald-600 dark:text-emerald-400 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium">
@@ -1940,166 +1946,6 @@
             );
         });
 
-        const FormatGuideSection = () => {
-            const [activeVersion, setActiveVersion] = useState('sa');
-
-            const versions = [
-                { id: 'iii', name: 'GTA III', structure: ['TKEY块', 'TDAT块'], features: ['无文件头，直接以TKEY块起始', '宽字符编码（UTF-16LE）', '条目按字母顺序排序', 'Xbox版VC也采用此格式'] },
-                { id: 'vc', name: 'GTA VC', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['新增TABL块支持多子表', '宽字符编码（UTF-16LE）', '支持MAIN主表', '字符集基于fonts.txd'] },
-                { id: 'sa', name: 'GTA SA', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['完整TABL/TKEY/TDAT支持', 'Windows-1252编码', 'CRC32条目索引', '最多200个子表'] },
-                { id: 'iv', name: 'GTA IV', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['GXT格式（哈希键名）', '支持8位/16位编码', '自定义哈希算法', '伪UTF-16编码'] },
-                { id: 'v', name: 'GTA V', structure: ['TABL块', 'TKEY块', 'TDAT块'], features: ['GXT2格式（版本号10）', '哈希键索引', 'UTF-8编码', '更大文件容量'] },
-            ];
-
-            const currentVersion = versions.find(v => v.id === activeVersion);
-
-            return (
-                <section id="format-guide" className="py-16 sm:py-20 md:py-24">
-                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
-                        <MotionDiv className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 md:mb-16">
-                            <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-blue-600 dark:text-blue-400 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-3 sm:mb-4">
-                                <i className="fas fa-book animate-pulse" />文件格式
-                            </div>
-                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-4"><GlowText>GXT文件</GlowText>格式详解</h2>
-                            <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">了解GXT文件的内部结构，掌握各版本格式差异</p>
-                        </MotionDiv>
-
-                        <div className="grid lg:grid-cols-2 gap-4 sm:gap-6 md:gap-8">
-                            <MotionDiv from="left" className="immersive-card rounded-xl sm:rounded-2xl p-4 sm:p-6 md:p-8 shadow-lg">
-                                <div className="flex items-center gap-3 sm:gap-4 mb-4 sm:mb-6">
-                                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center text-white text-lg sm:text-xl">
-                                        <i className="fas fa-info-circle" />
-                                    </div>
-                                    <h3 className="text-lg sm:text-xl font-bold">格式概述</h3>
-                                </div>
-                                <p className="text-slate-600 dark:text-slate-400 leading-relaxed mb-3 sm:mb-4 text-sm sm:text-base">
-                                    GXT文件的作用相当于字典，将简短的符号型字符串映射为完整的长文本字符串。开发人员在代码中仅需使用简短的键名（例如 <code className="px-1.5 sm:px-2 py-0.5 sm:py-1 glass-button rounded text-blue-500 text-xs sm:text-sm">GM_OVR</code>），在游戏向玩家展示文本时，该键名会被替换为玩家所选语言的翻译文本。
-                                </p>
-                                <p className="text-slate-600 dark:text-slate-400 leading-relaxed text-sm sm:text-base">
-                                    这种设计让游戏的多语言翻译工作无需对核心代码做大量修改：翻译人员只需将游戏文本翻译成对应语言，玩家选择该语言后，游戏就会调用对应语言的GXT文件中的文本内容。
-                                </p>
-                            </MotionDiv>
-
-                            <MotionDiv from="right" className="immersive-card rounded-xl sm:rounded-2xl p-4 sm:p-6 md:p-8 shadow-lg">
-                                <h3 className="text-lg sm:text-xl font-bold mb-4 sm:mb-6">版本对比</h3>
-                                <div className="flex flex-wrap gap-2 mb-4 sm:mb-6">
-                                    {versions.map((v) => (
-                                        <button
-                                            key={v.id}
-                                            onClick={() => setActiveVersion(v.id)}
-                                            className={`px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl font-medium transition-all text-xs sm:text-sm md:text-base ${activeVersion === v.id ? 'gradient-bg text-white shadow-lg' : 'glass-button text-slate-600 dark:text-slate-300 hover:scale-105'}`}
-                                        >
-                                            {v.name}
-                                        </button>
-                                    ))}
-                                </div>
-                                <div className="space-y-3 sm:space-y-4">
-                                    <div>
-                                        <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mb-1.5 sm:mb-2">文件结构</div>
-                                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                                            {currentVersion.structure.map((block, i) => (
-                                                <span key={i}>
-                                                    <span className="px-2 sm:px-3 py-1 sm:py-1.5 glass-button text-blue-600 dark:text-blue-400 rounded-md sm:rounded-lg text-xs sm:text-sm font-medium">{block}</span>
-                                                    {i < currentVersion.structure.length - 1 && <i className="fas fa-arrow-right text-slate-400 dark:text-slate-500 mx-0.5 sm:mx-1 text-xs sm:text-sm" />}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mb-1.5 sm:mb-2">特性</div>
-                                        <ul className="space-y-1.5 sm:space-y-2">
-                                            {currentVersion.features.map((feature, i) => (
-                                                <li key={i} className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-xs sm:text-sm">
-                                                    <i className="fas fa-check text-emerald-500 text-xs" />
-                                                    {feature}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                </div>
-                            </MotionDiv>
-                        </div>
-                    </div>
-                </section>
-            );
-        };
-
-        const KeybindsSection = () => {
-            const [activeTab, setActiveTab] = useState('walking');
-
-            const keybinds = {
-                walking: [
-                    { code: '~PED_FIREWEAPON~', desc: '开火' },
-                    { code: '~PED_CYCLE_WEAPON_RIGHT~', desc: '下一个武器' },
-                    { code: '~PED_CYCLE_WEAPON_LEFT~', desc: '上一个武器' },
-                    { code: '~PED_LOCK_TARGET~', desc: '锁定目标' },
-                    { code: '~PED_LOOKBEHIND~', desc: '向后看' },
-                    { code: '~PED_SPRINT~', desc: '冲刺' },
-                    { code: '~PED_JUMPING~', desc: '跳跃' },
-                    { code: '~PED_DUCK~', desc: '蹲下' },
-                    { code: '~PED_ENTER_CAR~', desc: '进入/离开载具' },
-                    { code: '~PED_CENTER_CAMERA_BEHIND_PLAYER~', desc: '镜头归位' },
-                    { code: '~GROUP_CONTROL_FWD~', desc: '团队前进指令' },
-                    { code: '~GROUP_CONTROL_BWD~', desc: '团队后退指令' },
-                ],
-                vehicle: [
-                    { code: '~VEHICLE_FIREWEAPON~', desc: '开火' },
-                    { code: '~VEHICLE_FIREWEAPON_ALT~', desc: '副武器开火' },
-                    { code: '~VEHICLE_ACCELERATE~', desc: '加速' },
-                    { code: '~VEHICLE_BRAKE~', desc: '刹车/倒车' },
-                    { code: '~VEHICLE_HANDBRAKE~', desc: '手刹' },
-                    { code: '~VEHICLE_HORN~', desc: '鸣笛' },
-                    { code: '~VEHICLE_RADIO_STATION_UP~', desc: '下一个电台' },
-                    { code: '~VEHICLE_RADIO_STATION_DOWN~', desc: '上一个电台' },
-                    { code: '~VEHICLE_LOOKLEFT~', desc: '向左看' },
-                    { code: '~VEHICLE_LOOKRIGHT~', desc: '向右看' },
-                    { code: '~VEHICLE_LOOKBEHIND~', desc: '回头看' },
-                    { code: '~VEHICLE_TURRETLEFT~', desc: '炮塔左移' },
-                    { code: '~VEHICLE_TURRETRIGHT~', desc: '炮塔右移' },
-                    { code: '~VEHICLE_ENTER_EXIT~', desc: '进入/离开载具' },
-                ],
-            };
-
-            return (
-                <section className="py-16 sm:py-20 md:py-24">
-                    <div className="container mx-auto px-3 sm:px-4 md:px-6">
-                        <MotionDiv className="text-center max-w-2xl mx-auto mb-10 sm:mb-12 md:mb-16">
-                            <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full immersive-badge text-blue-600 dark:text-blue-400 text-xs sm:text-sm font-semibold uppercase tracking-wider mb-3 sm:mb-4">
-                                <i className="fas fa-gamepad" />按键标记
-                            </div>
-                            <h2 className="text-2xl sm:text-3xl md:text-4xl font-extrabold mb-3 sm:mb-4">按键标记参考</h2>
-                            <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base md:text-lg">GXT文本中常用的按键标记符号</p>
-                        </MotionDiv>
-
-                        <div className="max-w-4xl mx-auto immersive-card rounded-xl sm:rounded-2xl overflow-hidden shadow-lg">
-                            <div className="flex flex-col sm:flex-row glass-panel border-b border-white/20 dark:border-white/5">
-                                <button
-                                    onClick={() => setActiveTab('walking')}
-                                    className={`flex-1 px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 font-medium transition-all text-sm sm:text-base ${activeTab === 'walking' ? 'text-blue-500 bg-white/30 dark:bg-white/10 border-b-2 border-blue-500' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    <i className="fas fa-walking mr-2" />步行操控
-                                </button>
-                                <button
-                                    onClick={() => setActiveTab('vehicle')}
-                                    className={`flex-1 px-3 sm:px-4 md:px-6 py-2.5 sm:py-3 md:py-4 font-medium transition-all text-sm sm:text-base ${activeTab === 'vehicle' ? 'text-blue-500 bg-white/30 dark:bg-white/10 border-b-2 border-blue-500' : 'text-slate-500 hover:text-slate-700'}`}
-                                >
-                                    <i className="fas fa-car mr-2" />载具操控
-                                </button>
-                            </div>
-                            <div className="p-3 sm:p-4 md:p-6 grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-                                {keybinds[activeTab].map((item, i) => (
-                                    <div key={i} className="flex items-center justify-between p-2 sm:p-3 glass-button rounded-lg sm:rounded-xl hover:scale-[1.02] transition-all">
-                                        <code className="text-xs sm:text-sm font-mono text-blue-500 glass-badge px-1.5 sm:px-2 py-0.5 sm:py-1 rounded">{item.code}</code>
-                                        <span className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">{item.desc}</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                </section>
-            );
-        };
-
         const CommunitySection = React.memo(() => {
             return (
                 <section id="community" className="py-16 sm:py-20 md:py-24">
@@ -2306,8 +2152,6 @@
                         <HeroSection />
                         <FeaturesSection />
                         <SpecsSection />
-                        <FormatGuideSection />
-                        <KeybindsSection />
                         <ToolsSection />
                         <DownloadSection />
                         <CommunitySection />

@@ -174,6 +174,50 @@
             border-radius: 0 2px 2px 0;
         }
 
+        .sidebar-group-toggle {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .sidebar-group-toggle i.fa-chevron-down {
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar-group-toggle.expanded i.fa-chevron-down {
+            transform: rotate(180deg);
+        }
+
+        .sidebar-sublist {
+            overflow: hidden;
+            transition: max-height 0.35s ease, opacity 0.3s ease;
+            max-height: 0;
+            opacity: 0;
+        }
+
+        .sidebar-sublist.expanded {
+            max-height: 800px;
+            opacity: 1;
+        }
+
+        .toast-popup {
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            background: linear-gradient(135deg, #f97316, #ec4899);
+            color: #fff;
+            padding: 8px 20px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+            pointer-events: none;
+            animation: toastIn 0.25s ease, toastOut 0.25s ease 0.95s forwards;
+            box-shadow: 0 8px 24px rgba(249, 115, 22, 0.3);
+        }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-12px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+        @keyframes toastOut { from { opacity: 1; transform: translateX(-50%) translateY(0); } to { opacity: 0; transform: translateX(-50%) translateY(-12px); } }
         @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(16px); }
             to { opacity: 1; transform: translateY(0); }
@@ -260,39 +304,63 @@
             );
         };
 
-        const Sidebar = ({ sections, activeSection, onSectionClick, mobileOpen, onMobileClose }) => {
+        const Sidebar = ({ groups, activeSection, onSectionClick, mobileOpen, onMobileClose }) => {
+            const [expandedGroups, setExpandedGroups] = useState({ tutorial: true, spec: true });
+
+            const toggleGroup = (groupId) => {
+                setExpandedGroups(prev => ({ ...prev, [groupId]: !prev[groupId] }));
+            };
+
+            const sidebarLinks = (items) => items.map((section) => {
+                const isActive = activeSection === section.id;
+                const isFaIcon = typeof section.icon === 'string' && section.icon.startsWith('fa-');
+                return (
+                    <li key={section.id}>
+                        <a
+                            href={`#${section.id}`}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                onSectionClick(section.id);
+                                onMobileClose();
+                            }}
+                            className={`sidebar-link flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-base transition-all ${isActive ? 'active' : 'text-slate-600 dark:text-slate-400'}`}
+                        >
+                            {isFaIcon ? (
+                                <i className={`fas ${section.icon} w-4 text-center ${isActive ? 'text-orange-500' : 'text-slate-400 dark:text-slate-500'}`} />
+                            ) : (
+                                <img src={section.icon} alt="" className={`w-5 h-5 ${isActive ? '' : 'opacity-50 dark:opacity-60'}`} />
+                            )}
+                            <span>{section.label}</span>
+                            {isActive && <span className="ml-auto w-1.5 h-1.5 rounded-full gradient-bg" />}
+                        </a>
+                    </li>
+                );
+            });
+
             return (
                 <aside className={`sidebar-container ${mobileOpen ? 'open' : ''} w-full md:w-72 lg:w-80 flex-shrink-0 md:static overflow-y-auto`}>
                     <nav className="glass-panel rounded-2xl p-3 md:p-4 h-full">
                         <div className="flex items-center justify-between md:hidden mb-3 px-2">
-                            <span className="font-semibold text-base text-slate-500 dark:text-slate-400">教程目录</span>
+                            <span className="font-semibold text-base text-slate-500 dark:text-slate-400">目录</span>
                             <button onClick={onMobileClose} className="w-8 h-8 rounded-lg glass-button flex items-center justify-center">
                                 <i className="fas fa-times text-sm" />
                             </button>
                         </div>
-                        <h3 className="hidden md:block px-3 pb-3 text-sm font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">教程目录</h3>
-                        <ul className="space-y-1">
-                            {sections.map((section) => {
-                                const isActive = activeSection === section.id;
-                                return (
-                                    <li key={section.id}>
-                                        <a
-                                            href={`#${section.id}`}
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                onSectionClick(section.id);
-                                                onMobileClose();
-                                            }}
-                                            className={`sidebar-link flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-base transition-all ${isActive ? 'active' : 'text-slate-600 dark:text-slate-400'}`}
-                                        >
-                                            <i className={`fas ${section.icon} w-4 text-center ${isActive ? 'text-orange-500' : 'text-slate-400 dark:text-slate-500'}`} />
-                                            <span>{section.label}</span>
-                                            {isActive && <span className="ml-auto w-1.5 h-1.5 rounded-full gradient-bg" />}
-                                        </a>
-                                    </li>
-                                );
-                            })}
-                        </ul>
+                        {groups.map((group) => (
+                            <div key={group.id} className="mb-2">
+                                <div
+                                    className={`sidebar-group-toggle flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors ${expandedGroups[group.id] ? 'expanded' : ''}`}
+                                    onClick={() => toggleGroup(group.id)}
+                                >
+                                    <i className={`fas ${group.icon} w-4 text-center text-orange-500`} />
+                                    <span className="flex-1">{group.label}</span>
+                                    <i className="fas fa-chevron-down text-xs" />
+                                </div>
+                                <ul className={`sidebar-sublist space-y-1 ${expandedGroups[group.id] ? 'expanded' : ''}`}>
+                                    {sidebarLinks(group.items)}
+                                </ul>
+                            </div>
+                        ))}
                     </nav>
                 </aside>
             );
@@ -333,6 +401,218 @@
                 </div>
             );
         };
+
+        const CharMapIII = () => (
+            <>
+                <CharMapStep title="Font Style 0 — Bank（银行字体）" rows={[
+                    {l:'20',c:' !△#$%&\'()*+,-./'},{l:'30',c:'0123456789:;◀=▶?'},{l:'40',c:'™ABCDEFGHIJKLMNO'},
+                    {l:'50',c:'PQRSTUVWXYZ[\\]^°'},{l:'60',c:'`abcdefghijklmno'},{l:'70',c:'pqrstuvwxyz ◯ ~ '},
+                    {l:'80',c:'ÀÁÂÄÆÇÈÉÊËÌÍÎÏÒÓ'},{l:'90',c:'ÔÖÙÚÛÜßàáâäæçèéê'},{l:'A0',c:'ëìíîïòóôöùúûüÑñ¿'},
+                    {l:'B0',c:'¡\''},
+                ]} />
+                <CharMapStep title="Font Style 1 — Pager（寻呼机字体）" rows={[
+                    {l:'20',c:' !"#$%&\'()- ,-. '},{l:'30',c:'0123456789:    ?'},{l:'40',c:' ABCDEFGHIJKLMNO'},
+                    {l:'50',c:'PQRSTUVWXYZ     '},{l:'60',c:' abcdefghijklmno'},{l:'70',c:'pqrstuvwxyz  ~ '},
+                    {l:'80',c:'ÀÁÂÄÆÇÈÉÊËÌÍÎÏÒÓ'},{l:'90',c:'ÔÖÙÚÛÜßàáâäæçèéê'},{l:'A0',c:'ëìíîïòóôöùúûüÑñ¿'},
+                    {l:'B0',c:'¡'},
+                ]} />
+                <CharMapStep title="Font Style 2 — Heading（标题字体）" rows={[
+                    {l:'20',c:' !△®$%&\'() +,-.✕'},{l:'30',c:'0123456789:▲◀▼▶?'},{l:'40',c:'™abcdefghijklmno'},
+                    {l:'50',c:'pqrstuvwxyz \\ №°'},{l:'60',c:'©abcdefghijklmno'},{l:'70',c:'pqrstuvwxyz ◯ ~ '},
+                    {l:'80',c:'àáâäæçèéêëìíîïòó'},{l:'90',c:'ôöùúûüßàáâäæçèéê'},{l:'A0',c:'ëìíîïòóôöùúûüññ¿'},
+                    {l:'B0',c:'¡'},
+                ]} />
+            </>
+        );
+
+        const CharMapVC = () => (
+            <>
+                <CharMapStep title="Font Style 0 — Bank（银行字体）" rows={[
+                    {l:'20',c:' !  $%&\'[] +,-. '},{l:'30',c:'0123456789:    ?'},{l:'40',c:' ABCDEFGHIJKLMNO'},
+                    {l:'50',c:'PQRSTUVWXYZ \\ ¡\\'},{l:'60',c:' abcdefghijklmno'},{l:'70',c:'pqrstuvwxyz  ~ '},
+                    {l:'80',c:'ÀÁÂÄÆÇÈÉÊËÌÍÎÏÒÓ'},{l:'90',c:'ÔÖÙÚÛÜßàáâäæçèéê'},{l:'A0',c:'ëìíîïòóôöùúûüÑñ¿'},
+                    {l:'B0',c:'i'},
+                ]} />
+                <CharMapStep title="Font Style 1 — Standard（标准字体）" rows={[
+                    {l:'20',c:' !"#$%&\'()*+,-./'},{l:'30',c:'0123456789:; = ?'},{l:'40',c:'™ABCDEFGHIJKLMNO'},
+                    {l:'50',c:'PQRSTUVWXYZ[\\]¡°'},{l:'60',c:'`abcdefghijklmno'},{l:'70',c:'pqrstuvwxyz |$~)'},
+                    {l:'80',c:'ÀÁÂÄÆÇÈÉÊËÌÍÎÏÒÓ'},{l:'90',c:'ÔÖÙÚÛÜßàáâäæçèéê'},{l:'A0',c:'ëìíîïòóôöùúûüÑñ¿'},
+                    {l:'B0',c:'0123456789:a'},
+                ]} />
+                <CharMapStep title="Font Style 2 — Heading（标题字体）" rows={[
+                    {l:'20',c:' !"#$%&\'()*+,-./'},{l:'30',c:'0123456789:; = ?'},{l:'40',c:'™abcdefghijklmno'},
+                    {l:'50',c:'pqrstuvwxyz[\\]¡°'},{l:'60',c:'`abcdefghijklmno'},{l:'70',c:'pqrstuvwxyz |$~)'},
+                    {l:'80',c:'àáâäæçèéêëìíîïòó'},{l:'90',c:'ôöùúûüßàáâäæçèéê'},{l:'A0',c:'ëìíîïòóôöùúûüññ¿'},
+                    {l:'B0',c:'0123456789:abcde'},{l:'C0',c:'fghijklmnopqrstu'},{l:'D0',c:'vwxyzàáâäæçèéêëì'},
+                    {l:'E0',c:'íîïòóôöùúûüßñ¿\'.'},
+                ]} />
+            </>
+        );
+
+        const CharMapStep = ({ title, rows }) => {
+            const [copiedCell, setCopiedCell] = useState(null);
+            const [toastMsg, setToastMsg] = useState(null);
+
+            const calcHex = (rowLabel, colIndex) => {
+                const rowVal = parseInt(rowLabel, 16);
+                const hexVal = rowVal >= 0x20 ? rowVal + colIndex : rowVal * 16 + colIndex;
+                return hexVal.toString(16).toUpperCase();
+            };
+
+            const handleCopy = (rowLabel, colIndex) => {
+                const hexStr = calcHex(rowLabel, colIndex);
+                navigator.clipboard.writeText(hexStr).catch(() => {});
+                setCopiedCell(`${rowLabel}-${colIndex}`);
+                setToastMsg('已复制 ' + hexStr);
+                setTimeout(() => setCopiedCell(null), 1200);
+                setTimeout(() => setToastMsg(null), 1200);
+            };
+
+            return (
+            <div className="mb-8">
+                {toastMsg && <div className="toast-popup">{toastMsg}</div>}
+                <div className="flex items-start gap-4 mb-3">
+                    <span className="flex-shrink-0 w-9 h-9 rounded-lg gradient-bg flex items-center justify-center text-white text-base font-bold shadow-lg shadow-orange-500/20" />
+                    <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 pt-0.5">{title}</h3>
+                </div>
+                <div className="ml-12 overflow-x-auto">
+                    <table className="border-collapse font-mono text-xs mx-auto">
+                        <thead>
+                            <tr>
+                                <th className="w-8 py-1 px-1 text-slate-400 font-normal"></th>
+                                {['00','01','02','03','04','05','06','07','08','09','0A','0B','0C','0D','0E','0F'].map(h => <th key={h} className="w-8 text-center py-1 text-slate-400 font-normal">{h}</th>)}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map((r,i) => (
+                                <tr key={i} className={i%2===0?'bg-white/20 dark:bg-white/5':''}>
+                                    <td className="text-center py-0.5 px-1 text-orange-500 font-bold">{r.l}</td>
+                                    {r.c.split('').map((ch,j) => (
+                                        <td
+                                            key={j}
+                                            onClick={() => handleCopy(r.l, j)}
+                                            title={calcHex(r.l, j)}
+                                            className={`text-center py-0.5 cursor-pointer transition-colors ${copiedCell === `${r.l}-${j}` ? 'bg-orange-500/30 text-orange-600 dark:text-orange-300' : 'text-slate-700 dark:text-slate-200 hover:bg-blue-500/20 hover:text-blue-600 dark:hover:text-blue-300'}`}
+                                        >
+                                            {ch}
+                                        </td>
+                                    ))}
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            );
+        };
+
+        const CharMapJpPS2 = () => (
+            <CharMapStep title="PlayStation 2" rows={[
+                {l:'80',c:'\u2003－\u201C\u201D\u2026\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18\uff19\uff10'},
+                {l:'90',c:'\u2003\u2003\u2003\u3000\u3001\u3002\u3005\u300C\u300D\u3041\u3042\u3044\u3046\u3047\u3048\u304A'},
+                {l:'A0',c:'\u304B\u304C\u304D\u304E\u304F\u3050\u3051\u3052\u3053\u3054\u3055\u3056\u3057\u3058\u3059\u305A'},
+                {l:'B0',c:'\u305B\u305C\u305D\u305E\u305F\u3060\u3061\u3063\u3064\u3065\u3066\u3067\u3068\u3069\u306A\u306B'},
+                {l:'C0',c:'\u306C\u306D\u306E\u306F\u3070\u3071\u3072\u3073\u3075\u3076\u3077\u3078\u3079\u307A\u307B\u307C'},
+                {l:'D0',c:'\u307D\u307E\u307F\u3080\u3081\u3082\u3083\u3084\u3085\u3086\u3087\u3088\u3089\u308A\u308B\u308C'},
+                {l:'E0',c:'\u308D\u308F\u3092\u3093\u30A1\u30A2\u30A3\u30A4\u30A5\u30A6\u30A7\u30A8\u30A9\u30AA\u30AB\u30AC'},
+                {l:'F0',c:'\u30AD\u30AE\u30AF\u30B0\u30B1\u30B2\u30B3\u30B4\u30B5\u30B6\u30B7\u30B8\u30B9\u30BA\u30BB\u30BC'},
+                {l:'10',c:'\u30BD\u30BE\u30BF\u30C0\u30C1\u30C3\u30C4\u30C6\u30C7\u30C8\u30C9\u30CA\u30CB\u30CC\u30CD\u30CE'},
+                {l:'11',c:'\u30CF\u30D0\u30D1\u30D2\u30D3\u30D4\u30D5\u30D6\u30D7\u30D8\u30D9\u30DA\u30DB\u30DC\u30DD\u30DE'},
+                {l:'12',c:'\u30DF\u30E0\u30E1\u30E2\u30E3\u30E4\u30E5\u30E6\u30E7\u30E8\u30E9\u30EA\u30EB\u30EC\u30ED\u30EF'},
+                {l:'13',c:'\u30F3\u30F4\u30FB\u30FC\u4E00\u4E01\u4E07\u4E08\u4E09\u4E0A\u4E0B\u4E0D\u4E0E\u4E16\u4E21\u4E26'},
+                {l:'14',c:'\u4E2D\u4E38\u4E3B\u4E45\u4E4F\u4E57\u4E71\u4E86\u4E88\u4E89\u4E8B\u4E8C\u4E92\u4E95\u4EA1\u4EA4'},
+                {l:'15',c:'\u4EBA\u4ECA\u4ECB\u4ED5\u4ED6\u4ED8\u4EE3\u4EE4\u4EE5\u4EF2\u4EF6\u4EFB\u4F0D\u4F0F\u4F11\u4F1A'},
+                {l:'16',c:'\u4F1D\u4F3C\u4F4D\u4F4E\u4F4F\u4F50\u4F53\u4F55\u4F59\u4F5C\u4F7F\u4F8B\u4F9B\u4F9D\u4FA1\u4FC2'},
+                {l:'17',c:'\u4FC3\u4FDD\u4FE1\u4FEE\u4FFA\u5009\u500B\u500D\u5012\u5019\u501F\u5024\u5049\u505C\u5074\u507D'},
+                {l:'18',c:'\u5099\u50AC\u50AD\u50B5\u50B7\u50CD\u50CF\u50D5\u50E7\u512A\u5132\u5143\u5144\u5145\u5148\u5149'},
+                {l:'19',c:'\u514D\u515A\u5165\u5168\u516C\u516D\u5171\u5175\u5177\u5185\u518D\u5197\u5199\u51B7\u51E1\u51E6'},
+                {l:'1A',c:'\u51FA\u5206\u5207\u5211\u521D\u5224\u5225\u5229\u5230\u5236\u5237\u523A\u523B\u5247\u524A\u524D'},
+                {l:'1B',c:'\u526F\u5272\u529B\u529F\u52A0\u52A9\u52AA\u52B4\u52B9\u52C7\u52C9\u52D5\u52D8\u52D9\u52DD\u52E2'},
+                {l:'1C',c:'\u5305\u5316\u5317\u5339\u533B\u5341\u534A\u5357\u5358\u5360\u5370\u5371\u5384\u539F\u53B3\u53BB'},
+                {l:'1D',c:'\u53C2\u53CA\u53CB\u53CD\u53CE\u53D6\u53D7\u53E3\u53E4\u53E5\u53E9\u53EF\u53F0\u53F3\u53F7\u53F8'},
+                {l:'1E',c:'\u5404\u5408\u540C\u540D\u5411\u541B\u5438\u5439\u544A\u5468\u5473\u547C\u547D\u54C1\u54E1\u5546'},
+                {l:'1F',c:'\u554F\u5584\u559C\u559D\u55B6\u55C5\u5618\u5602\u5668\u5674\u56DB\u56DE\u56E0\u56F0\u56F2\u56FA'},
+                {l:'20',c:'\u56FD\u571F\u5728\u5730\u574A\u578B\u57A3\u57CE \u57FA\u5831\u5834\u5857\u585E\u5897\u589C'},
+                {l:'21',c:'\u58C1\u58CA\u58EB\u58F0\u58F2\u5909\u5916\u591A\u591C\u5922\u5927\u5929\u592B\u592E\u5931\u594F'},
+                {l:'22',c:'\u5951\u5965\u596A\u596E\u5973\u5974\u597D\u5984\u5999\u59A8\u59BB\u59CB\u5A18\u5A2F\u5ACC\u563B'},
+                {l:'23',c:'\u5B22\u5B50\u5B57\u5B58\u5B64\u5B66\u5B85\u5B88\u5B89\u5B8C\u5B98\u5B9A\u5B9D\u5B9F\u5BA2\u5BA3'},
+                {l:'24',c:'\u5BB3\u5BB6\u5BB9\u5BC2\u5BC4\u5BC6\u5BD2\u5BDD\u5BDF\u5BE9\u5BF8\u5BFE\u5C04\u5C06\u5C09\u5C0B'},
+                {l:'25',c:'\u5C0E\u5C0F\u5C11\u5C3B\u5C3D\u5C3E\u5C40\u5C45\u5C48\u5C4A\u5C4B\u5C55\u5C64\u5C65\u5C71\u5CB8'},
+                {l:'26',c:'\u5CF6\u5D07\u5DDE\u5DE3\u5DE5\u5DE6\u5DE8\u5DEE\u5DF1\u5DF7\u5E02\u5E2B\u5E2F\u5E30\u5E38\u5E55'},
+                {l:'27',c:'\u5E63\u5E72\u5E74\u5E78\u5E79\u5E83\u5E95\u5E97\u5E9C\u5EA6\u5EA7\u5EAB\u5EAD\u5EC3\u5EFA\u5F01'},
+                {l:'28',c:'\u5F0F\u5F15\u5F1F\u5F35\u5F37\u5F3E\u5F53\u5F62\u5F69\u5F71\u5F79\u5F7C\u5F85\u5F8B\u5F8C\u5F92'},
+                {l:'29',c:'\u5F93\u5F97\u5FA1\u5FA9\u5FB4\u5FC3\u5FC5\u5FD8\u5FD9\u5FDC\u5FE0\u5FEB\u5FF5\u6012\u6016\u601D'},
+                {l:'2A',c:'\u6025\u6027\u602A\u604B\u6050\u6065\u6069\u606F\u6094\u60A3\u60A9\u60AA\u60C5\u60F3\u610F\u611B'},
+                {l:'2B',c:'\u611F\u614B\u6162\u616E\u618E\u61B6\u6210\u6211\u6226\u622E\u623B\u623F\u6240\u624B\u624D\u6253'},
+                {l:'2C',c:'\u6255\u6271\u6280\u6291\u6295\u6297\u6298\u629C\u629E\u62B1\u62BC\u62C5\u62D8\u62DB\u62E0\u62F6'},
+                {l:'2D',c:'\u62FE\u6301\u6307\u6311\u6328\u632F\u6349\u6355\u6368\u6383\u639B\u63A2\u63A5\u63B4\u63C3\u63DB'},
+                {l:'2E',c:'\u63F4\u640D\u642D\u643A\u643E\u6483\u64AE\u64CD\u652F\u653B\u653E\u653F\u6545\u6551\u6557\u6559'},
+                {l:'2F',c:'\u6563\u6570\u6574\u6575\u6577\u6587\u6599\u65AC\u65AD\u65B0\u65B9\u65C5\u65CB\u65CF \u65E5'},
+                {l:'30',c:'\u65E9\u6607\u660E\u6614\u661F\u6620\u6628\u6642\u6669\u666E\u666F\u6674\u6687\u6697\u66B4\u66F2'},
+                {l:'31',c:'\u66F4\u66F8\u66F9\u66FF\u6700\u6708\u6709\u670D\u6717\u671B\u671D\u671F\u6728\u672A\u672B\u672C'},
+                {l:'32',c:'\u672D\u6756\u675F\u6765\u676F\u6771\u677F\u6797\u679A\u679C\u67A0\u67C4\u67FB\u6839\u683C\u6848'},
+                {l:'33',c:'\u685F\u68B0\u68D2\u690D\u696D\u6975\u697D\u69CB\u69D8\u6A19\u6A21\u6A29\u6A2A\u6A4B\u6A5F\u6B20'},
+                {l:'34',c:'\u6B21\u6B27\u6B32\u6B3A\u6B53\u6B62\u6B63\u6B66\u6B69\u6B6F\u6B73\u6B7B\u6B8B\u6BBB\u6BB5\u6BBA'},
+                {l:'35',c:'\u6BBF\u6BCD\u6BCE\u6C0F\u6C11\u6C17\u6C34\u6C38\u6C42\u6C5A\u6C7A\u6C88\u6CA1\u6CBB\u6CC1\u6CD5'},
+                {l:'36',c:'\u6CE2\u6CE3\u6CE5\u6CE8\u6D0B\u6D17\u6D3B\u6D3E\u6D41\u6D6A\u6D74\u6D77\u6D78\u6D88\u6DF1\u6DF7'},
+                {l:'37',c:'\u6DFB\u6E08\u6E09\u6E1B\u6E21\u6E2F\u6E67\u6E7F\u6E80\u6E90\u6E96\u6E9C\u6EBA\u6EC5\u6F01\u6F14'},
+                {l:'38',c:'\u6F54\u6F70\u6F84\u6FC0\u706B\u707D\u708E\u70B9\u70BA\u70C8\u7121\u7126\u7136\u713C\u71B1\u71C3'},
+                {l:'39',c:'\u7206\u7236\u7247\u7248\u7267\u7269\u7279\u72AC\u72AF\u72B6\u72D0\u72D9\u72EC\u72FC\u7344\u7372'},
+                {l:'3A',c:'\u7384\u7387\u7389\u738B\u73FE\u7406\u74A7\u74F6\u7518\u751F\u7523\u7525\u7528\u7531\u7532\u7533'},
+                {l:'3B',c:'\u7537\u753B\u754C\u7551\u7559\u755C\u756A\u75AB\u75C5\u75DB\u7642\u767A\u767B\u767D\u7684\u7686'},
+                {l:'3C',c:'\u76AE\u76CA\u76D7\u76DB\u76E3\u76EE\u76F4\u76F8\u770B\u771F\u7720\u7740\u7761\u7763\u77E2\u77E5'},
+                {l:'3D',c:'\u77F3\u7832\u7834\u78BA\u793A\u793C\u793E\u795E\u7968\u7981\u79C1\u79D1\u79D2\u79D8\u79F0\u79FB'},
+                {l:'3E',c:'\u7A0B\u7A0E\u7A2E\u7A3C\u7A4D\u7A74\u7A7A\u7A81\u7A93\u7AAE\u7ACB\u7AEF\u7AF6\u7AFF\u7B11\u7B2C'},
+                {l:'3F',c:'\u7B49\u7B4B\u7B54\u7B97\u7BA1\u7BB1\u7BC4\u7BC9\u7C21\u7C73\u7C89\u7CBE\u7CFB\u7D04\u7D14\u7D19'},
+                {l:'40',c:'\u7D1A\u7D1B\u7D20\u7D30\u7D33\u7D39\u7D42\u7D44\u7D4C\u7D50\u7D61\u7D66\u7D71\u7D76\u7D99\u7D9A'},
+                {l:'41',c:'\u7DB2\u7DBA\u7DCF\u7DD1\u7DD2\u7DDA\u7DF4\u7E01\u7E04\u7E3E\u7E26\u7E3E\u7E54\u7F36\u7F6A\u7F6E'},
+                {l:'42',c:'\u7F72\u7F8A\u7F8E\u7FA9\u7FBD\u7FD2\u8001\u8003\u8005\u8010\u8033\u805E\u8077\u809D\u80B2\u80CC'},
+                {l:'43',c:'\u80F8\u80FD\u8105\u8107\u8131\u8150\u8155\u8170\u8179\u81E3\u81EA\u81ED\u8208\u8217\u821E\u822A'},
+                {l:'44',c:'\u8239\u826F\u8272\u82B8\u82E5\u82E6\u82F1\u8302\u8336\u8349\u8377\u83EF\u843D\u8449\u846C\u84B8'},
+                {l:'45',c:'\u85AC\u866B\u86EE\u8805\u8846\u884C\u8853\u8857\u885B\u8868\u888B\u88AB\u88C2\u88C5\u88CF\u88DC'},
+                {l:'46',c:'\u88F8\u8907\u8972\u8981\u898B\u898F\u8996\u8997\u899A\u89AA\u89B3\u89D2\u89E3\u89E6\u8A00\u8A08'},
+                {l:'47',c:'\u8A0A\u8A18\u8A2A\u8A2D\u8A31\u8A33\u8A3C\u8A50\u8A55\u8A66\u8A70\u8A71\u8A73\u8A8C\u8A93\u8A98'},
+                {l:'48',c:'\u8A9E\u8AA0\u8AA4\u8AAC\u8AAD\u8AB0\u8ABF\u8AC7\u8ACB\u8AE6\u8B00\u8B1D\u8B58\u8B66\u8B70\u8B77'},
+                {l:'49',c:'\u8C61\u8C6A\u8CA0\u8CA7\u8CA9\u8CB0\u8CB4\u8CBB\u8CB7\u8CB8\u8CC7\u8CD1\u8CDB\u8D0A\u8CEA\u8CFC'},
+                {l:'4A',c:'\u8D08\u8D64\u8D66\u8D70\u8D77\u8D85\u8D8A\u8DA3\u8DB3\u8DDD\u8DE1\u8DEF\u8E0F\u8E8D\u8EAB\u8ECA'},
+                {l:'4B',c:'\u8ECC\u8ECD\u8EE2\u8F15\u8F09\u8F2A\u8F38\u8F9E\u8FBA\u8FBC\u8FCE\u8FD1\u8FD4\u8FF7\u8FFD\u9000'},
+                {l:'4C',c:'\u9001\u9003\u9006\u901A\u901D\u901F\u9023\u902E\u9032\u9045\u904A\u904B\u904E\u9053\u9054\u9055'},
+                {l:'4D',c:'\u9060\u9063\u9069\u9078\u90AA\u90B8\u90CE\u90E8\u914D\u9152\u9154\u916C\u91CD\u91CE\u91CF\u91D1'},
+                {l:'4E',c:'\u91E3\u9280\u9283\u9332\u9375\u9396\u93AE\u9451\u9577\u9580\u9589\u958B\u9593\u95A2\u95D8\u9632'},
+                {l:'4F',c:'\u964D\u9650\u9662\u9663\u9664\u966A\u9670\u967A\u968A\u968E\u968F\u9699\u969B\u96A0\u96C6\u96C7'},
+                {l:'50',c:'\u96D1\u96E2\u96E3\u96E8\u96FB\u9759\u975E\u9762\u9769\u97F3\u97FF\u9803\u9806\u9811 \u982D'},
+                {l:'51',c:'\u983C\u984C\u984D\u9854\u9858\u985E\u98A8\u98DB\u98DF\u98F2\u98FC\u98FD\u98FE\u9996\u99AC\u99C4'},
+                {l:'52',c:'\u99C6\u99D0\u9A12\u9A13\u9A19\u9A5A\u9AA8\u9AD8\u9B42\u9B54\u9B5A\u9CE5\u9CE9\u9CF3\u9CF4\u9E7F'},
+                {l:'53',c:'\u9E97\u9EBB\u9ED2\u9ED9\u9F3B\u3003\u3003\u3003\u3003\u3003\uFF21\uFF22\uFF24\uFF27\uFF28\uFF2B'},
+                {l:'54',c:'\uFF2C\uFF2F\uFF30\uFF32\uFF33\uFF34\uFF38\uFF1F\uFF01\u3003\u3003\u3003\uFF0F\uFF5E'},
+            ]} />
+        );
+
+        const CharMapJpPC = () => (
+            <>
+                <CharMapStep title="ASCII 基础 (0x20–0x7F) — PC 版独有" rows={[
+                    {l:'20',c:' !"#$%&\'()*+,-./'},{l:'30',c:'0123456789:;<=>?'},
+                    {l:'40',c:'@ABCDEFGHIJKLMNO'},{l:'50',c:'PQRSTUVWXYZ[¥]^_'},
+                    {l:'60',c:'`abcdefghijklmno'},{l:'70',c:'pqrstuvwxyz{|}~\u3003'},
+                ]} />
+                <div className="mb-8 p-4 rounded-xl glass-card text-sm text-slate-500 dark:text-slate-400">
+                    <i className="fas fa-info-circle text-blue-500 mr-2" />
+                    PC 版 0x80~0x54F 的日语字符部分与 PS2 版基本一致（含全角符号、平假名、片假名、JIS 汉字），此处省略重复。PC 版独有的差异：全角符号区增加了箭头符号（←↑→↓）。
+                </div>
+            </>
+        );
+
+        const CharMapJpMobile = () => (
+            <>
+                <CharMapStep title="控制字符区 (0x07–0x7F) — Mobile 版" rows={[
+                    {l:'70',c:'\u3003\u3003\u3003\u3003\u3003\u3003\u3003\u3003\u3003\u3003\u3003\u3003\u3003\u3003\u3003°'},
+                ]} />
+                <div className="mb-8 p-4 rounded-xl glass-card text-sm text-slate-500 dark:text-slate-400">
+                    <i className="fas fa-info-circle text-blue-500 mr-2" />
+                    Mobile 版 0x80~0x53F 的字符集与 PC 版高度一致（含全角符号、平假名、片假名、JIS 汉字），但有少量差异（如 0x17 的「傾→倾」、0x30 的「暴→暴 曇」等），完整字符映射请参阅原文档。
+                </div>
+            </>
+        );
 
         const ContentArea = ({ activeSection, onSectionClick }) => {
             const contentRef = useRef(null);
@@ -384,9 +664,16 @@
 
                                 <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 mb-4">支持的游戏</h3>
                                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-                                    {['GTA III','GTA Vice City','GTA San Andreas','GTA IV','GTA V'].map((game, i) => (
-                                        <div key={i} className="text-center py-3 px-2 rounded-xl glass-card text-base font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
-                                            {game}
+                                    {[
+                                        { name: 'GTA III', icon: 'icon/III.ico' },
+                                        { name: 'GTA Vice City', icon: 'icon/VC.ico' },
+                                        { name: 'GTA San Andreas', icon: 'icon/SA.ico' },
+                                        { name: 'GTA IV', icon: 'icon/IV.ico' },
+                                        { name: 'GTA V', icon: 'icon/V.ico' },
+                                    ].map((game, i) => (
+                                        <div key={i} className="flex items-center justify-center gap-2 py-3 px-2 rounded-xl glass-card text-base font-medium text-slate-700 dark:text-slate-300 hover:scale-105 transition-transform">
+                                            <img src={game.icon} alt={game.name} className="w-5 h-5" />
+                                            {game.name}
                                         </div>
                                     ))}
                                 </div>
@@ -634,6 +921,545 @@
                             </div>
                         );
 
+                    case 'gxt-overview':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-file-lines gradient-text mr-3" />GXT 文件概述
+                                </h2>
+
+                                <TutorialStep number={1} title="什么是 GXT 文件">
+                                    <p>GTA Text（GXT）文件包含了向玩家展示的所有文本字符串。在 GTA 2 及以上版本中，GXT 文件通常位于游戏安装目录的 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-base text-orange-500">text</code> 文件夹中。除了 GTA 2 以外，每种语言对应一个 GXT 文件。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="工作原理">
+                                    <p>GXT 文件类似于字典，将简短的符号字符串（或唯一标识值）映射为较长的文本字符串。开发人员在代码中仅使用简短的键名（例如 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-base text-orange-500">GM_OVR</code>），在向玩家展示文本之前，该键名会被替换为玩家所选语言的翻译版本——例如"Game Over"（英文）或"游戏结束"（中文）。</p>
+                                    <p>这种设计使得游戏可以轻松翻译为多种语言，无需对核心代码进行大量修改：翻译人员只需将游戏文本翻译成对应语言，玩家选择该语言后，游戏就会调用对应语言的 GXT 文件中的文本内容。</p>
+                                </TutorialStep>
+
+                                <TipBox type="info">
+                                    以下内容翻译整理自 GTAMods Wiki 上的官方 GXT 文件格式文档，完整原文请访问 <a href="https://gtamods.com/wiki/GXT" target="_blank" className="text-blue-500 hover:underline">gtamods.com/wiki/GXT <i className="fas fa-external-link-alt text-xs" /></a>。
+                                </TipBox>
+                            </div>
+                        );
+
+                    case 'gxt-format-gta2':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-2 gradient-text mr-3" />GTA 2 文件格式
+                                </h2>
+
+                                <TutorialStep number={1} title="文件结构">
+                                    <p>GTA 2 的 GXT 文件以<strong>文件头</strong>开始，紧接着是 TKEY 块，然后是 TDAT 块。TKEY 块包含一个条目数组，每个条目提供对应 TDAT 条目的<strong>偏移量</strong>和<strong>名称</strong>。TDAT 条目包含游戏实际显示的文本内容。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="文件头 (Header)">
+                                    <table className="w-full text-sm border-collapse mt-2">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">偏移</th>
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">类型</th>
+                                                <th className="text-left py-2 px-3 text-slate-500">描述</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="font-mono">
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x00</td><td className="py-2 px-3 text-blue-500">char[3]</td><td className="py-2 px-3">GBL</td></tr>
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x03</td><td className="py-2 px-3 text-blue-500">char</td><td className="py-2 px-3">语言代码：E=英文 F=法文 G=德文 I=意大利文 S=西班牙文 J=日文</td></tr>
+                                            <tr><td className="py-2 px-3 text-orange-500">0x04</td><td className="py-2 px-3 text-blue-500">word</td><td className="py-2 px-3">文件版本，始终为 100</td></tr>
+                                        </tbody>
+                                    </table>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="TKEY 块">
+                                    <p>TKEY 块以 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm text-orange-500">TKEY</code> 标识符开头，后跟块大小。每个 TKEY 条目（0xC 字节）包含：</p>
+                                    <table className="w-full text-sm border-collapse mt-2">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">偏移</th><th className="text-left py-2 px-3 font-mono text-slate-500">类型</th><th className="text-left py-2 px-3 text-slate-500">描述</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="font-mono">
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x00</td><td className="py-2 px-3 text-blue-500">dword</td><td className="py-2 px-3">TDAT 条目偏移（相对值=偏移+TKEY大小+22）</td></tr>
+                                            <tr><td className="py-2 px-3 text-orange-500">0x04</td><td className="py-2 px-3 text-blue-500">char[8]</td><td className="py-2 px-3">TDAT 条目名称</td></tr>
+                                        </tbody>
+                                    </table>
+                                    <p className="mt-3">所有 TKEY 条目<strong>按字母顺序排序</strong>。TDAT 块的绝对位置 = TKEY 块大小 + 14。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={4} title="TDAT 块">
+                                    <p>TDAT 块以 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm text-orange-500">TDAT</code> 标识符开头。每个 TDAT 条目是一个<strong>宽字符数组</strong>（2 字节/字符），以空字符 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm">0x0000</code> 结尾。条目<strong>不按字母排序</strong>，按 GXT 源文件中的原始顺序排列。</p>
+                                    <TipBox type="info">
+                                        以 0x21 开头的字符表示帮派对话标记，如 0x216B: Krishna、0x216E: Neutral、0x2179: Yakuza 等。
+                                    </TipBox>
+                                </TutorialStep>
+                            </div>
+                        );
+
+                    case 'gxt-format-gta3':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <img src="icon/III.ico" alt="" className="w-7 h-7 mr-3 inline-block align-middle" />GTA III 文件格式
+                                </h2>
+
+                                <TutorialStep number={1} title="与 GTA 2 的区别">
+                                    <p>GTA III 的 GXT 文件与 GTA 2 几乎相同，但有以下关键区别：</p>
+                                    <ul className="list-disc list-inside space-y-1 text-base mt-2">
+                                        <li><strong>没有文件头</strong>——直接从 TKEY 块开始</li>
+                                        <li>TDAT 条目中对 0x21 开头的字符<strong>没有特殊处理</strong></li>
+                                    </ul>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="TKEY 块结构">
+                                    <table className="w-full text-sm border-collapse mt-2">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">偏移</th><th className="text-left py-2 px-3 font-mono text-slate-500">类型</th><th className="text-left py-2 px-3 text-slate-500">描述</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="font-mono">
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x00</td><td className="py-2 px-3 text-blue-500">char[4]</td><td className="py-2 px-3">TKEY</td></tr>
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x04</td><td className="py-2 px-3 text-blue-500">dword</td><td className="py-2 px-3">TKEY 块大小</td></tr>
+                                            <tr><td className="py-2 px-3 text-orange-500">0x08</td><td className="py-2 px-3 text-blue-500">TKEY[n]</td><td className="py-2 px-3">TKEY 条目数组（按字母顺序）</td></tr>
+                                        </tbody>
+                                    </table>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="TDAT 块结构">
+                                    <table className="w-full text-sm border-collapse mt-2">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">偏移</th><th className="text-left py-2 px-3 font-mono text-slate-500">类型</th><th className="text-left py-2 px-3 text-slate-500">描述</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="font-mono">
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x00</td><td className="py-2 px-3 text-blue-500">char[4]</td><td className="py-2 px-3">TDAT</td></tr>
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x04</td><td className="py-2 px-3 text-blue-500">dword</td><td className="py-2 px-3">TDAT 块大小</td></tr>
+                                            <tr><td className="py-2 px-3 text-orange-500">0x08</td><td className="py-2 px-3 text-blue-500">TDAT[n]</td><td className="py-2 px-3">TDAT 条目数组</td></tr>
+                                        </tbody>
+                                    </table>
+                                </TutorialStep>
+
+                                <TipBox type="info">
+                                    Xbox 版本的 Vice City 使用此格式（而非 VC 的 TABL 格式）。
+                                </TipBox>
+                            </div>
+                        );
+
+                    case 'gxt-format-vc':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <img src="icon/VC.ico" alt="" className="w-7 h-7 mr-3 inline-block align-middle" />GTA VC / LCS / VCS 文件格式
+                                </h2>
+
+                                <TutorialStep number={1} title="新增 TABL 块">
+                                    <p>从罪恶都市开始，GXT 文件新增了 <strong>TABL 块</strong>，位于 TKEY 块之前。这适用于：罪恶都市（PC）、罪恶都市传奇（VCS）和自由城故事（LCS）。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="TABL 块结构">
+                                    <table className="w-full text-sm border-collapse mt-2">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">偏移</th><th className="text-left py-2 px-3 font-mono text-slate-500">类型</th><th className="text-left py-2 px-3 text-slate-500">描述</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="font-mono">
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x00</td><td className="py-2 px-3 text-blue-500">char[4]</td><td className="py-2 px-3">TABL</td></tr>
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x04</td><td className="py-2 px-3 text-blue-500">dword</td><td className="py-2 px-3">TABL 块大小</td></tr>
+                                            <tr><td className="py-2 px-3 text-orange-500">0x08</td><td className="py-2 px-3 text-blue-500">TABL[n]</td><td className="py-2 px-3">TABL 条目数组</td></tr>
+                                        </tbody>
+                                    </table>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="TABL 条目结构 (0xC 字节)">
+                                    <table className="w-full text-sm border-collapse mt-2">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">偏移</th><th className="text-left py-2 px-3 font-mono text-slate-500">类型</th><th className="text-left py-2 px-3 text-slate-500">描述</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="font-mono">
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x00</td><td className="py-2 px-3 text-blue-500">char[8]</td><td className="py-2 px-3">TKEY 条目名称</td></tr>
+                                            <tr><td className="py-2 px-3 text-orange-500">0x04</td><td className="py-2 px-3 text-blue-500">dword</td><td className="py-2 px-3">TKEY 条目偏移（<strong>绝对值</strong>）</td></tr>
+                                        </tbody>
+                                    </table>
+                                </TutorialStep>
+
+                                <TutorialStep number={4} title="TKEY 和 TDAT 块">
+                                    <p>TKEY 块的绝对位置 = TABL 条目的偏移值。第一个名为 MAIN 的 TKEY 块格式略有不同（前面多了 8 字节名称字段），其他块按标准格式。TDAT 块紧接 TKEY 块之后，条目字符基于 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm text-orange-500">fonts.txd</code> 中的字符表，大体遵循 ASCII。</p>
+                                    <TipBox type="info">
+                                        所有 TABL 条目除 MAIN 外按字母顺序排序。TKEY 条目也按字母顺序排序。
+                                    </TipBox>
+                                </TutorialStep>
+                            </div>
+                        );
+
+                    case 'gxt-format-sa4':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <img src="icon/SA.ico" alt="" className="w-7 h-7 mr-3 inline-block align-middle" />GTA SA / IV 文件格式
+                                </h2>
+
+                                <TutorialStep number={1} title="文件头 (Header)">
+                                    <p>GTA SA/IV 的 GXT 文件包含多个表和条目，每个条目有唯一的 CRC 标识符和文本内容。文件头包含版本信息：</p>
+                                    <table className="w-full text-sm border-collapse mt-2">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">类型</th><th className="text-left py-2 px-3 font-mono text-slate-500">大小</th><th className="text-left py-2 px-3 text-slate-500">描述</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="font-mono">
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-blue-500">INT16</td><td className="py-2 px-3 text-orange-500">2b</td><td className="py-2 px-3">版本号（4）</td></tr>
+                                            <tr><td className="py-2 px-3 text-blue-500">INT16</td><td className="py-2 px-3 text-orange-500">2b</td><td className="py-2 px-3">每字符位数（8: ASCII，16: UTF-16）</td></tr>
+                                        </tbody>
+                                    </table>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="TABL 块 (Table Block)">
+                                    <p>TABL 块包含子表的数据及其偏移量：</p>
+                                    <table className="w-full text-sm border-collapse mt-2">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">偏移</th><th className="text-left py-2 px-3 font-mono text-slate-500">类型</th><th className="text-left py-2 px-3 text-slate-500">描述</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="font-mono">
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x00</td><td className="py-2 px-3 text-blue-500">CHAR[4]</td><td className="py-2 px-3">TABL</td></tr>
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x04</td><td className="py-2 px-3 text-blue-500">INT32</td><td className="py-2 px-3">块大小</td></tr>
+                                            <tr><td className="py-2 px-3 text-orange-500">0x08</td><td className="py-2 px-3 text-blue-500">数组</td><td className="py-2 px-3">[块大小/12] 个条目，含 8 字节子表名 + 4 字节偏移</td></tr>
+                                        </tbody>
+                                    </table>
+                                    <p className="mt-3">GTA SA 最多支持每个 GXT 文件中存储 <strong>200 个表</strong>。对于 MAIN 表，偏移直接指向 TKEY。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="TKEY 块">
+                                    <p>TKEY 块包含条目名称的 CRC32 散列值，游戏根据此散列值来检索文本：</p>
+                                    <table className="w-full text-sm border-collapse mt-2">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">偏移</th><th className="text-left py-2 px-3 font-mono text-slate-500">类型</th><th className="text-left py-2 px-3 text-slate-500">描述</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="font-mono">
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x00</td><td className="py-2 px-3 text-blue-500">CHAR[4]</td><td className="py-2 px-3">TKEY</td></tr>
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 text-orange-500">0x04</td><td className="py-2 px-3 text-blue-500">INT32</td><td className="py-2 px-3">块大小</td></tr>
+                                            <tr><td className="py-2 px-3 text-orange-500">0x08</td><td className="py-2 px-3 text-blue-500">数组</td><td className="py-2 px-3">[块大小/8] 个条目：4 字节条目偏移 + 4 字节 CRC32</td></tr>
+                                        </tbody>
+                                    </table>
+                                    <TipBox type="info">
+                                        GTA SA TKEY 按 CRC32 从低到高排序，GTA IV TKEY 排序方式未知（可能随机）。
+                                    </TipBox>
+                                </TutorialStep>
+
+                                <TutorialStep number={4} title="TDAT 块">
+                                    <p>TDAT 块紧接 TKEY 块之后，包含条目的实际文本内容。条目偏移相对于 TDAT + 8 的位置。每个条目内容以 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm">\0</code> 结尾（空终止字符串）。条目<strong>不排序</strong>，按源文件的原始行序排列。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={5} title="编码方式">
+                                    <ul className="list-disc list-inside space-y-2 text-base">
+                                        <li><strong>GTA SA</strong>：始终使用 <strong>Windows-1252</strong> 编码</li>
+                                        <li><strong>GTA IV (8 位)</strong>：使用<strong>自定义编码</strong></li>
+                                        <li><strong>GTA IV (16 位)</strong>：伪 16 位编码，实际只需关注每个字符的第一个字节。例如：<code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm">A3F4 C2DD E922</code>，只读取 A3、C2、E9</li>
+                                    </ul>
+                                </TutorialStep>
+
+                                <TutorialStep number={6} title="排序规则">
+                                    <table className="w-full text-sm border-collapse mt-2">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                                <th className="text-left py-2 px-3 font-mono text-slate-500">块</th><th className="text-left py-2 px-3 text-slate-500">排序方式</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 font-mono text-blue-500">TABL</td><td className="py-2 px-3">按字母顺序排序</td></tr>
+                                            <tr className="border-b border-slate-100 dark:border-slate-800"><td className="py-2 px-3 font-mono text-blue-500">TKEY</td><td className="py-2 px-3">GTA SA：CRC32 从低到高；GTA IV：未知（可能随机）</td></tr>
+                                            <tr><td className="py-2 px-3 font-mono text-blue-500">TDAT</td><td className="py-2 px-3">不排序，按源文件原始行序排列</td></tr>
+                                        </tbody>
+                                    </table>
+                                </TutorialStep>
+                            </div>
+                        );
+
+                    case 'gxt-format-gta1':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-1 gradient-text mr-3" />GTA 1 文件格式 (.fxt)
+                                </h2>
+
+                                <TutorialStep number={1} title="概述">
+                                    <p>GTA 1 的语言文件使用 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-base text-orange-500">.fxt</code> 扩展名，格式与其他 GTA 游戏完全不同。文件使用了简单的加密算法来混淆内容。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="加密算法">
+                                    <p>除了前 8 个字节以外，解密方法非常简单：<strong>每个字节减 1</strong>即可得到原始文本。</p>
+                                    <p>前 8 个字节使用不同的加密方式（可能只是为了迷惑模组开发者）：对于每个字节，减去的值通过将 99 左移计算得出。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="解密示例">
+                                    <div className="p-4 rounded-xl glass-card font-mono text-sm space-y-2">
+                                        <div className="text-slate-500">// 通用解密（第 9 字节起）</div>
+                                        <div><span className="text-blue-500">cipher[i]</span> <span className="text-slate-400">-</span> <span className="text-orange-500">1</span> <span className="text-slate-400">=</span> <span className="text-emerald-500">plain[i]</span></div>
+                                        <div className="mt-3 text-slate-500">// 前 8 字节特殊解密</div>
+                                        <div><span className="text-blue-500">cipher[i]</span> <span className="text-slate-400">-</span> <span className="text-orange-500">(99 &lt;&lt; i)</span> <span className="text-slate-400">=</span> <span className="text-emerald-500">plain[i]</span></div>
+                                    </div>
+                                </TutorialStep>
+
+                                <TipBox type="info">
+                                    GTA 1 的 .fxt 格式仅供历史参考。GXTStudio 主要支持 GTA III~V 的 .gxt/.gxt2 格式，不直接支持 .fxt 文件。
+                                </TipBox>
+                            </div>
+                        );
+
+                    case 'gxt-tokens':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-tag gradient-text mr-3" />标记 (Tokens)
+                                </h2>
+
+                                <TutorialStep number={1} title="什么是 Token">
+                                    <p>Token 是 GXT 文本中以 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm text-orange-500">~</code> 包围的字符或字符串，用于在文本中显示<strong>颜色、符号、动态文本和按键控制</strong>。注意：单独使用 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm">~</code> 在游戏显示文本时会导致<strong>游戏崩溃</strong>。</p>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="颜色标记">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                        {[
+                                            { token: '~r~', desc: '红色 (red)' },
+                                            { token: '~g~', desc: '绿色 (green)' },
+                                            { token: '~b~', desc: '蓝色 (blue)' },
+                                            { token: '~y~', desc: '黄色 (yellow)' },
+                                            { token: '~p~', desc: '紫色 (purple)' },
+                                            { token: '~w~', desc: '灰色/白色' },
+                                            { token: '~h~', desc: '白色/高亮' },
+                                            { token: '~l~', desc: '黑色/重置颜色' },
+                                            { token: '~o~', desc: '粉色' },
+                                            { token: '~q~', desc: '李子粉' },
+                                            { token: '~t~', desc: '绿色' },
+                                            { token: '~x~', desc: '浅蓝色' },
+                                        ].map((item, i) => (
+                                            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card">
+                                                <code className="font-mono text-sm text-orange-500">{item.token}</code>
+                                                <span className="text-sm text-slate-600 dark:text-slate-300">{item.desc}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </TutorialStep>
+
+                                <TutorialStep number={3} title="功能标记">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                        {[
+                                            { token: '~n~', desc: '换行' },
+                                            { token: '~s~', desc: '重置为标准颜色' },
+                                            { token: '~z~', desc: '字幕标记（关闭字幕时隐藏）' },
+                                            { token: '~f~', desc: '文字闪烁效果' },
+                                            { token: '~k~', desc: '按键提示（后跟按键代码）' },
+                                            { token: '~a~', desc: '区域文本' },
+                                            { token: '~1~', desc: '文本中嵌入数字' },
+                                            { token: '~B~', desc: '加粗/取消加粗（需配对使用）' },
+                                            { token: '~<~', desc: '◄ 图标' },
+                                            { token: '~>~', desc: '► 图标' },
+                                            { token: '~d~', desc: '▼ 图标' },
+                                            { token: '~u~', desc: '▲ 图标' },
+                                        ].map((item, i) => (
+                                            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card">
+                                                <code className="font-mono text-sm text-orange-500">{item.token}</code>
+                                                <span className="text-sm text-slate-600 dark:text-slate-300">{item.desc}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </TutorialStep>
+
+                                <TutorialStep number={4} title="手柄图标标记">
+                                    <p>GTA 中使用特定 token 显示手柄按键提示：</p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                        {[
+                                            { token: '~A~', desc: '左摇杆图标 (PS2 L3 / Xbox LStick)' },
+                                            { token: '~c~', desc: '右摇杆图标 (PS2 R3 / Xbox RStick)' },
+                                            { token: '~K~', desc: 'L1 / LT 图标' },
+                                            { token: '~j~', desc: 'R1 / RT 图标' },
+                                            { token: '~m~', desc: 'L2 / 白色按钮 图标' },
+                                            { token: '~v~', desc: 'R2 / 黑色按钮 图标' },
+                                            { token: '~o~', desc: '○ / B 按钮' },
+                                            { token: '~q~', desc: '□ / X 按钮' },
+                                            { token: '~t~', desc: '△ / Y 按钮' },
+                                            { token: '~x~', desc: '× / A 按钮' },
+                                        ].map((item, i) => (
+                                            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card">
+                                                <code className="font-mono text-sm text-orange-500">{item.token}</code>
+                                                <span className="text-sm text-slate-600 dark:text-slate-300">{item.desc}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </TutorialStep>
+
+                                <TutorialStep number={5} title="按键控制 Token">
+                                    <p>通过 opcode 00E1 可检测以下按键是否按下。以下为常用步行控制 token：</p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                        {[
+                                            { key: '~PED_FIREWEAPON~', desc: '射击' },
+                                            { key: '~GO_FORWARD~', desc: '前进' },
+                                            { key: '~GO_BACK~', desc: '后退' },
+                                            { key: '~GO_LEFT~', desc: '左移' },
+                                            { key: '~GO_RIGHT~', desc: '右移' },
+                                            { key: '~VEHICLE_ENTER_EXIT~', desc: '上/下车' },
+                                            { key: '~PED_JUMPING~', desc: '跳跃' },
+                                            { key: '~PED_SPRINT~', desc: '冲刺' },
+                                            { key: '~PED_LOCK_TARGET~', desc: '瞄准' },
+                                            { key: '~PED_DUCK~', desc: '蹲下' },
+                                        ].map((item, i) => (
+                                            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card">
+                                                <code className="font-mono text-xs text-orange-500">{item.key}</code>
+                                                <span className="text-sm text-slate-600 dark:text-slate-300">{item.desc}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </TutorialStep>
+
+                                <TutorialStep number={6} title="载具控制 Token">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                        {[
+                                            { key: '~VEHICLE_ACCELERATE~', desc: '加速' },
+                                            { key: '~VEHICLE_BRAKE~', desc: '刹车/倒车' },
+                                            { key: '~VEHICLE_STEERLEFT~', desc: '左转' },
+                                            { key: '~VEHICLE_STEERRIGHT~', desc: '右转' },
+                                            { key: '~VEHICLE_HORN~', desc: '喇叭' },
+                                            { key: '~VEHICLE_HANDBRAKE~', desc: '手刹' },
+                                            { key: '~VEHICLE_FIREWEAPON~', desc: '载具武器射击' },
+                                            { key: '~VEHICLE_CHANGE_RADIO_STATION~', desc: '切换电台' },
+                                            { key: '~TOGGLE_SUBMISSIONS~', desc: '副任务切换' },
+                                        ].map((item, i) => (
+                                            <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg glass-card">
+                                                <code className="font-mono text-xs text-orange-500">{item.key}</code>
+                                                <span className="text-sm text-slate-600 dark:text-slate-300">{item.desc}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </TutorialStep>
+                            </div>
+                        );
+
+                    case 'gxt-charmaps':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-table gradient-text mr-3" />字符映射表 (Character Maps)
+                                </h2>
+                                <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+                                    以下是 GXT 文件中可用的全部字符映射。每个字符由一个十六进制值表示（行值 + 列值，如 <code className="px-1.5 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 font-mono text-sm">0x41</code> = 'A'）。空格或空单元格表示该码位未定义。
+                                </p>
+
+                                <div className="mb-6">
+                                    <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 mb-1">
+                                        <img src="icon/III.ico" alt="" className="w-5 h-5 inline-block mr-2 align-text-bottom" />GTA III
+                                    </h3>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">字体样式 1 中<em>斜体</em>字符使用 Pager 字体；样式 2 中<strong>粗体</strong>字符使用 <strong>Pricedown 字体</strong>或脏污效果。</p>
+                                </div>
+                                <CharMapIII />
+                                <div className="mt-10 pt-6 border-t border-slate-200 dark:border-slate-700 mb-6">
+                                    <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 mb-1">
+                                        <img src="icon/VC.ico" alt="" className="w-5 h-5 inline-block mr-2 align-text-bottom" />GTA Vice City
+                                    </h3>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-4"><strong>粗体</strong>字符使用 Pricedown 字体或脏污效果；<em>斜体</em>字符使用 <strong>Rage Italic 字体</strong>。</p>
+                                </div>
+                                <CharMapVC />
+                            </div>
+                        );
+
+                    case 'gxt-charmaps-jp':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-language gradient-text mr-3" />日语字符映射 (Japanese)
+                                </h2>
+                                <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-6">
+                                    以下为 GTA Vice City 日语版 GXT 文件中可用的全部字符映射。由于日语字符数量庞大，此页独立于主字符映射表。字符集大体遵循 Unicode 顺序但非完整 Unicode。
+                                </p>
+
+                                <div className="mb-6">
+                                    <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 mb-1">
+                                        <img src="icon/VC.ico" alt="" className="w-5 h-5 inline-block mr-2 align-text-bottom" />Vice City — PlayStation 2
+                                    </h3>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">包含全角符号、平假名、片假名和 JIS 第一/第二水准汉字。</p>
+                                </div>
+                                <CharMapJpPS2 />
+                                <div className="mt-10 pt-6 border-t border-slate-200 dark:border-slate-700 mb-6">
+                                    <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 mb-1">
+                                        <img src="icon/VC.ico" alt="" className="w-5 h-5 inline-block mr-2 align-text-bottom" />Vice City — PC
+                                    </h3>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">在 PS2 版基础上增加了标准 ASCII 范围（0x20~0x7F），全角符号含箭头。</p>
+                                </div>
+                                <CharMapJpPC />
+                                <div className="mt-10 pt-6 border-t border-slate-200 dark:border-slate-700 mb-6">
+                                    <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-100 mb-1">
+                                        <img src="icon/VC.ico" alt="" className="w-5 h-5 inline-block mr-2 align-text-bottom" />Vice City — Mobile
+                                    </h3>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">移动版，0x07~0x52 范围。布局与 PC 版基本一致但起始偏移不同。</p>
+                                </div>
+                                <CharMapJpMobile />
+                                <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
+                                    完整文档请查看 <a href="https://gtamods.com/wiki/GXT/Japanese" target="_blank" className="text-blue-500 hover:underline">GTAMods Wiki 日语字符映射 <i className="fas fa-external-link-alt text-xs" /></a>。
+                                </p>
+                            </div>
+                        );
+
+                    case 'gxt-tools':
+                        return (
+                            <div className="animate-fade-in-up">
+                                <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100 mb-6">
+                                    <i className="fas fa-screwdriver-wrench gradient-text mr-3" />工具与参考
+                                </h2>
+
+                                <TutorialStep number={1} title="相关工具">
+                                    <p>以下是历史上出现过的 GXT 相关工具（部分已经过时，仅供参考）：</p>
+                                    <div className="space-y-3 mt-2">
+                                        {[
+                                            { name: 'GXTStudio', desc: '现代化 GXT 编辑器，支持 III~V 全系列，AI 翻译（推荐使用）', active: true },
+                                            { name: 'GTA2 GXT Editor v2.0', desc: 'GTA 2 专用编辑器 - 作者: Delfi' },
+                                            { name: 'GTA GXT Editor v1.3', desc: '经典 GXT 编辑器 - 作者: Zverik' },
+                                            { name: 'SAGE v0.9.7', desc: '多功能编辑器 - 作者: AleX AciD' },
+                                            { name: 'GXT Editor 1.3', desc: 'VC 版编辑器 - 作者: Jevon (GTAGarage)' },
+                                            { name: 'GXT Builder', desc: '构建工具 - 作者: Silent' },
+                                            { name: 'SA GXT Editor v1.3', desc: 'SA 专用编辑器 - 作者: Hammer83' },
+                                            { name: 'OpenIV', desc: '内置 GXT 文件查看器' },
+                                        ].map((item, i) => (
+                                            <div key={i} className={`flex items-center gap-3 p-3 rounded-xl glass-card ${item.active ? 'ring-2 ring-orange-500/30' : ''}`}>
+                                                <i className={`fas ${item.active ? 'fa-star text-orange-500' : 'fa-toolbox text-slate-400'}`} />
+                                                <div>
+                                                    <div className="font-medium text-slate-800 dark:text-slate-100 text-sm">{item.name}</div>
+                                                    <div className="text-xs text-slate-500 dark:text-slate-400">{item.desc}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </TutorialStep>
+
+                                <TutorialStep number={2} title="参考资料">
+                                    <div className="space-y-2">
+                                        <a href="https://gtamods.com/wiki/GXT" target="_blank" className="flex items-center gap-3 p-3 rounded-xl glass-card hover:scale-[1.02] transition-transform">
+                                            <i className="fas fa-book text-blue-500 text-lg" />
+                                            <div>
+                                                <div className="font-medium text-slate-800 dark:text-slate-100 text-sm">GTAMods Wiki - GXT</div>
+                                                <div className="text-xs text-slate-500 dark:text-slate-400">官方 GXT 文件格式完整文档</div>
+                                            </div>
+                                            <i className="fas fa-external-link-alt text-xs text-slate-400 ml-auto" />
+                                        </a>
+                                        <a href="https://gtaforums.com" target="_blank" className="flex items-center gap-3 p-3 rounded-xl glass-card hover:scale-[1.02] transition-transform">
+                                            <i className="fas fa-comments text-blue-500 text-lg" />
+                                            <div>
+                                                <div className="font-medium text-slate-800 dark:text-slate-100 text-sm">GTAForums</div>
+                                                <div className="text-xs text-slate-500 dark:text-slate-400">GTA 模组社区讨论论坛</div>
+                                            </div>
+                                            <i className="fas fa-external-link-alt text-xs text-slate-400 ml-auto" />
+                                        </a>
+                                    </div>
+                                </TutorialStep>
+                            </div>
+                        );
+
                     default:
                         return null;
                 }
@@ -645,9 +1471,9 @@
                         {renderContent()}
                         <div className="flex items-center justify-between mt-10 pt-6 border-t border-slate-200 dark:border-slate-700">
                             {(() => {
-                                const currentIndex = sections.findIndex(s => s.id === activeSection);
-                                const prev = currentIndex > 0 ? sections[currentIndex - 1] : null;
-                                const next = currentIndex < sections.length - 1 ? sections[currentIndex + 1] : null;
+                                const currentIndex = allSections.findIndex(s => s.id === activeSection);
+                                const prev = currentIndex > 0 ? allSections[currentIndex - 1] : null;
+                                const next = currentIndex < allSections.length - 1 ? allSections[currentIndex + 1] : null;
                                 return (
                                     <>
                                         <div>
@@ -682,16 +1508,8 @@
         };
 
         const MobileNavToggle = ({ onClick, section }) => {
-            const sections = {
-                intro: '软件简介',
-                'open-file': '打开文件',
-                'edit-text': '编辑文本',
-                'save-export': '保存与导出',
-                search: '搜索功能',
-                codetable: '码表转换',
-                'ai-translate': '智能翻译',
-                personalize: '个性化设置',
-            };
+            const labels = {};
+            allSections.forEach(s => { labels[s.id] = s.label; });
 
             return (
                 <button
@@ -699,12 +1517,12 @@
                     className="md:hidden fixed bottom-6 right-6 z-[950] w-14 h-14 rounded-2xl gradient-bg text-white shadow-lg shadow-orange-500/30 flex flex-col items-center justify-center gap-0.5 text-sm font-medium active:scale-95 transition-transform"
                 >
                     <i className="fas fa-list-ul text-base mb-0.5" />
-                    <span className="text-[10px]">{sections[section] || '目录'}</span>
+                    <span className="text-[10px]">{labels[section] || '目录'}</span>
                 </button>
             );
         };
 
-        const sections = [
+        const allSections = [
             { id: 'intro', label: '软件简介', icon: 'fa-rocket' },
             { id: 'open-file', label: '打开文件', icon: 'fa-folder-open' },
             { id: 'edit-text', label: '编辑文本', icon: 'fa-pen-to-square' },
@@ -713,6 +1531,21 @@
             { id: 'codetable', label: '码表转换', icon: 'fa-code' },
             { id: 'ai-translate', label: '智能翻译', icon: 'fa-robot' },
             { id: 'personalize', label: '个性化设置', icon: 'fa-paint-brush' },
+            { id: 'gxt-overview', label: 'GXT 文件概述', icon: 'fa-file-lines' },
+            { id: 'gxt-format-gta2', label: 'GTA 2 格式', icon: 'fa-2' },
+            { id: 'gxt-format-gta3', label: 'GTA III 格式', icon: 'icon/III.ico' },
+            { id: 'gxt-format-vc', label: 'GTA VC/LCS/VCS 格式', icon: 'icon/VC.ico' },
+            { id: 'gxt-format-sa4', label: 'GTA SA/IV 格式', icon: 'icon/SA.ico' },
+            { id: 'gxt-format-gta1', label: 'GTA 1 格式 (.fxt)', icon: 'fa-1' },
+            { id: 'gxt-tokens', label: '标记 (Tokens)', icon: 'fa-tag' },
+            { id: 'gxt-charmaps', label: '字符映射表', icon: 'fa-table' },
+            { id: 'gxt-charmaps-jp', label: '日语字符映射', icon: 'fa-language' },
+            { id: 'gxt-tools', label: '工具与参考', icon: 'fa-screwdriver-wrench' },
+        ];
+
+        const groups = [
+            { id: 'tutorial', label: '使用教程', icon: 'fa-book', items: allSections.slice(0, 8) },
+            { id: 'spec', label: 'GXT 文件规范', icon: 'icon/V.ico', items: allSections.slice(8) },
         ];
 
         const App = () => {
@@ -747,7 +1580,7 @@
                         <Navbar />
                         <div className="flex-1 flex pt-16 md:pt-20 gap-4 p-4 md:p-6 max-w-screen-2xl mx-auto w-full md:overflow-hidden">
                             <Sidebar
-                                sections={sections}
+                                groups={groups}
                                 activeSection={activeSection}
                                 onSectionClick={handleSectionClick}
                                 mobileOpen={mobileMenuOpen}
